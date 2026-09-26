@@ -18,11 +18,12 @@ The act of turning a tracker reference, a prompt, or a Runner session named
 _Avoid_: import, add, create ticket, onboard
 
 **Stage**:
-One named step in a Ticket's journey, defined by its Pipeline: a prompt, a
-Runner, and whether a human must be present. The default Pipeline's Stages
-are Grill, Plan, Implement, Document, Review, but a Pipeline may name any
-ordered list of Stages.
-_Avoid_: step, phase, state
+One named step in a Ticket's journey, defined by its Pipeline: either a
+prompt run by a Runner, with or without a human present, or an action Lasso
+performs itself, such as moving the tracker issue to a status. The default
+Pipeline's Stages are Grill, Plan, Implement, Document, Review, but a
+Pipeline may name any ordered list of Stages.
+_Avoid_: step, phase, state, node
 
 **Budget**:
 The limits on how much effort a Ticket may consume before it is flagged for a
@@ -33,6 +34,11 @@ _Avoid_: guardrail, boundary, limit, quota
 A Ticket that has exhausted its Budget or otherwise needs a human before any
 agent may continue.
 _Avoid_: blocked, stuck, escalated
+
+**Abandoned**:
+A Ticket a human has dropped before its Pipeline finished. It leaves Lasso's
+attention without counting as done.
+_Avoid_: cancelled, closed, dropped, deleted
 
 **Pipeline**:
 The ordered list of Stages a Ticket follows, with each Stage's prompt. A
