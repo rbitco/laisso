@@ -48,3 +48,10 @@ _Avoid_: LLM, model, agent, executor
 One Runner process working one Stage of one Ticket, identified by the
 Runner's own session id. Its name is a label for humans, never an identity.
 _Avoid_: run, job, terminal, conversation
+
+**Outcome**:
+What a Session reports when it ends: succeeded, failed, exhausted (the
+Runner stopped at one of its own limits), or interrupted (the process was
+killed or crashed), with the Runner's final message. Lasso, not the Runner,
+decides from an Outcome whether the Ticket is Flagged.
+_Avoid_: result, exit code, status, verdict
