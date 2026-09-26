@@ -7,9 +7,15 @@ next step or intervene.
 ## Language
 
 **Ticket**:
-A single unit of work Lasso drives from idea to merged. It is an issue in
-whatever tracker the target repo's `docs/agents/issue-tracker.md` names.
+A single unit of work Lasso drives from idea to merged. Once a tracker issue
+exists for it, the Ticket is linked to that issue; a Ticket that began as a
+prompt has none until Grill publishes a spec.
 _Avoid_: issue, work item, task, card
+
+**Intake**:
+The act of turning a tracker reference, a prompt, or a Runner session named
+"Lasso: intake" into a Ticket bound to a repo and a Pipeline.
+_Avoid_: import, add, create ticket, onboard
 
 **Stage**:
 One step in a Ticket's journey: Grill, Plan, Implement, Document, Review.
