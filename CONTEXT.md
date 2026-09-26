@@ -41,3 +41,8 @@ _Avoid_: workflow, playbook, template, orchestration
 The CLI agent that executes one Stage for one Ticket: Claude Code, Codex, or
 Pi. A Pipeline names a Runner per Stage.
 _Avoid_: LLM, model, agent, executor
+
+**Session**:
+One Runner process working one Stage of one Ticket, identified by the
+Runner's own session id. Its name is a label for humans, never an identity.
+_Avoid_: run, job, terminal, conversation
