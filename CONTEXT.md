@@ -55,3 +55,15 @@ Runner stopped at one of its own limits), or interrupted (the process was
 killed or crashed), with the Runner's final message. Lasso, not the Runner,
 decides from an Outcome whether the Ticket is Flagged.
 _Avoid_: result, exit code, status, verdict
+
+**Feedback**:
+Anything on a Ticket's PR that asks for a change: a failed check, an
+inline review thread, a top-level comment, or a changes-requested verdict.
+Comments the Runner itself posted are not Feedback. Comments on the Ticket
+in the tracker are not Feedback either.
+_Avoid_: review, comment, issue, finding
+
+**Round**:
+One Session of a repeating Stage that addresses the Feedback outstanding
+when it started. Feedback arriving mid-Round waits for the next Round.
+_Avoid_: iteration, pass, loop, cycle, revision
