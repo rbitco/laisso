@@ -18,8 +18,10 @@ The act of turning a tracker reference, a prompt, or a Runner session named
 _Avoid_: import, add, create ticket, onboard
 
 **Stage**:
-One step in a Ticket's journey: Grill, Plan, Implement, Document, Review.
-Some Stages need a human present; others an agent can run alone.
+One named step in a Ticket's journey, defined by its Pipeline: a prompt, a
+Runner, and whether a human must be present. The default Pipeline's Stages
+are Grill, Plan, Implement, Document, Review, but a Pipeline may name any
+ordered list of Stages.
 _Avoid_: step, phase, state
 
 **Budget**:
