@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
-import { parse } from "yaml";
+import { parse, parseDocument } from "yaml";
+import { applyPatch } from "../yaml-edit.ts";
 import type { LassoHome } from "./home.ts";
-import { parseDuration } from "../duration.ts";
+import { count, duration, flag, isPlainObject, mapping, money, positive, text, type Fail } from "../fields.ts";
 
 export interface RepoConfig {
   tracker: "jira" | "github";
@@ -78,52 +79,101 @@ notifications:
 export class ConfigError extends Error {}
 
 export function loadConfig(home: LassoHome, overrides: { port?: number } = {}): Config {
-  const raw = readRaw(home.configFile);
+  let text: string;
+  try {
+    text = readFileSync(home.configFile, "utf8");
+  } catch {
+    text = "";
+  }
+  return parseConfig(text, home.configFile, overrides);
+}
+
+/** Parse config.yaml text into a Config; a value that is present but wrong is a ConfigError naming the key. */
+export function parseConfig(text: string, file: string, overrides: { port?: number } = {}): Config {
+  const raw = mapping(parse(text), file, fail);
+  const at = (key: string) => `${file}: ${key}`;
+  const D = DEFAULT_CONFIG;
+  const budget = mapping(raw.budget, at("budget"), fail);
+  const notifications = mapping(raw.notifications, at("notifications"), fail);
   const config: Config = {
-    repos: normaliseRepos(raw.repos),
-    budget: { ...DEFAULT_CONFIG.budget, ...asObject(raw.budget) },
-    tick: asNumber(raw.tick, DEFAULT_CONFIG.tick),
-    concurrency: asNumber(raw.concurrency, DEFAULT_CONFIG.concurrency),
-    retention: asNumber(raw.retention, DEFAULT_CONFIG.retention),
-    branch_prefix: typeof raw.branch_prefix === "string" ? raw.branch_prefix : DEFAULT_CONFIG.branch_prefix,
-    port: asNumber(raw.port, DEFAULT_CONFIG.port),
-    notifications: { ...DEFAULT_CONFIG.notifications, ...asObject(raw.notifications) },
+    repos: normaliseRepos(mapping(raw.repos, at("repos"), fail)),
+    budget: {
+      rounds: count(budget.rounds, at("budget.rounds"), fail, D.budget.rounds),
+      attempts: count(budget.attempts, at("budget.attempts"), fail, D.budget.attempts),
+      wallTime: duration(budget.wallTime, at("budget.wallTime"), fail, D.budget.wallTime),
+      spend: money(budget.spend, at("budget.spend"), fail, D.budget.spend),
+    },
+    tick: positive(raw.tick, at("tick"), fail, D.tick),
+    concurrency: positive(raw.concurrency, at("concurrency"), fail, D.concurrency),
+    retention: count(raw.retention, at("retention"), fail, D.retention),
+    branch_prefix: string(raw.branch_prefix, at("branch_prefix"), fail, D.branch_prefix),
+    port: positive(raw.port, at("port"), fail, D.port),
+    notifications: {
+      enabled: flag(notifications.enabled, at("notifications.enabled"), fail, D.notifications.enabled),
+      flagged: flag(notifications.flagged, at("notifications.flagged"), fail, D.notifications.flagged),
+      human: flag(notifications.human, at("notifications.human"), fail, D.notifications.human),
+      gate: flag(notifications.gate, at("notifications.gate"), fail, D.notifications.gate),
+    },
   };
   if (overrides.port !== undefined) config.port = overrides.port;
-  try {
-    parseDuration(config.budget.wallTime);
-  } catch (error) {
-    throw new ConfigError(`${home.configFile}: budget.wallTime ${error instanceof Error ? error.message : String(error)}`);
-  }
-  if (!Number.isInteger(config.concurrency) || config.concurrency < 1) {
-    throw new ConfigError(`${home.configFile}: concurrency must be a whole number of 1 or more, not ${String(raw.concurrency)}`);
-  }
   return config;
 }
 
-function readRaw(file: string): Record<string, unknown> {
-  let text: string;
-  try {
-    text = readFileSync(file, "utf8");
-  } catch {
-    return {};
+const fail: Fail = (message) => new ConfigError(message);
+const string = text;
+
+/** What the dashboard may set (spec: Lasso home and configuration); repos stay a hand edit in v1. */
+const EDITABLE: Record<string, Set<string> | null> = {
+  budget: new Set(["rounds", "attempts", "wallTime", "spend"]),
+  tick: null,
+  concurrency: null,
+  retention: null,
+  branch_prefix: null,
+  port: null,
+  notifications: new Set(["enabled", "flagged", "human", "gate"]),
+};
+
+/** Keys whose new value only takes effect once Lasso restarts. */
+export const RESTART_KEYS = ["port", "tick"] as const;
+
+/**
+ * Apply a patch to config.yaml text in place, comments kept; null clears a
+ * key back to its default. Returns the new text and what it parses to, or
+ * throws a ConfigError with nothing written.
+ */
+export function patchConfigText(text: string, file: string, patch: unknown): { text: string; config: Config } {
+  if (!isPlainObject(patch)) throw new ConfigError("patch must be a mapping");
+  if (Object.keys(patch).length === 0) throw new ConfigError("nothing to change");
+  for (const [key, value] of Object.entries(patch)) {
+    if (key === "repos") throw new ConfigError("repos are edited in config.yaml by hand");
+    if (!(key in EDITABLE)) throw new ConfigError(`unknown field ${key}`);
+    const fields = EDITABLE[key];
+    if (fields && value !== null) {
+      if (!isPlainObject(value)) throw new ConfigError(`${key} must be a mapping`);
+      for (const sub of Object.keys(value)) if (!fields.has(sub)) throw new ConfigError(`unknown field ${key}.${sub}`);
+    }
   }
-  const parsed = parse(text);
-  return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
+  const doc = parseDocument(text);
+  applyPatch(doc, patch);
+  const out = doc.toString();
+  return { text: out, config: parseConfig(out, file) };
 }
 
-function asObject(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+/** Carry a freshly parsed config into the object the running server shares, in place, so every holder sees it. */
+export function applyLive(live: Config, fresh: Config): void {
+  Object.assign(live.budget, fresh.budget);
+  Object.assign(live.notifications, fresh.notifications);
+  for (const key of Object.keys(live.repos)) delete live.repos[key];
+  Object.assign(live.repos, fresh.repos);
+  live.concurrency = fresh.concurrency;
+  live.retention = fresh.retention;
+  live.branch_prefix = fresh.branch_prefix;
 }
 
-function asNumber(value: unknown, fallback: number): number {
-  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
-}
-
-function normaliseRepos(value: unknown): Record<string, RepoConfig> {
+function normaliseRepos(value: Record<string, unknown>): Record<string, RepoConfig> {
   const repos: Record<string, RepoConfig> = {};
-  for (const [name, entry] of Object.entries(asObject(value))) {
-    const repo = asObject(entry);
+  for (const [name, entry] of Object.entries(value)) {
+    const repo = isPlainObject(entry) ? entry : {};
     repos[name] = {
       tracker: repo.tracker === "github" ? "github" : "jira",
       project: String(repo.project ?? ""),

@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import type { Config } from "../server/config.ts";
+import { ConfigError, patchConfigText, applyLive, RESTART_KEYS, parseConfig, type Config } from "../server/config.ts";
 import type { LassoHome } from "../server/home.ts";
 import type { Tick } from "../server/tick.ts";
 import type { Tickets, TicketRow } from "../store/tickets.ts";
@@ -12,9 +12,12 @@ import type { Exits, ExtendRequest } from "../session/exits.ts";
 import type { Budgets } from "../budget/budgets.ts";
 import type { Queue } from "../session/queue.ts";
 import { Intake, IntakeError, type IntakeRequest } from "../intake/intake.ts";
-import { loadPipeline, type Pipeline } from "../pipeline/load.ts";
+import { loadPipeline, PipelineError, type Pipeline } from "../pipeline/load.ts";
+import { PipelineFiles } from "../pipeline/files.ts";
 import { dashboardHtml } from "../dashboard/page.ts";
-import { ticketView, ticketDetail, sessionView, sortForLedger, type ViewContext, type IntakeResult } from "./views.ts";
+import { ticketView, ticketDetail, sessionView, sortForLedger, pipelineListing, pipelineFileView, type ViewContext, type IntakeResult, type ConfigFile } from "./views.ts";
+import { readFileSync } from "node:fs";
+import { replaceFile } from "../atomic-write.ts";
 
 export interface AppDeps {
   config: Config;
@@ -61,7 +64,7 @@ export function createApp(deps: AppDeps): Hono {
   });
 
   app.onError((error, c) => {
-    if (error instanceof IntakeError || error instanceof RunError || error instanceof TriggerError || error instanceof TerminalError) return c.json({ error: error.message }, 400);
+    if (error instanceof IntakeError || error instanceof RunError || error instanceof TriggerError || error instanceof TerminalError || error instanceof PipelineError || error instanceof ConfigError) return c.json({ error: error.message }, 400);
     if (error instanceof ArtifactWarning) return c.json({ error: error.message, artifact: error.artifact, detail: error.detail, override: true }, 409);
     console.error(error);
     return c.json({ error: error.message }, 500);
@@ -144,6 +147,47 @@ export function createApp(deps: AppDeps): Hono {
     const found = sessionOf(c.req.param("id"), c.req.param("sid"));
     if ("error" in found) return c.json({ error: found.error }, 404);
     return c.json(sessionView(await deps.runs.stop(found.session)));
+  });
+
+  // Pipeline files, edited in place (spec: Lasso home and configuration). Nothing is written that does not parse.
+  const pipelines = new PipelineFiles(deps.home.pipelinesDir);
+  app.get("/api/pipelines", (c) => c.json(pipelines.list().map(pipelineListing)));
+  app.get("/api/pipelines/:name", (c) => {
+    const source = pipelines.read(c.req.param("name"));
+    return source ? c.json(pipelineFileView(source)) : c.json({ error: `no Pipeline named ${c.req.param("name")}` }, 404);
+  });
+  app.put("/api/pipelines/:name", async (c) => {
+    const body = ((await c.req.json().catch(() => null)) ?? {}) as { text?: unknown; create?: unknown };
+    return c.json(pipelineFileView(pipelines.write(c.req.param("name"), body.text, { create: body.create === true })));
+  });
+  app.patch("/api/pipelines/:name", async (c) => {
+    const patch = await c.req.json().catch(() => null);
+    return c.json(pipelineFileView(pipelines.patch(c.req.param("name"), patch)));
+  });
+  app.delete("/api/pipelines/:name", (c) => {
+    if (!pipelines.remove(c.req.param("name"))) return c.json({ error: `no Pipeline named ${c.req.param("name")}` }, 404);
+    return c.json({ ok: true });
+  });
+
+  // config.yaml, as the file has it: the running port and tick may differ until a restart.
+  const configText = () => {
+    try {
+      return readFileSync(deps.home.configFile, "utf8");
+    } catch {
+      return "";
+    }
+  };
+  const configFile = (text: string, restart: string[] = []): ConfigFile => ({ file: deps.home.configFile, text, config: parseConfig(text, deps.home.configFile), restart });
+  app.get("/api/config", (c) => c.json(configFile(configText())));
+  app.patch("/api/config", async (c) => {
+    const patch = await c.req.json().catch(() => null);
+    // Read, patch and write without yielding in between, so two edits cannot both start from the same text.
+    const before = configText();
+    const was = parseConfig(before, deps.home.configFile);
+    const { text, config } = patchConfigText(before, deps.home.configFile, patch);
+    replaceFile(deps.home.configFile, text);
+    applyLive(deps.config, config);
+    return c.json(configFile(text, RESTART_KEYS.filter((key) => was[key] !== config[key])));
   });
 
   app.get("/", (c) => c.html(dashboardHtml()));

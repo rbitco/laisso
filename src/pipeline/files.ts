@@ -1,0 +1,104 @@
+import { readFileSync, unlinkSync } from "node:fs";
+import { replaceFile } from "../atomic-write.ts";
+import path from "node:path";
+import { parseDocument } from "yaml";
+import { applyPatch } from "../yaml-edit.ts";
+import { isPlainObject } from "../fields.ts";
+import { parsePipeline, pipelineFile, listPipelines, PipelineError, NAME, type Pipeline } from "./load.ts";
+
+/** A Pipeline file as read: the text as written, and what it parses to or why it does not. */
+export interface PipelineSource {
+  name: string;
+  file: string;
+  text: string;
+  pipeline: Pipeline | null;
+  problem: string | null;
+}
+
+/**
+ * A structured edit of a Pipeline file (spec: the dashboard edits Pipeline
+ * files in place). Stages are keyed by name; null clears a field. The result
+ * must still parse, or nothing is written.
+ */
+export interface PipelinePatch {
+  runner?: string | null;
+  budget?: Record<string, unknown> | null;
+  stages?: Record<string, Record<string, unknown>>;
+}
+
+/** The Pipeline files under the Lasso home, edited in place with their comments kept. */
+export class PipelineFiles {
+  private dir: string;
+
+  constructor(dir: string) {
+    this.dir = dir;
+  }
+
+  list(): PipelineSource[] {
+    return listPipelines(this.dir).flatMap((name) => {
+      const file = pipelineFile(this.dir, name);
+      return file ? [sourceOf(name, file, readFileSync(file, "utf8"))] : [];
+    });
+  }
+
+  /** The Pipeline of that name, or null; a name that could not be a Pipeline's (such as a path) is nobody's. */
+  read(name: string): PipelineSource | null {
+    const file = NAME.test(name) ? pipelineFile(this.dir, name) : null;
+    if (!file) return null;
+    return sourceOf(name, file, readFileSync(file, "utf8"));
+  }
+
+  /** Create or replace the whole file; the text must parse first. With `create`, an existing Pipeline is left alone. */
+  write(name: string, text: unknown, opts: { create?: boolean } = {}): PipelineSource {
+    checkName(name);
+    if (typeof text !== "string") throw new PipelineError("text must be the whole Pipeline file");
+    parsePipeline(name, text);
+    const existing = pipelineFile(this.dir, name);
+    if (existing && opts.create) throw new PipelineError(`Pipeline ${name} already exists`);
+    const file = existing ?? path.join(this.dir, `${name}.yaml`);
+    replaceFile(file, text);
+    return sourceOf(name, file, text);
+  }
+
+  patch(name: string, patch: unknown): PipelineSource {
+    const current = this.read(name);
+    if (!current) throw new PipelineError(`Pipeline ${name} does not exist under ${this.dir}`);
+    if (!isPlainObject(patch)) throw new PipelineError("patch must be a mapping");
+    if (!current.pipeline) throw new PipelineError(`Pipeline ${name} cannot be patched until it loads (${current.problem}); replace its text instead`);
+    const doc = parseDocument(current.text);
+    const { stages, ...rest } = patch;
+    applyPatch(doc, rest);
+    if (stages !== undefined) {
+      if (!isPlainObject(stages)) throw new PipelineError("stages must be a mapping of Stage name to fields");
+      for (const [stageName, fields] of Object.entries(stages)) {
+        const index = current.pipeline.stages.findIndex((s) => s.name === stageName);
+        if (index < 0) throw new PipelineError(`Pipeline ${name} has no Stage named ${stageName}`);
+        if (!isPlainObject(fields)) throw new PipelineError(`Stage ${stageName}: fields must be a mapping`);
+        applyPatch(doc, fields, ["stages", index]);
+      }
+    }
+    const text = doc.toString();
+    parsePipeline(name, text);
+    replaceFile(current.file, text);
+    return sourceOf(name, current.file, text);
+  }
+
+  remove(name: string): boolean {
+    const file = NAME.test(name) ? pipelineFile(this.dir, name) : null;
+    if (!file) return false;
+    unlinkSync(file);
+    return true;
+  }
+}
+
+function checkName(name: string): void {
+  if (!NAME.test(name)) throw new PipelineError("Pipeline name must be lowercase letters, digits, and hyphens");
+}
+
+function sourceOf(name: string, file: string, text: string): PipelineSource {
+  try {
+    return { name, file, text, pipeline: parsePipeline(name, text), problem: null };
+  } catch (error) {
+    return { name, file, text, pipeline: null, problem: error instanceof Error ? error.message : String(error) };
+  }
+}

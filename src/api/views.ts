@@ -1,6 +1,8 @@
 import { shortId, type TicketRow } from "../store/tickets.ts";
 import type { SessionRow } from "../store/sessions.ts";
 import type { Pipeline, RunnerName, Stage } from "../pipeline/load.ts";
+import type { PipelineSource } from "../pipeline/files.ts";
+import type { Config } from "../server/config.ts";
 import type { BudgetView } from "../budget/budget.ts";
 import { adapterFor } from "../runner/adapters.ts";
 
@@ -118,6 +120,62 @@ export interface ViewContext {
 
 /** The order the Ledger shows display states in: attention first. */
 export const LEDGER_ORDER: DisplayState[] = ["flagged", "needs_you", "holding", "ready", "running", "queued", "quiet", "done", "abandoned"];
+
+/** A Pipeline as the editor sees it: every field of every Stage, action Stages included. */
+export interface PipelineView {
+  runner: RunnerName;
+  budget: { spend?: number };
+  stages: StageFields[];
+}
+
+export type StageFields =
+  | { kind: "runner"; name: string; label: string; prompt: string | null; skills: string[]; runner: RunnerName | null; human: boolean; advance: boolean; artifact: string | null; repeat: "feedback" | null; budget: { rounds?: number; attempts?: number; wallTime?: string }; runnerOptions: Record<string, unknown> }
+  | { kind: "action"; name: string; label: string; action: "tracker.transition"; status: string };
+
+export interface PipelineListing {
+  name: string;
+  file: string;
+  stages: Array<{ name: string; kind: Stage["kind"]; label: string }>;
+  problem: string | null;
+}
+
+export interface PipelineFile {
+  name: string;
+  file: string;
+  text: string;
+  pipeline: PipelineView | null;
+  problem: string | null;
+}
+
+export interface ConfigFile {
+  file: string;
+  text: string;
+  config: Config;
+  /** Keys this edit changed whose new value applies only after a restart. */
+  restart: string[];
+}
+
+export function pipelineListing(source: PipelineSource): PipelineListing {
+  return { name: source.name, file: source.file, stages: (source.pipeline?.stages ?? []).map((s) => ({ name: s.name, kind: s.kind, label: stageLabel(s) })), problem: source.problem };
+}
+
+export function pipelineFileView(source: PipelineSource): PipelineFile {
+  const pipeline = source.pipeline;
+  return {
+    name: source.name,
+    file: source.file,
+    text: source.text,
+    pipeline: pipeline ? { runner: pipeline.runner, budget: pipeline.budget, stages: pipeline.stages.map(stageFields) } : null,
+    problem: source.problem,
+  };
+}
+
+/** A Stage as the editor shows it: a runner it inherits from the Pipeline is null, so the form can say so. */
+function stageFields(stage: Stage): StageFields {
+  if (stage.kind === "action") return { ...stage, label: stageLabel(stage) };
+  const { inheritsRunner, ...fields } = stage;
+  return { ...fields, label: stageLabel(stage), runner: inheritsRunner ? null : stage.runner };
+}
 
 export function stageLabel(stage: Stage): string {
   return stage.kind === "action" ? stage.status : stage.name;

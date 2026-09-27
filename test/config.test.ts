@@ -25,6 +25,9 @@ describe("loadConfig", () => {
       expect(() => loadConfig(homeWith(`concurrency: ${bad}\n`))).toThrow(/concurrency must be a whole number of 1 or more/);
     }
     expect(loadConfig(homeWith("concurrency: 4\n")).concurrency).toBe(4);
-    expect(loadConfig(homeWith("concurrency: many\n")).concurrency).toBe(3);
+    expect(() => loadConfig(homeWith("concurrency: many\n"))).toThrow(/concurrency must be a whole number of 1 or more, not many/);
+    expect(() => loadConfig(homeWith("budget: 5\n"))).toThrow(/budget must be a mapping, not 5/);
+    expect(() => loadConfig(homeWith("budget: { wallTime: 30 }\n"))).toThrow(/budget\.wallTime/);
+    expect(loadConfig(homeWith("")).concurrency).toBe(3);
   });
 });

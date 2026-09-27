@@ -45,6 +45,15 @@ as slots free up. A change to the cap applies on the next tick without
 a restart. Retry and Resume, being explicit human acts, start
 regardless of the cap.
 
+Pipelines and `config.yaml` can be edited from the dashboard (the
+Pipelines and Config links in the header) or through `/api/pipelines`
+and `/api/config`. Edits change only the fields you touched and keep
+the file's comments and ordering; nothing is written that does not
+parse. Budget, concurrency, retention, branch prefix and notification
+changes apply at once; `port:` and `tick:` apply after a restart, and
+`repos:` stays a hand edit, though a config edit from the dashboard
+picks up any change to it made since Lasso started.
+
 ## Test
 
 ```sh

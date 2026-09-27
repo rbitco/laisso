@@ -102,6 +102,30 @@
   .timeline h3 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
   .timeline .row { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; font-variant-numeric: tabular-nums; font-size: 13px; }
   .timeline .row .meta { color: var(--muted); }
+  nav.views { display: flex; gap: 12px; }
+  nav.views a { color: var(--muted); text-decoration: none; }
+  nav.views a:hover { color: var(--accent); }
+  .panel { display: grid; gap: 12px; }
+  .panel h2 { margin: 0; font-size: 16px; }
+  .pipelines-grid { display: grid; grid-template-columns: minmax(180px, 240px) 1fr; gap: 16px; align-items: start; }
+  @media (max-width: 720px) { .pipelines-grid { grid-template-columns: 1fr; } }
+  .plist { display: grid; gap: 6px; }
+  .plist a { display: grid; gap: 2px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; color: inherit; text-decoration: none; }
+  .plist a.current { border-color: var(--accent); }
+  .plist a .why, .card .why, .panel .why { color: var(--muted); font-size: 12px; }
+  .card { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; }
+  .card.problem { border-color: var(--warn); }
+  .card h3 { margin: 0; font-size: 13px; display: flex; gap: 8px; align-items: baseline; }
+  .card h3 .kind { font-weight: normal; }
+  .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; align-items: end; }
+  .fields label, .fields .check { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+  .fields label.wide { grid-column: 1 / -1; }
+  .fields .check { display: flex; align-items: center; gap: 6px; }
+  .fields input, .fields select, .fields textarea { padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; font: inherit; }
+  .fields textarea { min-height: 96px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  textarea.raw { width: 100%; min-height: 360px; padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .bar .path { font-family: ui-monospace, monospace; font-size: 12px; color: var(--muted); word-break: break-all; }
   :root { --term-bg: #1c1d22; --term-ink: #d7d5cd; --term-dim: #8f8c84; --term-bright: #f2f0ea; --term-line: #33353d; --term-pill: #2e3038; --term-ok: #8fd19a; }
 </style>
 </head>
@@ -116,12 +140,15 @@
     <span data-role="tick-status">tick: never</span>
     <button type="button" data-role="check-now">Check now</button>
   </div>
+  <nav class="views"><a href="#">Tickets</a><a href="#pipelines">Pipelines</a><a href="#config">Config</a></nav>
 </header>
 <main>
   <p data-role="notice" class="notice" hidden></p>
   <form data-role="confirm" class="confirm" hidden></form>
   <section data-role="ledger" aria-label="Tickets"></section>
   <section data-role="detail" class="detail" hidden></section>
+  <section data-role="pipelines" class="panel" aria-label="Pipelines" hidden></section>
+  <section data-role="config" class="panel" aria-label="Config" hidden></section>
 </main>
 <script>
 (function () {
@@ -129,6 +156,8 @@
   const ledger = $('[data-role="ledger"]');
   const detail = $('[data-role="detail"]');
   const confirmPanel = $('[data-role="confirm"]');
+  const pipelinesPanel = $('[data-role="pipelines"]');
+  const configPanel = $('[data-role="config"]');
   const tickStatus = $('[data-role="tick-status"]');
   const notice = $('[data-role="notice"]');
   const intakeForm = $('form[data-role="intake"]');
@@ -443,9 +472,220 @@
     ledger.hidden = true; detail.hidden = false;
   }
 
+  const RUNNERS = ['claude', 'codex', 'pi'];
+  const BLANK_PIPELINE = 'runner: claude\nstages:\n  - name: implement\n    prompt: Do the work.\n    artifact: commits-on-branch\n';
+
+  function field(label, input, wide) { return el('label', { class: wide ? 'wide' : '' }, [label, input]); }
+  function check(label, name, on) {
+    const input = el('input', { type: 'checkbox', name });
+    input.checked = on;
+    return [input, el('label', { class: 'check' }, [input, label])];
+  }
+  function runnerSelect(name, value, blank) {
+    const s = el('select', { name });
+    if (blank) s.appendChild(el('option', { value: '', text: blank }));
+    for (const r of RUNNERS) { const o = el('option', { value: r, text: r }); if (r === value) o.selected = true; s.appendChild(o); }
+    return s;
+  }
+  // A blank clears the key; a number field must hold a number; unchanged fields stay out of the patch.
+  function changed(patch, key, before, after) { if (before !== after) patch[key] = after; }
+  function numberOrNull(input, what) {
+    const raw = input.value.trim();
+    if (raw === '') return null;
+    if (!/^\d+(\.\d+)?$/.test(raw)) { const e = new Error(what + ' must be a number'); e.input = input; throw e; }
+    return Number(raw);
+  }
+  function prune(patch) {
+    for (const [k, v] of Object.entries(patch)) {
+      if (v && typeof v === 'object' && !Array.isArray(v)) { prune(v); if (!Object.keys(v).length) delete patch[k]; }
+    }
+    return patch;
+  }
+  // Runs an edit; `act` returning false means nothing was sent, so nothing follows.
+  async function save(button, act, then) {
+    button.disabled = true; showNotice('');
+    try { if ((await act()) !== false) then(); else button.disabled = false; }
+    catch (e) { showNotice(e.message); if (e.input) e.input.focus(); button.disabled = false; }
+  }
+
+  // Pipelines: the list on the left, one Pipeline's Stages on the right, edited in place (comments and order kept).
+  async function showPipelines(name) {
+    let list;
+    try { list = await api('/api/pipelines'); } catch (e) { showNotice(e.message); return; }
+    const side = el('div', { class: 'plist' }, list.map((p) => el('a', { href: '#pipelines/' + encodeURIComponent(p.name), class: p.name === name ? 'current' : '' }, [
+      el('strong', { text: p.name }),
+      el('span', { class: 'why', text: p.problem ? 'does not load' : p.stages.map((s) => s.label).join(' → ') }),
+    ])));
+    const body = name ? await pipelineEditor(name) : el('p', { class: 'empty', text: 'Pick a Pipeline to edit it, or make a new one.' });
+    pipelinesPanel.replaceChildren(el('div', { class: 'pipelines-grid' }, [el('div', { class: 'panel' }, [side, newPipelineForm(list)]), body]));
+  }
+
+  function newPipelineForm(list) {
+    const nameInput = el('input', { name: 'name', placeholder: 'new-pipeline' });
+    const copy = el('select', { name: 'copy' }, [el('option', { value: '', text: 'a blank Pipeline' }), ...list.map((p) => el('option', { value: p.name, text: 'copy of ' + p.name }))]);
+    const create = el('button', { class: 'primary', type: 'submit', text: 'Create' });
+    const form = el('form', { class: 'card', 'data-role': 'new-pipeline' }, [el('div', { class: 'fields' }, [field('name', nameInput), field('start from', copy)]), el('div', { class: 'bar' }, [create])]);
+    form.addEventListener('submit', (ev) => {
+      ev.preventDefault();
+      const name = nameInput.value.trim();
+      save(create, async () => {
+        const text = copy.value ? (await api('/api/pipelines/' + encodeURIComponent(copy.value))).text : BLANK_PIPELINE;
+        await api('/api/pipelines/' + encodeURIComponent(name), { method: 'PUT', body: JSON.stringify({ text, create: true }) });
+      }, () => { location.hash = 'pipelines/' + encodeURIComponent(name); });
+    });
+    return form;
+  }
+
+  async function pipelineEditor(name) {
+    let p;
+    try { p = await api('/api/pipelines/' + encodeURIComponent(name)); } catch (e) { return el('p', { class: 'notice', text: e.message }); }
+    const panel = el('div', { class: 'panel', 'data-role': 'pipeline-editor' });
+    const asText = el('button', { type: 'button', text: 'Edit as text' });
+    const remove = el('button', { type: 'button', text: 'Delete' });
+    const head = el('div', { class: 'bar' }, [el('h2', { text: p.name }), el('span', { class: 'path', text: p.file }), asText, remove]);
+    remove.addEventListener('click', () => {
+      if (remove.textContent !== 'Delete for sure') { remove.textContent = 'Delete for sure'; setTimeout(() => { remove.textContent = 'Delete'; }, 4000); return; }
+      save(remove, () => api('/api/pipelines/' + encodeURIComponent(name), { method: 'DELETE' }), () => { location.hash = 'pipelines'; });
+    });
+    const structured = p.pipeline ? stagesForm(p) : el('div', { class: 'card problem' }, [el('div', { class: 'why', text: 'This file does not load: ' + p.problem + '. Fix it as text.' })]);
+    const raw = rawForm(p);
+    raw.hidden = !!p.pipeline;
+    asText.addEventListener('click', () => { raw.hidden = !raw.hidden; structured.hidden = !raw.hidden; asText.textContent = raw.hidden ? 'Edit as text' : 'Edit as fields'; });
+    if (!p.pipeline) { structured.hidden = false; asText.hidden = true; }
+    panel.replaceChildren(head, structured, raw);
+    return panel;
+  }
+
+  function rawForm(p) {
+    const area = el('textarea', { class: 'raw', name: 'text' });
+    area.value = p.text;
+    const button = el('button', { class: 'primary', type: 'submit', text: 'Save text' });
+    const form = el('form', { class: 'panel', 'data-role': 'pipeline-text' }, [area, el('div', { class: 'bar' }, [button, el('span', { class: 'why', text: 'the whole file, comments included; refused unless it parses' })])]);
+    form.addEventListener('submit', (ev) => {
+      ev.preventDefault();
+      save(button, () => api('/api/pipelines/' + encodeURIComponent(p.name), { method: 'PUT', body: JSON.stringify({ text: area.value }) }), () => { showNotice('saved ' + p.name); showPipelines(p.name); });
+    });
+    return form;
+  }
+
+  function stagesForm(p) {
+    const pipeline = p.pipeline;
+    const form = el('form', { class: 'panel', 'data-role': 'pipeline-fields' });
+    const runner = runnerSelect('runner', pipeline.runner);
+    const spend = el('input', { name: 'spend', value: pipeline.budget.spend === undefined ? '' : String(pipeline.budget.spend), placeholder: 'global default' });
+    form.appendChild(el('div', { class: 'card' }, [el('h3', { text: 'Pipeline' }), el('div', { class: 'fields' }, [field('runner', runner), field('spend per Ticket (USD)', spend)])]));
+    const stages = pipeline.stages.map((s) => stageCard(s, pipeline));
+    for (const card of stages) form.appendChild(card.node);
+    const button = el('button', { class: 'primary', type: 'submit', text: 'Save' });
+    form.appendChild(el('div', { class: 'bar' }, [button, el('span', { class: 'why', text: 'blank clears a field back to its default; add or reorder Stages as text' })]));
+    form.addEventListener('submit', (ev) => {
+      ev.preventDefault();
+      save(button, async () => {
+        const patch = { budget: {}, stages: {} };
+        changed(patch, 'runner', pipeline.runner, runner.value);
+        changed(patch.budget, 'spend', pipeline.budget.spend === undefined ? null : pipeline.budget.spend, numberOrNull(spend, 'spend'));
+        for (const card of stages) { const sp = card.patch(); if (Object.keys(sp).length) patch.stages[card.name] = sp; }
+        prune(patch);
+        if (!Object.keys(patch).length) { showNotice('nothing changed'); return false; }
+        await api('/api/pipelines/' + encodeURIComponent(p.name), { method: 'PATCH', body: JSON.stringify(patch) });
+      }, () => { showNotice('saved ' + p.name); showPipelines(p.name); });
+    });
+    return form;
+  }
+
+  function stageCard(s, pipeline) {
+    if (s.kind === 'action') {
+      const status = el('input', { name: 'status', value: s.status });
+      const node = el('div', { class: 'card' }, [el('h3', {}, [el('span', { class: 'kind', text: 'action' }), s.action]), el('div', { class: 'fields' }, [field('status', status)])]);
+      return { name: s.name, node, patch() { const patch = {}; changed(patch, 'status', s.status, status.value.trim()); return patch; } };
+    }
+    const name = el('input', { name: 'name', value: s.name });
+    const prompt = el('textarea', { name: 'prompt' }); prompt.value = s.prompt || '';
+    const skills = el('input', { name: 'skills', value: s.skills.join(', '), placeholder: 'grilling, to-spec' });
+    const runner = runnerSelect('runner', s.runner, 'Pipeline default (' + pipeline.runner + ')');
+    const artifact = el('input', { name: 'artifact', value: s.artifact || '', placeholder: 'commits-on-branch, file NOTES.md' });
+    const [human, humanLabel] = check('human: opens a terminal for me', 'human', s.human);
+    const [advance, advanceLabel] = check('advance to the next Stage on its own', 'advance', s.advance);
+    const [repeat, repeatLabel] = check('repeat on Feedback until the artifact is met', 'repeat', s.repeat === 'feedback');
+    const rounds = el('input', { name: 'rounds', value: s.budget.rounds === undefined ? '' : String(s.budget.rounds), placeholder: 'default' });
+    const attempts = el('input', { name: 'attempts', value: s.budget.attempts === undefined ? '' : String(s.budget.attempts), placeholder: 'default' });
+    const wallTime = el('input', { name: 'wallTime', value: s.budget.wallTime || '', placeholder: '30m' });
+    const node = el('div', { class: 'card' }, [
+      el('h3', {}, [el('span', { class: 'kind', text: s.human ? 'human' : 'runner' }), s.name]),
+      el('div', { class: 'fields' }, [field('name', name), field('runner', runner), field('artifact', artifact), field('skills', skills), field('prompt', prompt, true), humanLabel, advanceLabel, repeatLabel, field('rounds', rounds), field('attempts', attempts), field('wall time', wallTime)]),
+    ]);
+    return {
+      name: s.name, node,
+      patch() {
+        const patch = { budget: {} };
+        changed(patch, 'name', s.name, name.value.trim());
+        changed(patch, 'prompt', s.prompt, prompt.value === '' ? null : prompt.value);
+        const list = skills.value.split(',').map((x) => x.trim()).filter(Boolean);
+        if (list.join(',') !== s.skills.join(',')) patch.skills = list.length ? list : null;
+        if (runner.value !== (s.runner || '')) patch.runner = runner.value === '' ? null : runner.value;
+        changed(patch, 'artifact', s.artifact, artifact.value.trim() === '' ? null : artifact.value.trim());
+        if (human.checked !== s.human) patch.human = human.checked ? true : null;
+        if (advance.checked !== s.advance) patch.advance = advance.checked ? null : false;
+        if (repeat.checked !== (s.repeat === 'feedback')) patch.repeat = repeat.checked ? 'feedback' : null;
+        changed(patch.budget, 'rounds', s.budget.rounds === undefined ? null : s.budget.rounds, numberOrNull(rounds, 'rounds'));
+        changed(patch.budget, 'attempts', s.budget.attempts === undefined ? null : s.budget.attempts, numberOrNull(attempts, 'attempts'));
+        changed(patch.budget, 'wallTime', s.budget.wallTime === undefined ? null : s.budget.wallTime, wallTime.value.trim() === '' ? null : wallTime.value.trim());
+        return prune(patch);
+      },
+    };
+  }
+
+  // Config: every key the dashboard may set, edited in place; repos stay a hand edit.
+  async function showConfig() {
+    let c;
+    try { c = await api('/api/config'); } catch (e) { showNotice(e.message); return; }
+    const cfg = c.config;
+    const num = (key, value) => el('input', { name: key, value: String(value) });
+    const inputs = {
+      rounds: num('rounds', cfg.budget.rounds), attempts: num('attempts', cfg.budget.attempts), wallTime: el('input', { name: 'wallTime', value: cfg.budget.wallTime }), spend: num('spend', cfg.budget.spend),
+      tick: num('tick', cfg.tick), concurrency: num('concurrency', cfg.concurrency), retention: num('retention', cfg.retention), port: num('port', cfg.port),
+      branch_prefix: el('input', { name: 'branch_prefix', value: cfg.branch_prefix, placeholder: 'none' }),
+    };
+    const flags = ['enabled', 'flagged', 'human', 'gate'].map((k) => [k, ...check(k, k, cfg.notifications[k])]);
+    const button = el('button', { class: 'primary', type: 'submit', text: 'Save' });
+    const form = el('form', { class: 'panel', 'data-role': 'config-fields' }, [
+      el('div', { class: 'bar' }, [el('h2', { text: 'Config' }), el('span', { class: 'path', text: c.file })]),
+      el('div', { class: 'card' }, [el('h3', { text: 'Budget defaults' }), el('div', { class: 'fields' }, [field('rounds per repeating Stage', inputs.rounds), field('attempts per Stage', inputs.attempts), field('wall time per Session', inputs.wallTime), field('spend per Ticket (USD)', inputs.spend)])]),
+      el('div', { class: 'card' }, [el('h3', { text: 'Server' }), el('div', { class: 'fields' }, [field('tick (seconds)', inputs.tick), field('concurrency', inputs.concurrency), field('retention (days)', inputs.retention), field('branch prefix', inputs.branch_prefix), field('port', inputs.port)])]),
+      el('div', { class: 'card' }, [el('h3', { text: 'Notifications' }), el('div', { class: 'fields' }, flags.map((f) => f[2]))]),
+      el('div', { class: 'card' }, [el('h3', { text: 'Repos' }), el('div', { class: 'why', text: Object.keys(cfg.repos).length ? Object.entries(cfg.repos).map(([n, r]) => n + ': ' + r.tracker + ' ' + r.project + ' at ' + r.path + ', Pipeline ' + r.pipeline).join(' · ') : 'none yet' }), el('div', { class: 'why', text: 'repos are edited in config.yaml by hand' })]),
+      el('div', { class: 'bar' }, [button, el('span', { class: 'why', text: 'port and tick apply after a restart; everything else at once' })]),
+    ]);
+    form.addEventListener('submit', (ev) => {
+      ev.preventDefault();
+      let restart = [];
+      save(button, async () => {
+        const patch = { budget: {}, notifications: {} };
+        changed(patch.budget, 'rounds', cfg.budget.rounds, numberOrNull(inputs.rounds, 'rounds'));
+        changed(patch.budget, 'attempts', cfg.budget.attempts, numberOrNull(inputs.attempts, 'attempts'));
+        changed(patch.budget, 'wallTime', cfg.budget.wallTime, inputs.wallTime.value.trim() || null);
+        changed(patch.budget, 'spend', cfg.budget.spend, numberOrNull(inputs.spend, 'spend'));
+        for (const k of ['tick', 'concurrency', 'retention', 'port']) changed(patch, k, cfg[k], numberOrNull(inputs[k], k));
+        changed(patch, 'branch_prefix', cfg.branch_prefix || null, inputs.branch_prefix.value.trim() || null);
+        for (const [k, input] of flags) changed(patch.notifications, k, cfg.notifications[k], input.checked);
+        prune(patch);
+        if (!Object.keys(patch).length) { showNotice('nothing changed'); return false; }
+        restart = (await api('/api/config', { method: 'PATCH', body: JSON.stringify(patch) })).restart;
+      }, () => { showNotice(restart.length ? 'saved; ' + restart.join(' and ') + ' apply after a restart' : 'saved'); showConfig(); });
+    });
+    configPanel.replaceChildren(form);
+  }
+
+  function decodeName(part) { try { return decodeURIComponent(part); } catch { return part; } }
   function route() {
-    const id = location.hash.replace(/^#/, '');
-    if (id) showDetail(id); else { detailGen++; detail.hidden = true; ledger.hidden = false; refreshLedger(); }
+    const hash = location.hash.replace(/^#/, '');
+    detailGen++;
+    const view = hash === 'config' ? 'config' : hash === 'pipelines' || hash.startsWith('pipelines/') ? 'pipelines' : hash ? 'detail' : 'ledger';
+    ledger.hidden = view !== 'ledger'; detail.hidden = view !== 'detail'; pipelinesPanel.hidden = view !== 'pipelines'; configPanel.hidden = view !== 'config';
+    if (view === 'pipelines') showPipelines(hash.startsWith('pipelines/') ? decodeName(hash.slice('pipelines/'.length)) : null);
+    else if (view === 'config') showConfig();
+    else if (view === 'detail') showDetail(hash);
+    else refreshLedger();
   }
 
   function select(name, choices, suggestion) {
