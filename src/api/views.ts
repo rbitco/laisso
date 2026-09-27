@@ -77,6 +77,8 @@ export interface SessionView {
   /** Which of the requested limits the Runner honoured itself. */
   limitsHonoured: string[];
   openedAt: string | null;
+  /** The Runner's own id for the Session when it names its own (a Codex thread), for resuming by hand. */
+  runnerSessionId: string | null;
   stdoutPath: string | null;
   transcriptPath: string | null;
   running: boolean;
@@ -184,6 +186,7 @@ export function sessionView(row: SessionRow, now: number = Date.now()): SessionV
     usage: row.usage ? (JSON.parse(row.usage) as Record<string, unknown>) : null,
     limitsHonoured: row.limits_honoured ? (JSON.parse(row.limits_honoured) as string[]) : [],
     openedAt: row.opened_at,
+    runnerSessionId: row.runner_session_id,
     stdoutPath: row.stdout_path,
     transcriptPath: row.transcript_path,
     running: row.ended_at === null,

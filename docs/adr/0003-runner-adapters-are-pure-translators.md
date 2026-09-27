@@ -20,7 +20,9 @@ instead of three, and the same Session flows through both modes.
 ## Consequences
 
 - An adapter never touches the filesystem or a terminal; anything that
-  does belongs in Lasso's core.
+  does belongs in Lasso's core. The one exception is `findSession`, which
+  reads only the Runner's own session index, and only for a Runner that
+  names its sessions itself.
 - Lasso reads the stdout it captured, never the Runner's own transcript
   files; their paths are kept only as pointers for humans.
 - Runner-specific knobs (permission modes, sandboxes) are a fixed

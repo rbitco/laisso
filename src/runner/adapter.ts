@@ -25,10 +25,12 @@ export interface RunRequest {
   context: TicketContext;
   cwd: string;
   mode: "headless" | "terminal";
-  /** Lasso-chosen where the Runner allows, or a held id to resume. */
+  /** Lasso's id for the Session: chosen up front, and what LASSO_SESSION always names. */
   sessionId: string;
   /** The session id is held from an earlier launch: re-enter it rather than start it. */
   resume?: boolean;
+  /** On resume, the id the Runner gave the held session when it names its own (Codex); Lasso's otherwise. */
+  runnerSessionId?: string;
   /** A human-readable label for terminal Sessions; never an identity. */
   name?: string;
   limits: RunLimits;
@@ -48,7 +50,7 @@ export interface Outcome {
   finalMessage: string | null;
   usage: Record<string, unknown> | null;
   costUsd: number | null;
-  /** The Runner's own transcript: a pointer for humans, never read by Lasso (ADR 0003). */
+  /** The Runner's own transcript, or the directory it will land in: a pointer for humans, never read by Lasso (ADR 0003). */
   transcriptPath: string | null;
 }
 
@@ -59,11 +61,16 @@ export interface RunnerAdapter {
   name: RunnerName;
   /** The limits this Runner stops at by itself when asked; the rest Lasso enforces. */
   honours: Limit[];
+  /** Whether the Runner takes the session id Lasso chose, or assigns its own for `findSession` to recover. */
+  sessionIds: "lasso" | "runner";
   command(request: RunRequest): Command;
   parse(stdout: string, request: Pick<RunRequest, "cwd" | "sessionId">): Outcome;
   /** Where the Runner will keep its own transcript for this request; null when the Runner has none. */
   transcriptPath(request: Pick<RunRequest, "cwd" | "sessionId">): string | null;
-  /** The session id a Runner assigned itself, found after launch; null for Runners that take Lasso's id. */
+  /**
+   * The session id a Runner assigned itself, found after launch; null for Runners that take
+   * Lasso's id. The one operation that reads the Runner's own store (ADR 0003), and only its index.
+   */
   findSession(query: { cwd: string; launchedAfter: Date }): string | null;
 }
 
@@ -128,4 +135,26 @@ export function ticketEnv(request: RunRequest): Record<string, string> {
 /** Extra argv a Pipeline may pass through `runnerOptions: { args: [...] }`; the one knob Lasso does not model. */
 export function extraArgs(options: Record<string, unknown>): string[] {
   return Array.isArray(options.args) ? options.args.map(String) : [];
+}
+
+/** Every well-formed JSON object on its own line of captured stdout; anything else is skipped. */
+export function jsonLines(stdout: string): Record<string, unknown>[] {
+  return stdout
+    .split("\n")
+    .map((line) => {
+      try {
+        return JSON.parse(line) as unknown;
+      } catch {
+        return null;
+      }
+    })
+    .filter((r): r is Record<string, unknown> => r !== null && typeof r === "object" && !Array.isArray(r));
+}
+
+export function str(value: unknown): string | null {
+  return typeof value === "string" && value ? value : null;
+}
+
+export function obj(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 }

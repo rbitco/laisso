@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { LassoHome } from "../server/home.ts";
@@ -8,7 +8,7 @@ import type { Logger } from "../server/log.ts";
 import { shortId, type TicketRow } from "../store/tickets.ts";
 import type { Sessions, SessionRow } from "../store/sessions.ts";
 import type { RunnerStage } from "../pipeline/load.ts";
-import { requestFor, type Command, type RunRequest } from "../runner/adapter.ts";
+import { requestFor, type Command, type RunRequest, type RunnerAdapter } from "../runner/adapter.ts";
 import { adapterFor } from "../runner/adapters.ts";
 import { appleString, shellQuote } from "../macos.ts";
 
@@ -32,8 +32,9 @@ export interface WindowOpener {
 /**
  * Human Stages: Open terminal launches the Runner interactively on a Lasso-
  * chosen session id and tracks it by that id only. Opening again relaunches
- * on the held id (Resume). Lasso never checks liveness; the row ends only by
- * a human's act (spec: human Stages).
+ * on the held id (Resume); a Runner that names its own session (Codex) is
+ * asked for it first. Lasso never checks liveness; the row ends only by a
+ * human's act (spec: human Stages).
  */
 export class Terminal {
   private deps: TerminalDeps;
@@ -49,12 +50,18 @@ export class Terminal {
     const adapter = adapterFor(stage.runner);
     const held = sessions.running(ticket.id).find((s) => s.mode === "terminal" && s.stage === stage.name) ?? null;
     const sessionId = held?.id ?? randomUUID();
+    // Resume only a session the Runner has been launched on; a row whose window never opened starts afresh.
+    const launched = held?.opened_at != null ? held : null;
+    const runnerSessionId = launched && adapter.sessionIds === "runner" ? this.runnerSessionOf(launched, ticket.worktree, adapter) : undefined;
+    // A Runner that names its own session and has not recorded one since the window opened cannot be re-entered.
+    const lost = launched !== null && adapter.sessionIds === "runner" && runnerSessionId === null;
+    if (lost) log.warn("session.resume_lost", { session: sessionId, ticket: ticket.id, stage: stage.name, runner: adapter.name });
     const request: RunRequest = {
       ...requestFor(ticket, stage),
       mode: "terminal",
       sessionId,
-      // Resume only a session the Runner has been launched on; a row whose window never opened starts afresh.
-      resume: held?.opened_at != null,
+      resume: launched !== null && !lost,
+      runnerSessionId: runnerSessionId ?? undefined,
       name: `Lasso: ${ticket.reference ?? shortId(ticket.id)} ${stage.name}`,
       limits: {},
     };
@@ -80,19 +87,36 @@ export class Terminal {
     const dir = path.join(home.ticketsDir, ticket.id, "sessions");
     mkdirSync(dir, { recursive: true });
     const launcher = path.join(dir, `${sessionId}.command`);
-    writeFileSync(launcher, launcherScript(command), { mode: 0o755 });
+    const note = lost ? `Lasso found no ${adapter.name} session for ${stage.name} since the last window opened; starting afresh.` : null;
+    writeFileSync(launcher, launcherScript(command, note), { mode: 0o755 });
     await this.opener.open(launcher, request.name!);
     log.info(request.resume ? "session.resumed" : "session.opened", { session: sessionId, ticket: ticket.id, stage: stage.name, launcher });
     return sessions.setOpened(sessionId, new Date().toISOString());
   }
+
+  /** The id the Runner gave a launched Session: kept on the row once found, so later opens re-enter the same one. */
+  private runnerSessionOf(row: SessionRow, worktree: string, adapter: RunnerAdapter): string | null {
+    if (row.runner_session_id) return row.runner_session_id;
+    // The Runner records the physical directory it ran in.
+    let cwd = worktree;
+    try {
+      cwd = realpathSync(worktree);
+    } catch {
+      // A missing worktree finds nothing below.
+    }
+    const found = adapter.findSession({ cwd, launchedAfter: new Date(row.started_at) });
+    if (found) this.deps.sessions.setRunnerSession(row.id, found);
+    return found;
+  }
 }
 
-/** A shell script that enters the worktree, exports the Ticket context, and becomes the Runner. */
-export function launcherScript(command: Command): string {
+/** A shell script that enters the worktree, exports the Ticket context, says anything the human should know, and becomes the Runner. */
+export function launcherScript(command: Command, note: string | null = null): string {
   return [
     "#!/bin/sh",
     `cd ${shellQuote(command.cwd)} || exit 1`,
     ...Object.entries(command.env).map(([k, v]) => `export ${k}=${shellQuote(v)}`),
+    ...(note ? [`echo ${shellQuote(note)}`] : []),
     `exec ${command.argv.map(shellQuote).join(" ")}`,
     "",
   ].join("\n");

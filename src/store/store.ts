@@ -98,4 +98,7 @@ const MIGRATIONS: Array<(db: DatabaseSync) => void> = [
       ALTER TABLE sessions ADD COLUMN opened_at TEXT;
     `);
   },
+  (db) => {
+    db.exec(`ALTER TABLE sessions ADD COLUMN runner_session_id TEXT;`);
+  },
 ];

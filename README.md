@@ -20,6 +20,13 @@ Everything Lasso owns lives under `~/.lasso` (`LASSO_HOME` overrides it):
 The first run writes a commented `config.yaml` and the default Pipeline and
 never touches either again.
 
+A Pipeline names a Runner per Stage (`runner: claude | codex | pi`); a
+Stage may also carry `runnerOptions`, which Lasso does not model beyond
+passing through: `args` (extra argv before the prompt) and, for Codex,
+`skillsDir` (where its skill catalog lives, default `~/.agents/skills`).
+Codex ignores a skill mention whose path is outside its catalog without
+a word, so set `skillsDir` when the skills live elsewhere.
+
 ## Test
 
 ```sh

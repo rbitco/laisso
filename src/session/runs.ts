@@ -39,6 +39,8 @@ interface Live {
   killReason: EndedReason | null;
   /** Set when the process never started; the Session ends interrupted and the Flag says runner.unavailable. */
   spawnError: string | null;
+  /** How the process closed: a signal death or exit 143, whoever sent it, means interrupted. */
+  exit: { code: number | null; signal: NodeJS.Signals | null } | null;
   done: Promise<SessionRow>;
   resolve: (row: SessionRow) => void;
 }
@@ -120,7 +122,7 @@ export class Runs {
     });
     let resolve!: (row: SessionRow) => void;
     const done = new Promise<SessionRow>((r) => (resolve = r));
-    const live: Live = { child, stage, request, stdoutPath, fd, stderr: "", wallTimer: null, killReason: null, spawnError: null, done, resolve };
+    const live: Live = { child, stage, request, stdoutPath, fd, stderr: "", wallTimer: null, killReason: null, spawnError: null, exit: null, done, resolve };
     this.live.set(sessionId, live);
     if (command.stdin !== undefined) child.stdin!.end(command.stdin);
 
@@ -134,6 +136,7 @@ export class Runs {
     });
     child.once("close", (code, signal) => {
       log.info("session.exited", { session: sessionId, code, signal });
+      live.exit = { code, signal };
       this.finish(sessionId);
     });
     live.wallTimer = setTimeout(() => void this.kill(sessionId, "wall_time"), wallTimeMs);
@@ -224,9 +227,12 @@ export class Runs {
     const adapter = adapterFor(live.stage.runner);
     const stdout = live.spawnError ? "" : readFileSync(live.stdoutPath, "utf8");
     const parsed = adapter.parse(stdout, live.request);
-    const outcome: Outcome = live.killReason || live.spawnError ? { ...parsed, status: "interrupted" } : parsed;
+    // A signal death, whoever sent it (exit 143 is SIGTERM under a shell), is an interruption whatever stdout says.
+    const terminated = live.exit?.code === 143 || live.exit?.signal != null;
+    const signalName = live.exit?.signal ?? "SIGTERM";
+    const outcome: Outcome = live.killReason || live.spawnError || terminated ? { ...parsed, status: "interrupted" } : parsed;
     const stderr = live.stderr.trim() || null;
-    const finalMessage = outcome.finalMessage ?? (live.killReason ? `killed: ${live.killReason.replace("_", " ")}` : (live.spawnError ?? stderr));
+    const finalMessage = outcome.finalMessage ?? (live.killReason ? `killed: ${live.killReason.replace("_", " ")}` : (live.spawnError ?? (terminated ? `terminated by ${signalName}` : stderr)));
     const end: SessionEnd = {
       ended_by: live.killReason === "stop" || live.killReason === "abandon" ? "human" : "outcome",
       ended_reason: live.killReason,
@@ -235,6 +241,8 @@ export class Runs {
       usage: outcome.usage ? JSON.stringify(outcome.usage) : null,
       cost_usd: outcome.costUsd,
       transcript_path: outcome.transcriptPath,
+      // A Runner that names its own session (Codex) reports the id in its output; it is kept so a human can resume by hand.
+      runner_session_id: adapter.sessionIds === "runner" ? outcome.sessionId : null,
     };
     // The verdict is reached before the row ends so a reader never sees a
     // Session over and its Ticket not yet advanced or Flagged.

@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import path from "node:path";
-import { renderPrompt, ticketEnv, extraArgs, type RunnerAdapter, type RunRequest, type Command, type Outcome, type OutcomeStatus } from "./adapter.ts";
+import { renderPrompt, ticketEnv, extraArgs, jsonLines, str, obj, type RunnerAdapter, type RunRequest, type Command, type Outcome, type OutcomeStatus } from "./adapter.ts";
 
 interface ResultRecord {
   type?: unknown;
@@ -21,6 +21,7 @@ interface ResultRecord {
 export const claudeAdapter: RunnerAdapter = {
   name: "claude",
   honours: ["remainingSpendUsd"],
+  sessionIds: "lasso",
 
   command(request: RunRequest): Command {
     const prompt = renderPrompt(request, (name) => `/${name}`);
@@ -54,16 +55,7 @@ export const claudeAdapter: RunnerAdapter = {
   },
 
   parse(stdout: string, request: Pick<RunRequest, "cwd" | "sessionId">): Outcome {
-    const records = stdout
-      .split("\n")
-      .map((line) => {
-        try {
-          return JSON.parse(line) as Record<string, unknown>;
-        } catch {
-          return null;
-        }
-      })
-      .filter((r): r is Record<string, unknown> => r !== null && typeof r === "object");
+    const records = jsonLines(stdout);
     const result = records.filter((r) => r.type === "result").at(-1) as ResultRecord | undefined;
     const init = records.find((r) => r.type === "system" && r.subtype === "init");
     const sessionId = str(result?.session_id) ?? str(init?.session_id) ?? request.sessionId;
@@ -75,7 +67,7 @@ export const claudeAdapter: RunnerAdapter = {
       status: statusOf(result),
       sessionId,
       finalMessage,
-      usage: result.usage && typeof result.usage === "object" ? (result.usage as Record<string, unknown>) : null,
+      usage: obj(result.usage),
       costUsd: typeof result.total_cost_usd === "number" ? result.total_cost_usd : null,
       transcriptPath,
     };
@@ -94,8 +86,4 @@ function statusOf(result: ResultRecord): OutcomeStatus {
   if (result.subtype === "success" && !result.is_error) return "succeeded";
   if (result.subtype === "error_max_turns" || result.subtype === "error_max_budget_usd") return "exhausted";
   return "failed";
-}
-
-function str(value: unknown): string | null {
-  return typeof value === "string" && value ? value : null;
 }

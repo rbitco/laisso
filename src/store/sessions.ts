@@ -27,11 +27,13 @@ export interface SessionRow {
   pid: number | null;
   /** When a terminal Session's window was last opened (Open terminal, or Resume). */
   opened_at: string | null;
+  /** The id the Runner gave this Session when it names its own (a Codex thread); null when it took Lasso's. */
+  runner_session_id: string | null;
 }
 
 export type NewSession = Pick<SessionRow, "id" | "ticket" | "stage" | "stage_snapshot" | "mode" | "started_by" | "stdout_path" | "limits_honoured"> & Partial<Pick<SessionRow, "transcript_path">>;
 
-export type SessionEnd = Pick<SessionRow, "ended_by" | "ended_reason" | "outcome" | "final_message" | "usage" | "cost_usd" | "transcript_path">;
+export type SessionEnd = Pick<SessionRow, "ended_by" | "ended_reason" | "outcome" | "final_message" | "usage" | "cost_usd" | "transcript_path"> & Partial<Pick<SessionRow, "runner_session_id">>;
 
 /** One row per Runner process (or action) that worked a Stage of a Ticket; the history the Ticket row lacks (spec: Store). */
 export class Sessions {
@@ -81,13 +83,19 @@ export class Sessions {
     this.db.prepare(`UPDATE sessions SET pid = ? WHERE id = ?`).run(pid, id);
   }
 
+  setRunnerSession(id: string, runnerSessionId: string): SessionRow {
+    this.db.prepare(`UPDATE sessions SET runner_session_id = ? WHERE id = ?`).run(runnerSessionId, id);
+    return this.get(id)!;
+  }
+
   end(id: string, end: SessionEnd, now: string = new Date().toISOString()): SessionRow {
     this.db
       .prepare(
-        `UPDATE sessions SET ended_at = ?, ended_by = ?, ended_reason = ?, outcome = ?, final_message = ?, usage = ?, cost_usd = ?, transcript_path = ?, pid = NULL
+        `UPDATE sessions SET ended_at = ?, ended_by = ?, ended_reason = ?, outcome = ?, final_message = ?, usage = ?, cost_usd = ?, transcript_path = ?,
+           runner_session_id = COALESCE(?, runner_session_id), pid = NULL
          WHERE id = ? AND ended_at IS NULL`,
       )
-      .run(now, end.ended_by, end.ended_reason, end.outcome, end.final_message, end.usage, end.cost_usd, end.transcript_path, id);
+      .run(now, end.ended_by, end.ended_reason, end.outcome, end.final_message, end.usage, end.cost_usd, end.transcript_path, end.runner_session_id ?? null, id);
     return this.get(id)!;
   }
 

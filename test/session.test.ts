@@ -130,14 +130,6 @@ describe("a headless Stage", () => {
     expect(d.flag).toEqual({ reason: "artifact.missing", detail: "commits-on-branch: no commits on the branch beyond origin/main", at: expect.any(String) });
   });
 
-  it("Flags runner.unavailable when the Stage's Runner has no adapter", async () => {
-    const { lasso, ticket } = await lassoWithTicket(PIPELINE.replace("runner: claude", "runner: codex"));
-    await checkNow(lasso);
-    const d = await detailOf(lasso, ticket.id);
-    expect(d.flag).toMatchObject({ reason: "runner.unavailable", detail: "Runner codex has no adapter yet" });
-    expect(d.sessions).toEqual([]);
-  });
-
   it("Flags outcome.failed with the Runner's message", async () => {
     const { lasso, ticket } = await lassoWithTicket();
     await lasso.runner.script({ stdout: claudeFixture("failed.jsonl"), exit: 1 });

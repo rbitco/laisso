@@ -221,7 +221,7 @@
         head.appendChild(reopen);
       }
       pane.replaceChildren(head, el('div', { class: 'hint', text: opened + '. Lasso tracks this Session by its id only: the row ends when you mark the Stage done or skip it.' }),
-        el('div', { class: 'paths' }, [copyChip('worktree', t.worktree), copyChip('session id', s.id), s.transcriptPath ? copyChip('transcript', s.transcriptPath) : el('span')]));
+        el('div', { class: 'paths' }, [copyChip('worktree', t.worktree), copyChip('session id', s.id), s.runnerSessionId ? copyChip('runner session', s.runnerSessionId) : el('span'), s.transcriptPath ? copyChip('transcript', s.transcriptPath) : el('span')]));
       return pane;
     }
     const final = el('div', { class: 'final' + (s.outcome === 'succeeded' ? ' ok' : ''), text: s.finalMessage || '' });
@@ -234,6 +234,7 @@
     const paths = el('div', { class: 'paths' }, [
       copyChip('worktree', t.worktree),
       s.stdoutPath ? copyChip('stdout', s.stdoutPath) : el('span'),
+      s.runnerSessionId ? copyChip('runner session', s.runnerSessionId) : el('span'),
       s.transcriptPath ? copyChip('transcript', s.transcriptPath) : el('span'),
     ]);
     pane.replaceChildren(head, out, final, paths);
