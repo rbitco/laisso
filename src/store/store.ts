@@ -109,4 +109,7 @@ const MIGRATIONS: Array<(db: DatabaseSync) => void> = [
       ALTER TABLE tickets ADD COLUMN budget_spend REAL;
     `);
   },
+  (db) => {
+    db.exec(`ALTER TABLE tickets ADD COLUMN runnable_since TEXT;`);
+  },
 ];

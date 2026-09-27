@@ -154,7 +154,7 @@ export class Progress {
     const next = current.pipeline.stages[current.index + 1];
     const now = new Date().toISOString();
     if (!next) {
-      const done = this.deps.tickets.update(ticket.id, { state: "done", holding_since: null, ...unflagPatch(ticket, now) });
+      const done = this.deps.tickets.update(ticket.id, { state: "done", holding_since: null, runnable_since: null, ...unflagPatch(ticket, now) });
       this.deps.log.info("ticket.done", { ticket: ticket.id });
       await this.deps.mirror.push(done.id);
       return;
@@ -205,7 +205,7 @@ export class Progress {
   /** Abandon: the Ticket leaves Lasso's attention for good (CONTEXT.md: Abandoned). Worktree, branch and PR cleanup is LASSO-39. */
   async abandon(ticket: TicketRow): Promise<TicketRow> {
     if (ticket.state !== "active") throw new TriggerError(`Ticket ${ticket.reference ?? ticket.id} is already ${ticket.state}`);
-    const abandoned = this.deps.tickets.update(ticket.id, { state: "abandoned", holding_since: null, ...unflagPatch(ticket, new Date().toISOString()) });
+    const abandoned = this.deps.tickets.update(ticket.id, { state: "abandoned", holding_since: null, runnable_since: null, ...unflagPatch(ticket, new Date().toISOString()) });
     this.endHumanSessions(abandoned, "abandon");
     this.deps.log.info("ticket.abandoned", { ticket: ticket.id, stage: ticket.stage, flagged: ticket.flagged_at !== null });
     await this.deps.mirror.push(abandoned.id);
@@ -213,7 +213,7 @@ export class Progress {
   }
 
   async flag(ticketId: string, reason: string, detail: string | null): Promise<void> {
-    const flagged = this.deps.tickets.update(ticketId, { flagged_at: new Date().toISOString(), flag_reason: reason, flag_detail: detail });
+    const flagged = this.deps.tickets.update(ticketId, { flagged_at: new Date().toISOString(), flag_reason: reason, flag_detail: detail, runnable_since: null });
     this.deps.log.info("ticket.flagged", { ticket: ticketId, reason, detail });
     this.deps.notifier.post("flagged", flagged, detail ? `${reason}: ${detail}` : reason);
     await this.deps.mirror.push(flagged.id);

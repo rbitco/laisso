@@ -44,6 +44,13 @@ human-in-the-loop Stage, or holding at a Stage that does not auto-advance.
 The dashboard lists these first and Lasso notifies once as each begins.
 _Avoid_: pending, waiting, needs review, action required
 
+**Queued**:
+A Ticket whose next Stage could run now but for the concurrency cap: every
+slot is held by a running headless Session. Queued Tickets start oldest
+first as slots free. Only running headless Sessions hold a slot, so a
+Flagged Ticket or a human Stage never keeps the line from moving.
+_Avoid_: pending, waiting, blocked, backlogged
+
 **Ledger**:
 The dashboard's list of active Tickets, ordered so that whatever needs
 Attention comes first. Done and Abandoned Tickets sit behind a toggle.

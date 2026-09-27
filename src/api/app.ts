@@ -10,6 +10,7 @@ import { ArtifactWarning, TriggerError, type Progress } from "../session/progres
 import { TerminalError, type Terminal } from "../session/terminal.ts";
 import type { Exits, ExtendRequest } from "../session/exits.ts";
 import type { Budgets } from "../budget/budgets.ts";
+import type { Queue } from "../session/queue.ts";
 import { Intake, IntakeError, type IntakeRequest } from "../intake/intake.ts";
 import { loadPipeline, type Pipeline } from "../pipeline/load.ts";
 import { dashboardHtml } from "../dashboard/page.ts";
@@ -26,6 +27,7 @@ export interface AppDeps {
   terminal: Terminal;
   exits: Exits;
   budgets: Budgets;
+  queue: Queue;
   version: string;
 }
 
@@ -34,7 +36,7 @@ export function createApp(deps: AppDeps): Hono {
   const app = new Hono();
   const intake = new Intake({ config: deps.config, home: deps.home, tickets: deps.tickets });
   const baseUrl = `http://localhost:${deps.config.port}`;
-  const viewContext: ViewContext = {
+  const views: Omit<ViewContext, "queuePosition"> = {
     baseUrl,
     pipelineFor: (ticket: TicketRow): Pipeline | null => {
       try {
@@ -45,6 +47,11 @@ export function createApp(deps: AppDeps): Hono {
     },
     sessionsFor: (ticket: TicketRow) => deps.sessions.forTicket(ticket.id),
     budgetFor: (ticket, pipeline, stage, rows) => deps.budgets.view(ticket, pipeline, stage, rows),
+  };
+  /** The view context for one request: queue positions are computed once for every Ticket it renders. */
+  const viewContext = (): ViewContext => {
+    const positions = deps.queue.positions();
+    return { ...views, queuePosition: (ticket) => positions.get(ticket.id) ?? null };
   };
 
   // Every response carries the version, so a client can tell Lasso from a stranger on the port.
@@ -73,21 +80,22 @@ export function createApp(deps: AppDeps): Hono {
 
   app.get("/api/tickets", (c) => {
     const all = c.req.query("all") === "1" || c.req.query("all") === "true";
-    return c.json(sortForLedger(deps.tickets.list({ all }).map((t) => ticketView(t, viewContext))));
+    const ctx = viewContext();
+    return c.json(sortForLedger(deps.tickets.list({ all }).map((t) => ticketView(t, ctx))));
   });
 
   app.post("/api/tickets", async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as Partial<IntakeRequest>;
     const { ticket, branchExisted } = await intake.admit({ input: body.input ?? "", repo: body.repo, pipeline: body.pipeline });
     await deps.progress.admitted(ticket);
-    const result: IntakeResult = { ...ticketView(deps.tickets.get(ticket.id)!, viewContext), branchExisted };
+    const result: IntakeResult = { ...ticketView(deps.tickets.get(ticket.id)!, viewContext()), branchExisted };
     return c.json(result, 201);
   });
 
   app.get("/api/tickets/:id", (c) => {
     const ticket = deps.tickets.find(c.req.param("id"));
     if (!ticket) return c.json({ error: `no Ticket matches ${c.req.param("id")}` }, 404);
-    return c.json(ticketDetail(ticket, viewContext));
+    return c.json(ticketDetail(ticket, viewContext()));
   });
 
   // The Triggers on a Ticket (spec: Triggers per Ticket). Each answers with the Ticket as it now stands.
@@ -96,7 +104,7 @@ export function createApp(deps: AppDeps): Hono {
       const ticket = deps.tickets.find(c.req.param("id"));
       if (!ticket) return c.json({ error: `no Ticket matches ${c.req.param("id")}` }, 404);
       const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
-      return c.json(ticketDetail(await pull(ticket, body), viewContext));
+      return c.json(ticketDetail(await pull(ticket, body), viewContext()));
     });
 
   trigger("terminal", async (ticket) => {

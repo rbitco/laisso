@@ -29,6 +29,8 @@ export interface TicketRow {
   budget_attempts: number | null;
   budget_wall_time: string | null;
   budget_spend: number | null;
+  /** When a tick first found a headless Stage of this Ticket ready to start; the queue is ordered by it. Cleared when a Session starts or the Ticket stops being runnable. */
+  runnable_since: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -82,6 +84,11 @@ export class Tickets {
   /** Mirror bookkeeping only: it is not activity on the Ticket, so updated_at is left alone. */
   setMirrorPending(id: string, since: string | null): void {
     this.db.prepare(`UPDATE tickets SET mirror_pending = ? WHERE id = ?`).run(since, id);
+  }
+
+  /** Queue bookkeeping only: not activity on the Ticket, so updated_at is left alone. */
+  setRunnableSince(id: string, since: string | null): void {
+    this.db.prepare(`UPDATE tickets SET runnable_since = ? WHERE id = ?`).run(since, id);
   }
 
   update(id: string, patch: Partial<Omit<TicketRow, "id" | "created_at">>, now: string = new Date().toISOString()): TicketRow {

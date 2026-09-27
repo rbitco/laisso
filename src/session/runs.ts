@@ -15,6 +15,7 @@ import { requestFor, type RunRequest, type Outcome } from "../runner/adapter.ts"
 import { checkArtifact } from "../artifact/check.ts";
 import { parseDuration } from "../duration.ts";
 import type { Budgets } from "../budget/budgets.ts";
+import type { Queue } from "./queue.ts";
 import { spendOf } from "../budget/budget.ts";
 
 export class RunError extends Error {}
@@ -27,6 +28,7 @@ export interface RunsDeps {
   log: Logger;
   progress: Progress;
   budgets: Budgets;
+  queue: Queue;
 }
 
 type Verdict = "advance" | { flag: string; detail: string | null };
@@ -70,18 +72,18 @@ export class Runs {
     this.deps = deps;
   }
 
-  /** The tick's work: start a Session for every Ticket whose current Stage runs headlessly and has none running. */
+  /** The tick's work: start the oldest runnable Tickets while slots are free (spec: Concurrency); the rest stay in line. */
   async startRunnable(): Promise<TickChange[]> {
     const changes: TickChange[] = [];
-    for (const ticket of this.deps.tickets.list()) {
-      const resolved = this.deps.progress.runnable(ticket);
-      if (resolved === null) continue;
-      if ("problem" in resolved) {
-        await this.deps.progress.flag(ticket.id, "pipeline.missing", resolved.problem);
-        changes.push({ ticket: ticket.id, summary: `Flagged: ${resolved.problem}` });
-        continue;
-      }
-      const { pipeline, stage } = resolved;
+    const { ready, problems } = this.deps.queue.runnable();
+    for (const { ticket, problem } of problems) {
+      await this.deps.progress.flag(ticket.id, "pipeline.missing", problem);
+      changes.push({ ticket: ticket.id, summary: `Flagged: ${problem}` });
+    }
+    // Free slots are counted afresh before each start: a launch awaits the tracker when it
+    // Flags, and a human Retry or Resume may take a slot meanwhile.
+    for (const { ticket, pipeline, stage } of ready) {
+      if (this.deps.queue.freeSlots() <= 0) break;
       changes.push({ ticket: ticket.id, summary: await this.launch(ticket, pipeline, stage, "auto") });
     }
     return changes;
@@ -119,6 +121,7 @@ export class Runs {
     const { home, sessions, log, budgets } = this.deps;
     const running = sessions.running(ticket.id).find((r) => r.mode === "headless");
     if (running) throw new RunError(`${running.stage} is already running on Ticket ${ticket.reference ?? ticket.id}`);
+    this.deps.tickets.setRunnableSince(ticket.id, null);
     const adapter = adapterFor(stage.runner);
     const sessionId = randomUUID();
     const sessionsDir = path.join(home.ticketsDir, ticket.id, "sessions");
@@ -317,8 +320,15 @@ export class Runs {
     if (next && !("problem" in next)) {
       const refusal = budgets.refusal(ticket, next.pipeline, next.stage);
       if (!refusal) {
-        log.info("session.retry", { ticket: ticket.id, stage: next.stage.name, after: row.id, outcome: row.outcome });
-        await this.launch(ticket, next.pipeline, next.stage, "auto");
+        // The ended Session has given its slot back, so the retry normally takes it at once;
+        // when the cap has been lowered meanwhile the Ticket joins the line instead.
+        if (this.deps.queue.freeSlots() > 0) {
+          log.info("session.retry", { ticket: ticket.id, stage: next.stage.name, after: row.id, outcome: row.outcome });
+          await this.launch(ticket, next.pipeline, next.stage, "auto");
+        } else {
+          log.info("session.retry_queued", { ticket: ticket.id, stage: next.stage.name, after: row.id, outcome: row.outcome });
+          tickets.setRunnableSince(ticket.id, new Date().toISOString());
+        }
         return;
       }
       // The Budget is what stops the retry, so the Flag carries its reason and the Outcome as detail;

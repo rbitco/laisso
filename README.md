@@ -37,6 +37,14 @@ Flags the Ticket when they run out or the spend is used up. A Flagged
 Ticket offers six exits in the dashboard and the API: Retry, Resume,
 Extend, Mark done, Skip and Abandon.
 
+`concurrency:` in `config.yaml` caps how many headless Sessions run at
+once across all Tickets (default 3). Terminal Sessions never hold a
+slot. Tickets past the cap queue in the order they became runnable and
+show their position in the Ledger; each tick starts the oldest in line
+as slots free up. A change to the cap applies on the next tick without
+a restart. Retry and Resume, being explicit human acts, start
+regardless of the cap.
+
 ## Test
 
 ```sh

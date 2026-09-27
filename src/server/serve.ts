@@ -15,6 +15,7 @@ import { Mirror } from "../tracker/mirror.ts";
 import { Actions } from "../session/actions.ts";
 import { Exits } from "../session/exits.ts";
 import { Budgets } from "../budget/budgets.ts";
+import { Queue } from "../session/queue.ts";
 import { loadPipeline } from "../pipeline/load.ts";
 import { Tick } from "./tick.ts";
 import { createApp } from "../api/app.ts";
@@ -62,12 +63,13 @@ export async function serve(opts: ServeOptions): Promise<number> {
   const progress = new Progress({ home, tickets, sessions, log, notifier, mirror });
   const terminal = new Terminal({ home, sessions, log });
   const budgets = new Budgets({ config, sessions });
-  const runs = new Runs({ config, home, tickets, sessions, log, progress, budgets });
+  const queue = new Queue({ home, tickets, sessions, progress, log, cap: config.concurrency });
+  const runs = new Runs({ config, home, tickets, sessions, log, progress, budgets, queue });
   const actions = new Actions({ config, tickets, sessions, log, progress });
   // One tick: owed mirror pushes, then action Stages, then headless starts (an action that just advanced may start its successor now).
   const tick = new Tick(config.tick, log, async () => [...(await mirror.retryPending()), ...(await actions.runDue()), ...(await runs.startRunnable())]);
   const exits = new Exits({ tickets, sessions, log, progress, runs, terminal, budgets, tick });
-  const app = createApp({ config, home, tick, tickets, sessions, runs, progress, terminal, exits, budgets, version: VERSION });
+  const app = createApp({ config, home, tick, tickets, sessions, runs, progress, terminal, exits, budgets, queue, version: VERSION });
 
   if (defaults.wroteConfig) log.info("config.written", { file: home.configFile });
   if (defaults.wrotePipeline) log.info("pipeline.written", { name: "default" });

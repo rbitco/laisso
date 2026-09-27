@@ -53,6 +53,8 @@ export interface TicketView {
   flag: { at: string; reason: string; detail: string | null } | null;
   pr: string | null;
   display: { state: DisplayState; label: string; why: string };
+  /** Place in the line for a headless slot when Queued, else null. */
+  queue: number | null;
   triggers: Trigger[];
   /** The four gauges as they stand, and the Ticket layer behind them. */
   budget: BudgetView;
@@ -110,6 +112,8 @@ export interface ViewContext {
   /** A Ticket's Sessions, newest first. */
   sessionsFor(ticket: TicketRow): SessionRow[];
   budgetFor(ticket: TicketRow, pipeline: Pipeline | null, stage: Stage | null, rows: SessionRow[]): BudgetView;
+  /** The Ticket's place in the line for a headless slot, 1 first, or null when it is not in line. */
+  queuePosition(ticket: TicketRow): number | null;
 }
 
 /** The order the Ledger shows display states in: attention first. */
@@ -125,7 +129,8 @@ export function ticketView(ticket: TicketRow, ctx: ViewContext): TicketView {
   const stage = index >= 0 ? pipeline!.stages[index]! : null;
   const human = stage?.kind === "runner" && stage.human;
   const rows = ctx.sessionsFor(ticket);
-  const display = displayState(ticket, stage, rows[0] ?? null);
+  const queue = ctx.queuePosition(ticket);
+  const display = displayState(ticket, stage, rows[0] ?? null, queue);
   const triggers = ticketTriggers(ticket, stage, rows);
   return {
     id: ticket.id,
@@ -150,6 +155,7 @@ export function ticketView(ticket: TicketRow, ctx: ViewContext): TicketView {
     flag: ticket.flagged_at ? { at: ticket.flagged_at, reason: ticket.flag_reason ?? "", detail: ticket.flag_detail } : null,
     pr: ticket.pr,
     display: { ...display, label: DISPLAY_LABEL[display.state] },
+    queue,
     triggers,
     budget: ctx.budgetFor(ticket, pipeline, stage, rows),
     mirrorPending: ticket.mirror_pending !== null,
@@ -199,7 +205,7 @@ export function sessionView(row: SessionRow, now: number = Date.now()): SessionV
   };
 }
 
-function displayState(ticket: TicketRow, stage: Stage | null, latest: SessionRow | null): { state: DisplayState; why: string } {
+function displayState(ticket: TicketRow, stage: Stage | null, latest: SessionRow | null, queue: number | null): { state: DisplayState; why: string } {
   const human = stage?.kind === "runner" && stage.human;
   const name = stage ? stageLabel(stage) : ticket.stage;
   if (ticket.state === "done") return { state: "done", why: "done" };
@@ -211,6 +217,7 @@ function displayState(ticket: TicketRow, stage: Stage | null, latest: SessionRow
     const opened = latest && latest.ended_at === null && latest.mode === "terminal" && latest.stage === ticket.stage ? latest.opened_at : null;
     return { state: "needs_you", why: opened ? `terminal opened ${clockTime(opened)}` : "not started" };
   }
+  if (queue !== null) return { state: "queued", why: `${queue} in line; ${name} starts when a slot frees` };
   return { state: "ready", why: `${name} starts on the next tick` };
 }
 
@@ -258,6 +265,9 @@ function clockTime(iso: string): string {
 export function sortForLedger(views: TicketView[]): TicketView[] {
   return [...views].sort((a, b) => {
     const order = LEDGER_ORDER.indexOf(a.display.state) - LEDGER_ORDER.indexOf(b.display.state);
-    return order !== 0 ? order : b.updatedAt.localeCompare(a.updatedAt);
+    if (order !== 0) return order;
+    // Queued rows by their place in line; every other group most recent activity first.
+    if (a.queue !== null && b.queue !== null) return a.queue - b.queue;
+    return b.updatedAt.localeCompare(a.updatedAt);
   });
 }

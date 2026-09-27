@@ -95,6 +95,9 @@ export function loadConfig(home: LassoHome, overrides: { port?: number } = {}): 
   } catch (error) {
     throw new ConfigError(`${home.configFile}: budget.wallTime ${error instanceof Error ? error.message : String(error)}`);
   }
+  if (!Number.isInteger(config.concurrency) || config.concurrency < 1) {
+    throw new ConfigError(`${home.configFile}: concurrency must be a whole number of 1 or more, not ${String(raw.concurrency)}`);
+  }
   return config;
 }
 
