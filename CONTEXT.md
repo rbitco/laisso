@@ -13,8 +13,8 @@ prompt has none until Grill publishes a spec.
 _Avoid_: issue, work item, task, card
 
 **Intake**:
-The act of turning a tracker reference, a prompt, or a Runner session named
-"Lasso: intake" into a Ticket bound to a repo and a Pipeline.
+The act of turning a tracker reference or a prompt into a Ticket bound to a
+repo, a Pipeline, and a branch in its own worktree.
 _Avoid_: import, add, create ticket, onboard
 
 **Stage**:
