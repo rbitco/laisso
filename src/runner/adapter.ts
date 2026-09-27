@@ -1,4 +1,5 @@
 import type { RunnerName } from "../pipeline/load.ts";
+import { renderFeedback, type FeedbackItem } from "../review/feedback.ts";
 
 export type OutcomeStatus = "succeeded" | "failed" | "exhausted" | "interrupted";
 
@@ -35,6 +36,15 @@ export interface RunRequest {
   name?: string;
   limits: RunLimits;
   runnerOptions: Record<string, unknown>;
+  /** A Round of a repeating Stage: the Feedback snapshot it addresses and the marker its comments carry. */
+  feedback?: RoundContext;
+}
+
+export interface RoundContext {
+  round: number;
+  pr: { number: number; url: string };
+  items: FeedbackItem[];
+  marker: string;
 }
 
 export interface Command {
@@ -116,7 +126,8 @@ export function renderPrompt(request: RunRequest, skill: (name: string) => strin
   ];
   // Skill invocations lead so the Runner sees them where it expects a command (spec: adapters prepend them).
   const skills = request.skills.map(skill);
-  const body = [skills.join("\n"), preamble.join("\n"), request.prompt?.trim() ?? ""].filter(Boolean);
+  const feedback = request.feedback ? renderFeedback(request.feedback.items, request.feedback.pr, request.feedback.round, request.feedback.marker) : "";
+  const body = [skills.join("\n"), preamble.join("\n"), request.prompt?.trim() ?? "", feedback].filter(Boolean);
   return body.join("\n\n");
 }
 
@@ -129,6 +140,7 @@ export function ticketEnv(request: RunRequest): Record<string, string> {
     LASSO_BRANCH: context.branch,
     LASSO_STAGE: request.stage,
     LASSO_SESSION: request.sessionId,
+    ...(request.feedback ? { LASSO_ROUND: String(request.feedback.round), LASSO_MARKER: request.feedback.marker } : {}),
   };
 }
 

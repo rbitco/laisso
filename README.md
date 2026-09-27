@@ -13,6 +13,7 @@ Node 24 or later (the code runs as TypeScript directly; nothing is compiled).
 pnpm install
 pnpm start            # starts lasso on http://localhost:7433
 pnpm start -- status  # the ledger, as a client of the running process
+pnpm start -- check   # run a tick now and print what changed
 ```
 
 Everything Lasso owns lives under `~/.lasso` (`LASSO_HOME` overrides it):
@@ -44,6 +45,21 @@ show their position in the Ledger; each tick starts the oldest in line
 as slots free up. A change to the cap applies on the next tick without
 a restart. Retry and Resume, being explicit human acts, start
 regardless of the cap.
+
+A Stage with `repeat: feedback` is the Review loop. Each tick Lasso
+polls the Ticket's PR through `gh` (comments, review threads, check
+runs on the head commit, the review decision) with ETags, so an
+unchanged PR costs nothing against the rate limit. New Feedback opens a
+Round: a Session whose prompt carries the snapshot of what to address
+and a marker (`<!-- lasso:<ticket>:<stage>:round-<n> -->`) the Runner
+ends each of its PR comments with, so its own replies are never taken
+for Feedback. When the Round ends Lasso records how each item was
+addressed (a resolved thread, a marked reply, a new push) and Flags
+`review.unaddressed` for what still stands, `review.check_repeat` when
+the same check fails two Rounds running, and `review.pr_closed` when
+the PR closes unmerged. A merged PR finishes the Stage; green checks
+with nothing outstanding show as quiet. `lasso check` and the header's
+Check now run a tick and report what changed.
 
 Pipelines and `config.yaml` can be edited from the dashboard (the
 Pipelines and Config links in the header) or through `/api/pipelines`

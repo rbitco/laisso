@@ -164,24 +164,7 @@ describe("spend and Rounds", () => {
     expect(done.budget.spend.used).toBeCloseTo(0.587317, 5);
   });
 
-  it("opens a Round on a repeating Stage only within the Pipeline's ceiling; retries re-run the Round and count as attempts", async () => {
-    const pipeline = PIPELINE.replace("artifact: commits-on-branch", "artifact: commits-on-branch\n    repeat: feedback\n    budget: { rounds: 0 }");
-    const { lasso, ticket } = await lassoWithTicket({}, pipeline);
-    expect(ticket.budget.rounds).toEqual({ used: 0, limit: 0, source: "pipeline" });
-    const tick = await checkNow(lasso);
-    expect(tick.changes).toEqual([{ ticket: ticket.id, summary: "Flagged: implement: 0 of 0 Rounds used" }]);
-    expect((await detailOf(lasso, ticket.id)).flag).toMatchObject({ reason: "budget.rounds", detail: "implement: 0 of 0 Rounds used" });
-    await expect(pull(lasso, ticket.id, "retry")).rejects.toThrow("implement: 0 of 0 Rounds used; Extend the Budget first");
-
-    // One Round allowed: the first attempt opens it, the retry re-runs it, and attempts are what run out.
-    const extended = await pull(lasso, ticket.id, "extend", { rounds: 1 });
-    expect(extended.flag).toBeNull();
-    expect(extended.budget.rounds).toEqual({ used: 1, limit: 1, source: "ticket" });
-    const d = await flagged(lasso, ticket.id);
-    expect(d.flag).toMatchObject({ reason: "budget.attempts", detail: "implement: 2 of 2 attempts used" });
-    expect(d.budget.rounds).toEqual({ used: 1, limit: 1, source: "ticket" });
-    expect(d.sessions).toHaveLength(2);
-  });
+  // Rounds against the Budget are exercised in review.test.ts, where a repeating Stage has Feedback to open one.
 
   it("does not count a Session cut off by shutdown as an attempt", async () => {
     const { lasso, ticket } = await lassoWithTicket({ budget: { attempts: 1 } });

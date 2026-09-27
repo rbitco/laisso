@@ -88,6 +88,10 @@
   .session .head { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
   .session .head strong { color: var(--term-bright); }
   .session .meta { color: var(--term-dim); }
+  .session .feedback { display: grid; gap: 4px; margin: 8px 0; font-size: 13px; }
+  .session .feedback h4 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--term-dim); }
+  .session .feedback .row { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+  .session .feedback .kind { color: var(--term-dim); font-variant-numeric: tabular-nums; }
   .session .pill { background: var(--term-pill); color: var(--term-bright); }
   .session .pill.succeeded { background: var(--ok); color: #fff; }
   .session .pill.failed, .session .pill.exhausted, .session .pill.interrupted { background: var(--warn); color: #fff; }
@@ -317,12 +321,28 @@
   // Each showDetail is a generation; a pane whose generation has passed stops polling and never re-renders.
   let detailGen = 0;
 
+  const sessionLabel = (s) => s.stage + ' #' + s.ordinal + (s.round ? ' · Round ' + s.round : '');
+
+  /** The Feedback a Round addressed: one line per item, with the evidence it was addressed or "open". */
+  function feedbackList(items) {
+    if (!items || !items.length) return el('span');
+    return el('div', { class: 'feedback', 'data-role': 'feedback' }, [
+      el('h4', { text: 'Feedback' }),
+      ...items.map((f) => el('div', { class: 'row' }, [
+        el('span', { class: 'pill ' + (f.addressed ? 'succeeded' : 'flagged'), text: f.addressed ? 'addressed' : 'open' }),
+        el('span', { class: 'kind', text: f.kind }),
+        f.url ? el('a', { href: f.url, target: '_blank', rel: 'noopener', text: f.summary }) : el('span', { text: f.summary }),
+        el('span', { class: 'meta', text: f.addressed || '' }),
+      ])),
+    ]);
+  }
+
   function sessionPane(t, s, gen) {
     const pane = el('section', { class: 'session', 'data-role': 'session' });
     const outcome = s.running ? 'running' : (s.outcome || 'unknown');
     const head = el('div', { class: 'head' }, [
       el('span', { class: 'pill ' + outcome, text: outcome + (s.endedReason ? ' · ' + s.endedReason : '') }),
-      el('strong', { text: s.stage + ' #' + s.ordinal }),
+      el('strong', { text: sessionLabel(s) }),
       el('span', { class: 'meta', text: s.mode + ' · ' + s.startedBy }),
       el('span', { class: 'meta', 'data-role': 'duration', text: duration(s.durationMs) }),
       el('span', { class: 'meta', text: s.costUsd === null ? '' : '$' + s.costUsd.toFixed(2) }),
@@ -365,7 +385,7 @@
       s.runnerSessionId ? copyChip('runner session', s.runnerSessionId) : el('span'),
       s.transcriptPath ? copyChip('transcript', s.transcriptPath) : el('span'),
     ]);
-    pane.replaceChildren(head, out, final, paths);
+    pane.replaceChildren(head, feedbackList(s.feedback), out, final, paths);
 
     let offset = 0;
     let stale = false;
@@ -394,7 +414,7 @@
       el('h3', { text: 'Sessions' }),
       ...sessions.map((s) => el('div', { class: 'row' }, [
         el('span', { class: 'pill ' + (s.running ? 'running' : s.outcome || ''), text: s.running ? 'running' : (s.outcome || '?') }),
-        el('span', { text: s.stage + ' #' + s.ordinal }),
+        el('span', { text: sessionLabel(s) }),
         el('span', { class: 'meta', text: s.mode + ' · ' + s.startedBy + (s.endedReason ? ' · ' + s.endedReason : '') }),
         el('span', { class: 'meta', text: duration(s.durationMs) + (s.costUsd === null ? '' : ' · $' + s.costUsd.toFixed(2)) }),
         el('span', { class: 'meta', text: relative(s.startedAt) }),
@@ -747,7 +767,11 @@
   });
 
   $('[data-role="check-now"]').addEventListener('click', async () => {
-    try { await api('/api/check-now', { method: 'POST' }); await refreshTick(); route(); }
+    try {
+      const tick = await api('/api/check-now', { method: 'POST' });
+      showNotice(tick.changes.length ? tick.changes.map((c) => c.summary).join('; ') : 'nothing new');
+      await refreshTick(); route();
+    }
     catch (e) { showNotice(e.message); }
   });
 

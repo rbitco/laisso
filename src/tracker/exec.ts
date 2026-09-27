@@ -22,9 +22,9 @@ export function parseJson<T>(tool: string, reference: string, stdout: string, on
 }
 
 /** Run a tracker CLI (gh, acli) and report what it said; never throws on a non-zero exit. */
-export function runTool(command: string, args: string[]): Promise<ToolResult> {
+export function runTool(command: string, args: string[], opts: { cwd?: string } = {}): Promise<ToolResult> {
   return new Promise((resolve) => {
-    execFile(command, args, { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) => {
+    execFile(command, args, { encoding: "utf8", maxBuffer: 16 * 1024 * 1024, cwd: opts.cwd }, (error, stdout, stderr) => {
       const e = error as (Error & { code?: unknown }) | null;
       const code = e ? (typeof e.code === "number" ? e.code : 1) : 0;
       resolve({ code, stdout: stdout ?? "", stderr: (stderr ?? "") + (e && typeof e.code !== "number" ? e.message : "") });

@@ -65,19 +65,23 @@ function pick<T>(ticket: T | null, pipeline: T | undefined, global: T): Resolved
   return { value: global, source: "global" };
 }
 
-/** The Sessions that count as attempts at a Stage: a run cut off by shutdown is not one (spec: Budget). */
-export function attemptsOf(rows: SessionRow[], stage: string): SessionRow[] {
+/** The Sessions that count as tries at a Stage: a run cut off by shutdown is not one (spec: Budget). */
+function triesOf(rows: SessionRow[], stage: string): SessionRow[] {
   return rows.filter((r) => r.stage === stage && r.mode !== "action" && r.ended_reason !== "shutdown");
 }
 
-/**
- * Rounds of a repeating Stage. A retry re-runs the same Round (spec: Budget),
- * so the first attempt opens Round 1 and nothing here opens another: Rounds
- * driven by Feedback arrive with the feedback poller (LASSO-37), which will
- * mark the Session that opens each.
- */
+/** The attempts at a Stage; in a repeating Stage, those of its latest Round, since each Round starts its attempts afresh. */
+export function attemptsOf(rows: SessionRow[], stage: string): SessionRow[] {
+  const tries = triesOf(rows, stage);
+  const rounds = tries.map((r) => r.round).filter((n): n is number => n !== null);
+  if (rounds.length === 0) return tries;
+  const latest = Math.max(...rounds);
+  return tries.filter((r) => r.round === latest);
+}
+
+/** Rounds of a repeating Stage that were opened: a retry re-runs the same Round, so it counts once (spec: Budget). */
 export function roundsOf(rows: SessionRow[], stage: string): number {
-  return attemptsOf(rows, stage).length > 0 ? 1 : 0;
+  return new Set(triesOf(rows, stage).map((r) => r.round).filter((n): n is number => n !== null)).size;
 }
 
 export function spendOf(rows: SessionRow[]): number {
@@ -98,13 +102,16 @@ export function usageOf(rows: SessionRow[], pipeline: Pipeline | null, stage: St
 
 /**
  * Why the next Session of the Stage may not start, or null. Spend first; then
- * the Round it would open on a repeating Stage; then attempts, which every
- * Runner Stage has. Wall time is enforced on the running Session instead.
+ * the Round it would open on a repeating Stage, whose attempts start afresh;
+ * else attempts, which every Runner Stage has. Wall time is enforced on the
+ * running Session instead.
  */
-export function refusalOf(budget: Budget, usage: Usage, stage: Stage): Refusal | null {
+export function refusalOf(budget: Budget, usage: Usage, stage: Stage, opensRound = false): Refusal | null {
   if (usage.spend >= budget.spend.value) return { reason: "budget.cost", detail: `spend $${usage.spend.toFixed(2)} of $${budget.spend.value} used` };
-  const opensRound = stage.kind === "runner" && stage.repeat && usage.attempts === 0;
-  if (opensRound && usage.rounds >= budget.rounds.value) return { reason: "budget.rounds", detail: `${stage.name}: ${usage.rounds} of ${budget.rounds.value} Rounds used` };
+  if (opensRound) {
+    if (usage.rounds >= budget.rounds.value) return { reason: "budget.rounds", detail: `${stage.name}: ${usage.rounds} of ${budget.rounds.value} Rounds used` };
+    return null;
+  }
   if (usage.attempts >= budget.attempts.value) return { reason: "budget.attempts", detail: `${stage.name}: ${usage.attempts} of ${budget.attempts.value} attempts used` };
   return null;
 }

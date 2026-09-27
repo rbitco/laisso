@@ -5,7 +5,7 @@ import type { Sessions, EndedReason } from "../store/sessions.ts";
 import type { Notifier } from "../notify/notifier.ts";
 import { loadPipeline, type ActionStage, type Pipeline, type RunnerStage, type Stage } from "../pipeline/load.ts";
 import type { Mirror } from "../tracker/mirror.ts";
-import { checkArtifact } from "../artifact/check.ts";
+import { checkArtifact, type PrProbe } from "../artifact/check.ts";
 
 /** A Trigger that cannot pull right now, with the reason for the human. */
 export class TriggerError extends Error {}
@@ -34,6 +34,8 @@ export interface ProgressDeps {
   log: Logger;
   notifier: Notifier;
   mirror: Mirror;
+  /** The Ticket's PR for the pr-* artifacts; wired once the Review loop exists. */
+  prProbe: (ticket: TicketRow) => PrProbe;
 }
 
 /**
@@ -61,13 +63,23 @@ export class Progress {
     return { pipeline, stage: pipeline.stages[index]!, index };
   }
 
-  /** The headless Stage the tick should start for this Ticket, null when there is nothing to start, or the problem. */
+  /**
+   * The headless Stage the tick should start for this Ticket, null when there is nothing to start, or the problem.
+   * A repeating Stage runs only as a Round: one due from the poller, or the latest one again after a retryable end.
+   */
   runnable(ticket: TicketRow): { pipeline: Pipeline; stage: RunnerStage } | { problem: string } | null {
     if (!this.idle(ticket)) return null;
     const current = this.current(ticket);
     if ("problem" in current) return current;
     if (current.stage.kind !== "runner" || current.stage.human) return null;
+    if (current.stage.repeat && !ticket.feedback_due && !this.roundToRerun(ticket, current.stage)) return null;
     return { pipeline: current.pipeline, stage: current.stage };
+  }
+
+  /** The latest Round's Session ended interrupted or exhausted on its own: the Round is run again (spec: Budget). */
+  private roundToRerun(ticket: TicketRow, stage: RunnerStage): boolean {
+    const last = this.deps.sessions.latestRound(ticket.id, stage.name);
+    return last !== null && last.ended_by === "outcome" && last.ended_reason !== "shutdown" && (last.outcome === "interrupted" || last.outcome === "exhausted");
   }
 
   /** The action Stage the tick should perform for this Ticket now, or null. */
@@ -181,7 +193,7 @@ export class Progress {
   async markDone(ticket: TicketRow, override: boolean): Promise<TicketRow> {
     const { stage } = this.exitStage(ticket);
     if (!override && stage.kind === "runner" && stage.artifact) {
-      const verdict = await checkArtifact(stage.artifact, ticket.worktree);
+      const verdict = await checkArtifact(stage.artifact, ticket.worktree, this.deps.prProbe(ticket));
       if (!verdict.present) throw new ArtifactWarning(stage.artifact, verdict.detail ?? "missing");
     }
     // The check awaited; the Ticket is re-read so a Trigger that landed meanwhile is not applied twice.

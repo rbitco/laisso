@@ -8,8 +8,10 @@ export interface SessionRow {
   id: string;
   ticket: string;
   stage: string;
-  /** This Session's number within its Stage for its Ticket; the Round number in a repeating Stage. */
+  /** This Session's number within its Stage for its Ticket. */
   ordinal: number;
+  /** The Round this Session worked, in a repeating Stage; a retry re-runs the same Round, so several Sessions share one. */
+  round: number | null;
   stage_snapshot: string;
   mode: SessionMode;
   started_by: "auto" | "human";
@@ -31,7 +33,7 @@ export interface SessionRow {
   runner_session_id: string | null;
 }
 
-export type NewSession = Pick<SessionRow, "id" | "ticket" | "stage" | "stage_snapshot" | "mode" | "started_by" | "stdout_path" | "limits_honoured"> & Partial<Pick<SessionRow, "transcript_path">>;
+export type NewSession = Pick<SessionRow, "id" | "ticket" | "stage" | "stage_snapshot" | "mode" | "started_by" | "stdout_path" | "limits_honoured"> & Partial<Pick<SessionRow, "transcript_path" | "round">>;
 
 export type SessionEnd = Pick<SessionRow, "ended_by" | "ended_reason" | "outcome" | "final_message" | "usage" | "cost_usd" | "transcript_path"> & Partial<Pick<SessionRow, "runner_session_id">>;
 
@@ -47,10 +49,10 @@ export class Sessions {
     const ordinal = this.count(session.ticket, session.stage) + 1;
     this.db
       .prepare(
-        `INSERT INTO sessions (id, ticket, stage, ordinal, stage_snapshot, mode, started_by, started_at, stdout_path, limits_honoured, transcript_path)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO sessions (id, ticket, stage, ordinal, stage_snapshot, mode, started_by, started_at, stdout_path, limits_honoured, transcript_path, round)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(session.id, session.ticket, session.stage, ordinal, session.stage_snapshot, session.mode, session.started_by, now, session.stdout_path, session.limits_honoured, session.transcript_path ?? null);
+      .run(session.id, session.ticket, session.stage, ordinal, session.stage_snapshot, session.mode, session.started_by, now, session.stdout_path, session.limits_honoured, session.transcript_path ?? null, session.round ?? null);
     return this.get(session.id)!;
   }
 
@@ -97,6 +99,17 @@ export class Sessions {
       )
       .run(now, end.ended_by, end.ended_reason, end.outcome, end.final_message, end.usage, end.cost_usd, end.transcript_path, end.runner_session_id ?? null, id);
     return this.get(id)!;
+  }
+
+  /** The newest headless Session of the Stage that worked a Round, or null before the first. */
+  latestRound(ticket: string, stage: string): SessionRow | null {
+    return (this.db.prepare(`SELECT * FROM sessions WHERE ticket = ? AND stage = ? AND mode = 'headless' AND round IS NOT NULL ORDER BY started_at DESC, ordinal DESC LIMIT 1`).get(ticket, stage) as SessionRow | undefined) ?? null;
+  }
+
+  /** The highest Round any Session of the Stage worked, or 0 before the first. */
+  lastRound(ticket: string, stage: string): number {
+    const row = this.db.prepare(`SELECT MAX(round) AS n FROM sessions WHERE ticket = ? AND stage = ?`).get(ticket, stage) as { n: number | null };
+    return row.n ?? 0;
   }
 
   private count(ticket: string, stage: string): number {

@@ -5,6 +5,8 @@ import type { PipelineSource } from "../pipeline/files.ts";
 import type { Config } from "../server/config.ts";
 import type { BudgetView } from "../budget/budget.ts";
 import { adapterFor } from "../runner/adapters.ts";
+import type { FeedbackRow } from "../store/feedback.ts";
+import { quietWhy } from "../review/review.ts";
 
 export type DisplayState = "flagged" | "needs_you" | "holding" | "ready" | "running" | "queued" | "quiet" | "done" | "abandoned";
 
@@ -67,11 +69,26 @@ export interface TicketView {
   url: string;
 }
 
+/** One Feedback item a Round was told about, and how it was addressed once the Round ended. */
+export interface FeedbackView {
+  kind: FeedbackRow["kind"];
+  id: string;
+  summary: string;
+  url: string | null;
+  path: string | null;
+  line: number | null;
+  addressed: string | null;
+}
+
 export interface SessionView {
   id: string;
   ticket: string;
   stage: string;
   ordinal: number;
+  /** The Round this Session worked, in a repeating Stage. */
+  round: number | null;
+  /** The Round's Feedback snapshot; empty outside a repeating Stage. */
+  feedback: FeedbackView[];
   mode: SessionRow["mode"];
   startedBy: SessionRow["started_by"];
   startedAt: string;
@@ -113,6 +130,8 @@ export interface ViewContext {
   pipelineFor(ticket: TicketRow): Pipeline | null;
   /** A Ticket's Sessions, newest first. */
   sessionsFor(ticket: TicketRow): SessionRow[];
+  /** A Round's Feedback snapshot as recorded. */
+  feedbackFor(session: SessionRow): FeedbackRow[];
   budgetFor(ticket: TicketRow, pipeline: Pipeline | null, stage: Stage | null, rows: SessionRow[]): BudgetView;
   /** The Ticket's place in the line for a headless slot, 1 first, or null when it is not in line. */
   queuePosition(ticket: TicketRow): number | null;
@@ -188,7 +207,8 @@ export function ticketView(ticket: TicketRow, ctx: ViewContext): TicketView {
   const human = stage?.kind === "runner" && stage.human;
   const rows = ctx.sessionsFor(ticket);
   const queue = ctx.queuePosition(ticket);
-  const display = displayState(ticket, stage, rows[0] ?? null, queue);
+  const budget = ctx.budgetFor(ticket, pipeline, stage, rows);
+  const display = displayState(ticket, stage, rows[0] ?? null, queue, budget.rounds.limit);
   const triggers = ticketTriggers(ticket, stage, rows);
   return {
     id: ticket.id,
@@ -215,7 +235,7 @@ export function ticketView(ticket: TicketRow, ctx: ViewContext): TicketView {
     display: { ...display, label: DISPLAY_LABEL[display.state] },
     queue,
     triggers,
-    budget: ctx.budgetFor(ticket, pipeline, stage, rows),
+    budget,
     mirrorPending: ticket.mirror_pending !== null,
     createdAt: ticket.created_at,
     updatedAt: ticket.updated_at,
@@ -231,11 +251,11 @@ export function ticketDetail(ticket: TicketRow, ctx: ViewContext): TicketDetail 
     label: stageLabel(s),
     human: s.kind === "runner" && s.human,
   }));
-  const sessions = ctx.sessionsFor(ticket).map(sessionView);
+  const sessions = ctx.sessionsFor(ticket).map((row) => sessionView(row, Date.now(), ctx.feedbackFor(row)));
   return { ...ticketView(ticket, ctx), stages, session: sessions[0] ?? null, sessions };
 }
 
-export function sessionView(row: SessionRow, now: number = Date.now()): SessionView {
+export function sessionView(row: SessionRow, now: number = Date.now(), feedback: FeedbackRow[] = []): SessionView {
   const started = new Date(row.started_at).getTime();
   const ended = row.ended_at ? new Date(row.ended_at).getTime() : now;
   return {
@@ -243,6 +263,8 @@ export function sessionView(row: SessionRow, now: number = Date.now()): SessionV
     ticket: row.ticket,
     stage: row.stage,
     ordinal: row.ordinal,
+    round: row.round,
+    feedback: feedback.map((f) => ({ kind: f.kind, id: f.source_id, summary: f.summary, url: f.url, path: f.path, line: f.line, addressed: f.addressed })),
     mode: row.mode,
     startedBy: row.started_by,
     startedAt: row.started_at,
@@ -263,19 +285,21 @@ export function sessionView(row: SessionRow, now: number = Date.now()): SessionV
   };
 }
 
-function displayState(ticket: TicketRow, stage: Stage | null, latest: SessionRow | null, queue: number | null): { state: DisplayState; why: string } {
+function displayState(ticket: TicketRow, stage: Stage | null, latest: SessionRow | null, queue: number | null, rounds: number): { state: DisplayState; why: string } {
   const human = stage?.kind === "runner" && stage.human;
   const name = stage ? stageLabel(stage) : ticket.stage;
   if (ticket.state === "done") return { state: "done", why: "done" };
   if (ticket.state === "abandoned") return { state: "abandoned", why: "abandoned" };
   if (ticket.flagged_at) return { state: "flagged", why: ticket.flag_reason ?? "flagged" };
-  if (headlessRunning(latest)) return { state: "running", why: `${latest.stage}, run ${latest.ordinal}` };
+  if (headlessRunning(latest)) return { state: "running", why: latest.round !== null ? `${latest.stage}, Round ${latest.round} of ${rounds}` : `${latest.stage}, run ${latest.ordinal}` };
   if (ticket.holding_since) return { state: "holding", why: `Start ${name} when ready` };
   if (human) {
     const opened = latest && latest.ended_at === null && latest.mode === "terminal" && latest.stage === ticket.stage ? latest.opened_at : null;
     return { state: "needs_you", why: opened ? `terminal opened ${clockTime(opened)}` : "not started" };
   }
   if (queue !== null) return { state: "queued", why: `${queue} in line; ${name} starts when a slot frees` };
+  // A repeating Stage with no Round due waits on its PR: quiet (spec: Review loop).
+  if (stage?.kind === "runner" && stage.repeat && !ticket.feedback_due) return { state: "quiet", why: quietWhy(ticket, name) };
   return { state: "ready", why: `${name} starts on the next tick` };
 }
 

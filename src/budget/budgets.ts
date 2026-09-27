@@ -23,9 +23,10 @@ export class Budgets {
     return usageOf(rows, pipeline, stage);
   }
 
-  /** Null when the next Session of the Stage may start. */
+  /** Null when the next Session of the Stage may start. A repeating Stage with a Round due would open one. */
   refusal(ticket: TicketRow, pipeline: Pipeline, stage: Stage): Refusal | null {
-    return refusalOf(this.resolve(ticket, pipeline, stage), this.usage(ticket, pipeline, stage), stage);
+    const opensRound = stage.kind === "runner" && stage.repeat !== null && ticket.feedback_due !== null;
+    return refusalOf(this.resolve(ticket, pipeline, stage), this.usage(ticket, pipeline, stage), stage, opensRound);
   }
 
   view(ticket: TicketRow, pipeline: Pipeline | null, stage: Stage | null, rows?: SessionRow[]): BudgetView {

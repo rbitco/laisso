@@ -22,7 +22,12 @@ export interface TicketRow {
   pr: string | null;
   branch: string;
   worktree: string;
+  /** The newest PR activity a Round has seen; Feedback after it is new (spec: Review loop). */
   feedback_watermark: string | null;
+  /** The Feedback snapshot of a Round that is due to start, as JSON; null when nothing is outstanding. */
+  feedback_due: string | null;
+  /** What the last poll saw of the PR, as JSON, for the displayed state. */
+  pr_status: string | null;
   mirror_pending: string | null;
   /** The Ticket layer of the Budget: Extend sets these; null defers to the Pipeline and the global default. */
   budget_rounds: number | null;

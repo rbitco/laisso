@@ -4,6 +4,7 @@ import type { LassoHome } from "../server/home.ts";
 import type { Tick } from "../server/tick.ts";
 import type { Tickets, TicketRow } from "../store/tickets.ts";
 import type { Sessions } from "../store/sessions.ts";
+import type { Feedback } from "../store/feedback.ts";
 import type { Runs } from "../session/runs.ts";
 import { RunError } from "../session/runs.ts";
 import { ArtifactWarning, TriggerError, type Progress } from "../session/progress.ts";
@@ -25,6 +26,7 @@ export interface AppDeps {
   tick: Tick;
   tickets: Tickets;
   sessions: Sessions;
+  feedback: Feedback;
   runs: Runs;
   progress: Progress;
   terminal: Terminal;
@@ -49,6 +51,7 @@ export function createApp(deps: AppDeps): Hono {
       }
     },
     sessionsFor: (ticket: TicketRow) => deps.sessions.forTicket(ticket.id),
+    feedbackFor: (session) => deps.feedback.forSession(session.id),
     budgetFor: (ticket, pipeline, stage, rows) => deps.budgets.view(ticket, pipeline, stage, rows),
   };
   /** The view context for one request: queue positions are computed once for every Ticket it renders. */

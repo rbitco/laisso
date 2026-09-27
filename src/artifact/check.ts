@@ -9,13 +9,25 @@ export interface ArtifactVerdict {
   detail: string | null;
 }
 
+/** The Ticket's PR as the pr-* artifacts need it, read on demand; null when the branch has none. */
+export type PrProbe = () => Promise<{ number: number; state: "OPEN" | "CLOSED" | "MERGED"; reviewed: boolean } | null>;
+
+const NO_PR: PrProbe = async () => null;
+
 /**
  * Is the Stage's declared artifact there? Lasso decides done from this and
- * the Outcome, never from Stage-specific signals (ADR 0002). The tracker and
- * PR artifacts arrive with the slices that own those integrations.
+ * the Outcome, never from Stage-specific signals (ADR 0002). The tracker
+ * artifacts arrive with the slice that owns that integration.
  */
-export async function checkArtifact(artifact: string | null, worktree: string): Promise<ArtifactVerdict> {
+export async function checkArtifact(artifact: string | null, worktree: string, pr: PrProbe = NO_PR): Promise<ArtifactVerdict> {
   if (artifact === null) return { present: true, detail: null };
+  if (artifact === "pr-exists" || artifact === "pr-review" || artifact === "pr-merged") {
+    const found = await pr();
+    if (!found) return { present: false, detail: "no PR for the branch" };
+    if (artifact === "pr-exists") return { present: true, detail: null };
+    if (artifact === "pr-review") return found.reviewed ? { present: true, detail: null } : { present: false, detail: `nobody has reviewed PR #${found.number}` };
+    return found.state === "MERGED" ? { present: true, detail: null } : { present: false, detail: `PR #${found.number} is ${found.state.toLowerCase()}` };
+  }
   const file = fileArtifact(artifact);
   if (file !== null) {
     return existsSync(path.join(worktree, file)) ? { present: true, detail: null } : { present: false, detail: `${file} does not exist in the worktree` };

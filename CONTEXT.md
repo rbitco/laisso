@@ -100,4 +100,16 @@ _Avoid_: review, comment, issue, finding
 **Round**:
 One Session of a repeating Stage that addresses the Feedback outstanding
 when it started. Feedback arriving mid-Round waits for the next Round.
+A retried Round re-runs with the same Feedback and keeps its number.
 _Avoid_: iteration, pass, loop, cycle, revision
+
+**Marker**:
+The hidden line a Runner ends each PR comment with, naming the Ticket,
+Stage, and Round. It is how Lasso tells the Runner's replies from Feedback.
+_Avoid_: signature, tag, stamp
+
+**Quiet**:
+The displayed state of a Ticket on a repeating Stage with nothing to
+address: no PR yet, checks running, or checks green with nothing
+outstanding. Lasso keeps polling the PR; a human merges it.
+_Avoid_: idle, waiting, blocked

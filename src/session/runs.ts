@@ -17,6 +17,7 @@ import { parseDuration } from "../duration.ts";
 import type { Budgets } from "../budget/budgets.ts";
 import type { Queue } from "./queue.ts";
 import { spendOf } from "../budget/budget.ts";
+import type { Review, RoundPlan } from "../review/review.ts";
 
 export class RunError extends Error {}
 
@@ -29,9 +30,11 @@ export interface RunsDeps {
   progress: Progress;
   budgets: Budgets;
   queue: Queue;
+  review: Review;
 }
 
-type Verdict = "advance" | { flag: string; detail: string | null };
+/** Lasso's verdict on an ended Session: the Stage is done, waits for more Feedback (a Round), or Flags. */
+export type Verdict = "advance" | "wait" | { flag: string; detail: string | null };
 
 interface Live {
   child: ChildProcess;
@@ -96,14 +99,17 @@ export class Runs {
    * unflagged the Ticket leaves no gap in which the tick could start it too.
    */
   async launch(ticket: TicketRow, pipeline: Pipeline, stage: RunnerStage, startedBy: "auto" | "human", resumeFrom: SessionRow | null = null): Promise<string> {
+    // A repeating Stage runs only as a Round; with none due and none to re-run it waits for the PR.
+    const plan = stage.repeat ? this.deps.review.plan(ticket, stage) : null;
+    if (stage.repeat && !plan) return `${stage.name}: nothing to address; the PR is polled each tick`;
     const refusal = this.deps.budgets.refusal(ticket, pipeline, stage);
     if (refusal) {
       await this.deps.progress.flag(ticket.id, refusal.reason, refusal.detail);
       return `Flagged: ${refusal.detail}`;
     }
     try {
-      this.start(ticket, pipeline, stage, startedBy, resumeFrom);
-      return `started ${stage.name}`;
+      this.start(ticket, pipeline, stage, startedBy, resumeFrom, plan);
+      return plan ? `started ${stage.name} Round ${plan.round}` : `started ${stage.name}`;
     } catch (error) {
       // The Runner never started, so there is no Session to blame: runner.unavailable, not outcome.*.
       const detail = error instanceof Error ? error.message : String(error);
@@ -117,10 +123,12 @@ export class Runs {
    * earlier Session where the Runner allows (the Resume exit). Synchronous on
    * purpose: the row and the process both exist when it returns.
    */
-  start(ticket: TicketRow, pipeline: Pipeline, stage: RunnerStage, startedBy: "auto" | "human", resumeFrom: SessionRow | null = null): SessionRow {
-    const { home, sessions, log, budgets } = this.deps;
+  start(ticket: TicketRow, pipeline: Pipeline, stage: RunnerStage, startedBy: "auto" | "human", resumeFrom: SessionRow | null = null, plan: RoundPlan | null = null): SessionRow {
+    const { home, sessions, log, budgets, review } = this.deps;
     const running = sessions.running(ticket.id).find((r) => r.mode === "headless");
     if (running) throw new RunError(`${running.stage} is already running on Ticket ${ticket.reference ?? ticket.id}`);
+    if (stage.repeat && !plan) plan = review.plan(ticket, stage);
+    if (stage.repeat && !plan) throw new RunError(`${stage.name} has no Feedback to address`);
     this.deps.tickets.setRunnableSince(ticket.id, null);
     const adapter = adapterFor(stage.runner);
     const sessionId = randomUUID();
@@ -134,7 +142,8 @@ export class Runs {
     // The id re-entered is the earliest one in the chain, so a later Resume of this row finds it too.
     const resumed = resumeFrom ? (resumeFrom.runner_session_id ?? resumeFrom.id) : null;
     const resume = resumed ? { resume: true, runnerSessionId: resumed } : {};
-    const request: RunRequest = { ...requestFor(ticket, stage), mode: "headless", sessionId, ...resume, limits: { wallTimeMs, remainingSpendUsd } };
+    const feedback = plan ? { feedback: { round: plan.round, pr: plan.pr, items: plan.items, marker: plan.marker } } : {};
+    const request: RunRequest = { ...requestFor(ticket, stage), mode: "headless", sessionId, ...resume, limits: { wallTimeMs, remainingSpendUsd }, ...feedback };
     const command = adapter.command(request);
 
     // The stdout file is opened before the row exists, so a row never outlives a process that was never spawned.
@@ -148,7 +157,9 @@ export class Runs {
       started_by: startedBy,
       stdout_path: stdoutPath,
       limits_honoured: JSON.stringify(adapter.honours.filter((limit) => request.limits[limit] !== undefined)),
+      round: plan?.round ?? null,
     });
+    if (plan) review.opened(ticket, sessionId, plan);
     if (resumed && adapter.sessionIds === "lasso") sessions.setRunnerSession(sessionId, resumed);
 
     const child = spawn(command.argv[0]!, command.argv.slice(1), {
@@ -179,7 +190,7 @@ export class Runs {
     live.wallTimer = setTimeout(() => void this.kill(sessionId, "wall_time"), wallTimeMs);
     live.wallTimer.unref();
 
-    log.info("session.started", { session: sessionId, ticket: ticket.id, stage: stage.name, pid: child.pid, argv0: command.argv[0], resumed: resumeFrom?.id ?? null });
+    log.info("session.started", { session: sessionId, ticket: ticket.id, stage: stage.name, round: plan?.round ?? null, pid: child.pid, argv0: command.argv[0], resumed: resumeFrom?.id ?? null });
     return row;
   }
 
@@ -293,20 +304,29 @@ export class Runs {
     let verdict: Verdict | null;
     if (live.killReason === "shutdown" || this.closing) verdict = null;
     else if (live.spawnError) verdict = { flag: "runner.unavailable", detail: live.spawnError };
-    else verdict = await this.judge(live.stage, end, live.request.cwd);
+    else verdict = await this.judge(live, end);
     const row = this.deps.sessions.end(sessionId, end);
     this.deps.log.info("session.ended", { session: sessionId, ticket: row.ticket, stage: row.stage, outcome: row.outcome, reason: row.ended_reason, cost: row.cost_usd });
     if (verdict) await this.apply(row, verdict);
     live.resolve(row);
   }
 
-  /** Lasso's verdict from the Outcome and the artifact (ADR 0002): advance, or Flag with the reason. */
-  private async judge(stage: RunnerStage, end: SessionEnd, cwd: string): Promise<Verdict> {
+  /** Lasso's verdict from the Outcome and the artifact (ADR 0002): advance, or Flag with the reason; a Round asks the PR what it addressed. */
+  private async judge(live: Live, end: SessionEnd): Promise<Verdict> {
+    const { stage } = live;
     if (end.outcome !== "succeeded") {
       return { flag: end.ended_reason === "wall_time" ? "budget.wall_time" : `outcome.${end.outcome}`, detail: end.final_message };
     }
-    const artifact = await checkArtifact(stage.artifact, cwd);
-    return artifact.present ? "advance" : { flag: "artifact.missing", detail: `${stage.artifact}: ${artifact.detail}` };
+    const ticket = this.deps.tickets.get(live.ticket);
+    if (!ticket) return "wait";
+    try {
+      if (stage.repeat) return await this.deps.review.judge(ticket, stage, live.request.sessionId);
+      const artifact = await checkArtifact(stage.artifact, live.request.cwd, () => this.deps.review.probe(ticket));
+      return artifact.present ? "advance" : { flag: "artifact.missing", detail: `${stage.artifact}: ${artifact.detail}` };
+    } catch (error) {
+      // The PR could not be read (gh down, rate limited): the Session still ends, and a human is told why.
+      return { flag: "review.poll_failed", detail: error instanceof Error ? error.message : String(error) };
+    }
   }
 
   private async apply(row: SessionRow, verdict: Verdict): Promise<void> {
@@ -314,6 +334,7 @@ export class Runs {
     const ticket = tickets.get(row.ticket);
     if (!ticket || ticket.state !== "active") return;
     if (verdict === "advance") return progress.finished(ticket);
+    if (verdict === "wait") return;
     // Interrupted and exhausted runs try again while attempts remain; a run a human stopped, or one that failed, asks instead.
     const retryable = row.ended_by === "outcome" && (row.outcome === "interrupted" || row.outcome === "exhausted");
     const next = retryable ? progress.runnable(ticket) : null;

@@ -112,4 +112,29 @@ const MIGRATIONS: Array<(db: DatabaseSync) => void> = [
   (db) => {
     db.exec(`ALTER TABLE tickets ADD COLUMN runnable_since TEXT;`);
   },
+  // The Review loop (LASSO-36): a Round's Feedback snapshot, one row per item, with the evidence it was addressed.
+  (db) => {
+    db.exec(`
+      ALTER TABLE sessions ADD COLUMN round INTEGER;
+      ALTER TABLE tickets ADD COLUMN feedback_due TEXT;
+      ALTER TABLE tickets ADD COLUMN pr_status TEXT;
+      CREATE TABLE feedback_item (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session TEXT NOT NULL REFERENCES sessions (id),
+        kind TEXT NOT NULL CHECK (kind IN ('check', 'thread', 'comment', 'verdict')),
+        source_id TEXT NOT NULL,
+        name TEXT,
+        url TEXT,
+        summary TEXT NOT NULL,
+        path TEXT,
+        line INTEGER,
+        at TEXT NOT NULL,
+        head TEXT,
+        body TEXT,
+        log TEXT,
+        addressed TEXT
+      );
+      CREATE INDEX feedback_item_session ON feedback_item (session);
+    `);
+  },
 ];

@@ -7,6 +7,9 @@ import { createLogger } from "./log.ts";
 import { Store } from "../store/store.ts";
 import { Tickets } from "../store/tickets.ts";
 import { Sessions } from "../store/sessions.ts";
+import { Feedback } from "../store/feedback.ts";
+import { PullRequests } from "../review/github.ts";
+import { Review } from "../review/review.ts";
 import { Runs } from "../session/runs.ts";
 import { Progress } from "../session/progress.ts";
 import { Terminal } from "../session/terminal.ts";
@@ -47,6 +50,7 @@ export async function serve(opts: ServeOptions): Promise<number> {
   const store = new Store(home.dbFile);
   const tickets = new Tickets(store.db);
   const sessions = new Sessions(store.db);
+  const feedback = new Feedback(store.db);
   const notifier = createNotifier({ config: config.notifications, log, baseUrl: `http://localhost:${config.port}` });
   const mirror = new Mirror({
     config,
@@ -60,16 +64,18 @@ export async function serve(opts: ServeOptions): Promise<number> {
       }
     },
   });
-  const progress = new Progress({ home, tickets, sessions, log, notifier, mirror });
+  const prs = new PullRequests(log);
+  const progress: Progress = new Progress({ home, tickets, sessions, log, notifier, mirror, prProbe: (ticket) => () => review.probe(ticket) });
+  const review: Review = new Review({ tickets, sessions, feedback, progress, prs, log });
   const terminal = new Terminal({ home, sessions, log });
   const budgets = new Budgets({ config, sessions });
   const queue = new Queue({ home, tickets, sessions, progress, log, cap: config.concurrency });
-  const runs = new Runs({ config, home, tickets, sessions, log, progress, budgets, queue });
+  const runs = new Runs({ config, home, tickets, sessions, log, progress, budgets, queue, review });
   const actions = new Actions({ config, tickets, sessions, log, progress });
-  // One tick: owed mirror pushes, then action Stages, then headless starts (an action that just advanced may start its successor now).
-  const tick = new Tick(config.tick, log, async () => [...(await mirror.retryPending()), ...(await actions.runDue()), ...(await runs.startRunnable())]);
+  // One tick: owed mirror pushes, then action Stages, then the PR poll (a Round it makes due starts below), then headless starts.
+  const tick = new Tick(config.tick, log, async () => [...(await mirror.retryPending()), ...(await actions.runDue()), ...(await review.poll()), ...(await runs.startRunnable())]);
   const exits = new Exits({ tickets, sessions, log, progress, runs, terminal, budgets, tick });
-  const app = createApp({ config, home, tick, tickets, sessions, runs, progress, terminal, exits, budgets, queue, version: VERSION });
+  const app = createApp({ config, home, tick, tickets, sessions, feedback, runs, progress, terminal, exits, budgets, queue, version: VERSION });
 
   if (defaults.wroteConfig) log.info("config.written", { file: home.configFile });
   if (defaults.wrotePipeline) log.info("pipeline.written", { name: "default" });
