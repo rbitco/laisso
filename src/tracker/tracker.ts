@@ -10,7 +10,7 @@ export interface Issue {
   body: string | null;
 }
 
-/** What Lasso asks of a tracker at intake; the adapters are thin translators over gh and acli. */
+/** What Lasso asks of a tracker: reading an issue at intake, moving it for an action Stage, and mirroring labels. The adapters are thin translators over gh and acli. */
 export interface Tracker {
   /** The JIRA project key or the GitHub owner/repo; empty when the tracker was chosen from a reference alone. */
   project: string;
@@ -19,7 +19,23 @@ export interface Tracker {
   fetchIssue(reference: string): Promise<Issue>;
   /** Null when `status` is a status this tracker can move an issue to; otherwise the reason it is not. */
   checkStatus(status: string): Promise<string | null>;
+  /** The action Stage `tracker.transition`: move the issue to the literal status. */
+  transition(reference: string, status: string): Promise<void>;
+  /** The issue's labels as the tracker has them now. */
+  labels(reference: string): Promise<string[]>;
+  /** Add and remove labels in one write; the tracker creates unknown labels where it must. */
+  editLabels(reference: string, change: LabelChange): Promise<void>;
 }
+
+export interface LabelChange {
+  add: string[];
+  remove: string[];
+}
+
+/** Lasso's labels on a tracker issue: `lasso:<stage>` for the current Stage, `lasso:flagged` while Flagged (ADR 0005). */
+export const LABEL_PREFIX = "lasso:";
+export const FLAGGED_LABEL = `${LABEL_PREFIX}flagged`;
+export const mirrorLabel = (stage: string): string => `${LABEL_PREFIX}${stage}`;
 
 export type TrackerKind = RepoConfig["tracker"];
 

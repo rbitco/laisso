@@ -52,6 +52,7 @@ function renderDetail(t: TicketDetail): string {
     ...t.stages.map((s, i) => `  ${i === t.stage.index ? ">" : " "} ${s.label}${s.human ? " (human)" : ""}`),
   ];
   if (t.flag) lines.splice(2, 0, `flag:      ${t.flag.reason}${t.flag.detail ? `: ${t.flag.detail}` : ""}`);
+  if (t.mirrorPending) lines.splice(2, 0, "tracker:   labels not written yet; retried each tick");
   if (t.session) {
     if (t.session.finalMessage) lines.push(`last:      ${t.session.finalMessage.split("\n")[0]}`);
     if (t.session.stdoutPath) lines.push(`stdout:    ${t.session.stdoutPath}`);

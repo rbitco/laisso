@@ -11,6 +11,9 @@ import { Runs } from "../session/runs.ts";
 import { Progress } from "../session/progress.ts";
 import { Terminal } from "../session/terminal.ts";
 import { createNotifier } from "../notify/notifier.ts";
+import { Mirror } from "../tracker/mirror.ts";
+import { Actions } from "../session/actions.ts";
+import { loadPipeline } from "../pipeline/load.ts";
 import { Tick } from "./tick.ts";
 import { createApp } from "../api/app.ts";
 
@@ -42,10 +45,24 @@ export async function serve(opts: ServeOptions): Promise<number> {
   const tickets = new Tickets(store.db);
   const sessions = new Sessions(store.db);
   const notifier = createNotifier({ config: config.notifications, log, baseUrl: `http://localhost:${config.port}` });
-  const progress = new Progress({ home, tickets, sessions, log, notifier });
+  const mirror = new Mirror({
+    config,
+    tickets,
+    log,
+    pipelineFor: (ticket) => {
+      try {
+        return loadPipeline(home.pipelinesDir, ticket.pipeline);
+      } catch {
+        return null;
+      }
+    },
+  });
+  const progress = new Progress({ home, tickets, sessions, log, notifier, mirror });
   const terminal = new Terminal({ home, sessions, log });
   const runs = new Runs({ config, home, tickets, sessions, log, progress });
-  const tick = new Tick(config.tick, log, () => runs.startRunnable());
+  const actions = new Actions({ config, tickets, sessions, log, progress });
+  // One tick: owed mirror pushes, then action Stages, then headless starts (an action that just advanced may start its successor now).
+  const tick = new Tick(config.tick, log, async () => [...(await mirror.retryPending()), ...(await actions.runDue()), ...(await runs.startRunnable())]);
   const app = createApp({ config, home, tick, tickets, sessions, runs, progress, terminal, version: VERSION });
 
   if (defaults.wroteConfig) log.info("config.written", { file: home.configFile });
@@ -69,6 +86,8 @@ export async function serve(opts: ServeOptions): Promise<number> {
   console.log(`lasso listening at ${url}`);
 
   runs.reconcile();
+  actions.reconcile();
+  mirror.markAllPending();
   await tick.run("startup");
   tick.start();
 

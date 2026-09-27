@@ -106,7 +106,9 @@ describe("admitting a reference Ticket", () => {
     expect(t).toMatchObject({ reference: "acme/web#7", branch: "acme-web-7-fix-the-footer", pipeline: "gh" });
     const detail = JSON.parse((await runCli(["status", t.id, "--json"], lasso)).stdout) as { body: string };
     expect(detail.body).toBe("They 404.");
-    expect((await lasso.tracker.calls()).map((c) => c.tool)).toEqual(["gh"]);
+    // The issue fetch, then the label mirror (which the shim has no answer for here, so it stays pending).
+    expect((await lasso.tracker.calls()).map((c) => c.args.slice(0, 2).join(" "))).toEqual(["issue view", "issue view", "issue edit"]);
+    expect(t.mirrorPending).toBe(true);
   });
 
   it("refuses a reference whose tracker is not the repo's", async () => {

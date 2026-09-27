@@ -74,6 +74,11 @@ export class Tickets {
     return this.db.prepare(sql).all() as unknown as TicketRow[];
   }
 
+  /** Mirror bookkeeping only: it is not activity on the Ticket, so updated_at is left alone. */
+  setMirrorPending(id: string, since: string | null): void {
+    this.db.prepare(`UPDATE tickets SET mirror_pending = ? WHERE id = ?`).run(since, id);
+  }
+
   update(id: string, patch: Partial<Omit<TicketRow, "id" | "created_at">>, now: string = new Date().toISOString()): TicketRow {
     const entries = Object.entries({ ...patch, updated_at: now });
     const sets = entries.map(([k]) => `${k} = ?`).join(", ");

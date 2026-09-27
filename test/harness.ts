@@ -56,6 +56,8 @@ export interface Lasso {
   breakNotifier(): Promise<void>;
   /** SIGINT the server and wait for exit; the home is left in place. */
   stop(): Promise<number | null>;
+  /** SIGKILL the server, as a crash would: nothing is reconciled on the way out. */
+  kill(): Promise<void>;
   /** Stop and delete the home. */
   destroy(): Promise<void>;
 }
@@ -188,6 +190,10 @@ export interface TrackerReply {
   stdout?: string;
   stderr?: string;
   code?: number;
+  /** Consumed by the first invocation it matches, so a later identical call falls through to the next reply. */
+  once?: boolean;
+  /** Hold the answer this long: a tracker that never comes back. */
+  sleepMs?: number;
 }
 
 export interface TrackerCall {
@@ -196,8 +202,8 @@ export interface TrackerCall {
 }
 
 export interface TrackerShim {
-  /** Add a canned reply; the first reply whose `match` strings all appear wins. */
-  reply(reply: TrackerReply): Promise<void>;
+  /** Add a canned reply; the first reply whose `match` strings all appear wins, so `first` puts this one ahead of the rest. */
+  reply(reply: TrackerReply, first?: boolean): Promise<void>;
   /** Every gh and acli invocation so far, oldest first. */
   calls(): Promise<TrackerCall[]>;
   /** Forget recorded calls (replies stay). */
@@ -220,6 +226,8 @@ try { replies = JSON.parse(fs.readFileSync(path.join(__dirname, ${JSON.stringify
 const joined = args.join(" ");
 const hit = replies.find((r) => r.tool === ${JSON.stringify(tool)} && r.match.every((m) => joined.includes(m)));
 if (!hit) { process.stderr.write("shim: no reply for ${tool} " + joined + "\\n"); process.exit(1); }
+if (hit.once) fs.writeFileSync(path.join(__dirname, ${JSON.stringify(REPLIES_FILE)}), JSON.stringify(replies.filter((r) => r !== hit)));
+if (hit.sleepMs) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, hit.sleepMs);
 if (hit.stdout) process.stdout.write(hit.stdout);
 if (hit.stderr) process.stderr.write(hit.stderr);
 process.exit(hit.code ?? 0);
@@ -232,14 +240,15 @@ export function trackerShim(pathDir: string): TrackerShim {
   const repliesFile = path.join(pathDir, REPLIES_FILE);
   const callsFile = path.join(pathDir, CALLS_FILE);
   return {
-    async reply(reply) {
+    async reply(reply, first = false) {
       let replies: TrackerReply[] = [];
       try {
         replies = JSON.parse(await readFile(repliesFile, "utf8"));
       } catch {
         // first reply
       }
-      replies.push(reply);
+      if (first) replies.unshift(reply);
+      else replies.push(reply);
       await writeFile(repliesFile, JSON.stringify(replies));
     },
     calls: () => readJsonl<TrackerCall>(callsFile),
@@ -393,6 +402,10 @@ export async function startLasso(opts: StartOptions = {}): Promise<Lasso> {
       const code = await exited;
       clearTimeout(timer);
       return code;
+    },
+    async kill() {
+      if (child.exitCode === null) child.kill("SIGKILL");
+      await exited;
     },
     async destroy() {
       await lasso.stop();

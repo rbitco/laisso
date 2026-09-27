@@ -1,0 +1,243 @@
+import { describe, it, expect, afterEach } from "vitest";
+import { startLassoWithRepos, startLasso, runCli, waitFor, claudeFixture, type Lasso, type TrackerCall, type TrackerReply } from "./harness.ts";
+import type { TicketDetail, IntakeResult } from "../src/api/views.ts";
+import type { TickChange } from "../src/server/tick.ts";
+
+// Seam one: action Stages and the label mirror, watched through the API and
+// the gh/acli shim, which records every invocation and replays canned answers.
+const running: Lasso[] = [];
+afterEach(async () => {
+  while (running.length) await running.pop()!.destroy();
+});
+
+// grill (human) → In Progress (action) → implement (headless) → Done (action)
+const PIPELINE = `runner: claude
+stages:
+  - name: grill
+    prompt: Interview me.
+    human: true
+  - action: tracker.transition
+    status: In Progress
+  - name: implement
+    prompt: Do the work.
+    artifact: commits-on-branch
+  - action: tracker.transition
+    status: Done
+`;
+
+const jiraView = (key: string, summary: string) => JSON.stringify({ key, fields: { summary, description: "Body." } });
+const jiraLabels = (...labels: string[]) => JSON.stringify({ key: "APP-12", fields: { labels } });
+const ghLabels = (...names: string[]) => JSON.stringify({ labels: names.map((name) => ({ name })) });
+
+/** A JIRA-tracked repo on the flow Pipeline; `before` replies take precedence over the generic ones. */
+async function jiraLasso(before: TrackerReply[] = []) {
+  const started = await startLassoWithRepos({ app: { tracker: "jira", project: "APP", pipeline: "flow" } }, {}, { flow: PIPELINE });
+  running.push(started.lasso);
+  const { lasso } = started;
+  for (const reply of before) await lasso.tracker.reply(reply);
+  await lasso.tracker.reply({ tool: "acli", match: ["workitem view APP-12", "summary,description"], stdout: jiraView("APP-12", "Add dark mode") });
+  await lasso.tracker.reply({ tool: "acli", match: ["workitem search"], stdout: "[]" });
+  await lasso.tracker.reply({ tool: "acli", match: ["workitem transition"], stdout: "✓ ok\n" });
+  await lasso.tracker.reply({ tool: "acli", match: ["workitem edit"], stdout: "✓ ok\n" });
+  return started;
+}
+
+const admit = (lasso: Lasso, input: string) => lasso.api<IntakeResult>("/api/tickets", { method: "POST", body: JSON.stringify({ input }) });
+const detailOf = (lasso: Lasso, id: string) => lasso.api<TicketDetail>(`/api/tickets/${id}`);
+const checkNow = (lasso: Lasso) => lasso.api<{ changes: TickChange[] }>("/api/check-now", { method: "POST" });
+const pull = (lasso: Lasso, id: string, trigger: string) => lasso.api<TicketDetail>(`/api/tickets/${id}/${trigger}`, { method: "POST", body: "{}" });
+const argsOf = (calls: TrackerCall[]) => calls.map((c) => c.args.join(" "));
+const callsSince = (lasso: Lasso, count: number) => waitFor(async () => { const c = await lasso.tracker.calls(); return c.length >= count ? c : null; }, `${count} tracker calls`);
+
+describe("the tracker mirror", () => {
+  it("labels the first Stage at intake, swaps the label on each transition, and clears it at done", async () => {
+    const { lasso } = await jiraLasso();
+    // A stale label from an earlier run and a human's own label: the first is overwritten, the second kept.
+    await lasso.tracker.reply({ tool: "acli", match: ["workitem view APP-12", "--fields labels"], stdout: jiraLabels("lasso:review", "mine"), once: true });
+
+    const ticket = await admit(lasso, "APP-12");
+    expect(ticket.mirrorPending).toBe(false);
+    expect(argsOf(await lasso.tracker.calls())).toEqual([
+      "jira workitem view APP-12 --fields summary,description --json",
+      'jira workitem search --jql project = APP AND status = "In Progress" --limit 1 --json',
+      'jira workitem search --jql project = APP AND status = "Done" --limit 1 --json',
+      "jira workitem view APP-12 --fields labels --json",
+      "jira workitem edit --key APP-12 --labels lasso:grill --remove-labels lasso:review --yes",
+    ]);
+    await lasso.tracker.clearCalls();
+
+    // Skip grill: an action Stage keeps grill's label, so the push finds nothing to change.
+    await lasso.tracker.reply({ tool: "acli", match: ["workitem view APP-12", "--fields labels"], stdout: jiraLabels("mine", "lasso:grill"), once: true });
+    const skipped = await pull(lasso, ticket.id, "skip");
+    expect(skipped.stage).toMatchObject({ name: "transition-in-progress", label: "In Progress", kind: "action" });
+    expect(skipped.display).toMatchObject({ state: "ready", why: "In Progress starts on the next tick" });
+    expect(skipped.mirrorPending).toBe(false);
+    expect(argsOf(await lasso.tracker.calls())).toEqual(["jira workitem view APP-12 --fields labels --json"]);
+    await lasso.tracker.clearCalls();
+    await lasso.tracker.reply({ tool: "acli", match: ["workitem view APP-12", "--fields labels"], stdout: jiraLabels("mine", "lasso:grill"), once: true });
+    await lasso.tracker.reply({ tool: "acli", match: ["workitem view APP-12", "--fields labels"], stdout: jiraLabels("mine", "lasso:implement") });
+
+    await lasso.runner.script({ stdout: claudeFixture("success.json"), commands: [["git", "commit", "-q", "--allow-empty", "-m", "work"]] });
+    const tick = await checkNow(lasso);
+    expect(tick.changes).toEqual([
+      { ticket: ticket.id, summary: "transition-in-progress: tracker.transition In Progress" },
+      { ticket: ticket.id, summary: "started implement" },
+    ]);
+    const closed = await waitFor(async () => { const d = await detailOf(lasso, ticket.id); return d.stage.name === "transition-done" ? d : null; }, "implement to finish");
+    expect(closed.display).toMatchObject({ state: "ready", why: "Done starts on the next tick" });
+    // The action moved the status, then the label swapped to implement; implement's finish found the label already right.
+    expect(argsOf(await callsSince(lasso, 4))).toEqual([
+      "jira workitem transition --key APP-12 --status In Progress --yes",
+      "jira workitem view APP-12 --fields labels --json",
+      "jira workitem edit --key APP-12 --labels lasso:implement --remove-labels lasso:grill --yes",
+      "jira workitem view APP-12 --fields labels --json",
+    ]);
+    await lasso.tracker.clearCalls();
+    const done = await checkNow(lasso);
+    expect(done.changes).toEqual([{ ticket: ticket.id, summary: "transition-done: tracker.transition Done" }]);
+    const finished = await waitFor(async () => { const d = await detailOf(lasso, ticket.id); return d.state === "done" ? d : null; }, "the Ticket to be done");
+    expect(finished.sessions.map((s) => [s.stage, s.mode, s.outcome, s.finalMessage])).toEqual([
+      ["transition-done", "action", "succeeded", "tracker.transition Done"],
+      ["implement", "headless", "succeeded", expect.any(String)],
+      ["transition-in-progress", "action", "succeeded", "tracker.transition In Progress"],
+    ]);
+    expect(argsOf(await callsSince(lasso, 3))).toEqual([
+      "jira workitem transition --key APP-12 --status Done --yes",
+      "jira workitem view APP-12 --fields labels --json",
+      "jira workitem edit --key APP-12 --remove-labels lasso:implement --yes",
+    ]);
+  });
+
+  it("parks a failed push as pending, retries it on the tick, and overwrites the tracker after a restart", async () => {
+    const { lasso } = await jiraLasso();
+    await lasso.tracker.reply({ tool: "acli", match: ["workitem view APP-12", "--fields labels"], stderr: "✗ Error: 503 Service Unavailable\n", code: 1, once: true });
+    await lasso.tracker.reply({ tool: "acli", match: ["workitem view APP-12", "--fields labels"], stdout: jiraLabels("lasso:elsewhere") });
+
+    const ticket = await admit(lasso, "APP-12");
+    expect(ticket.mirrorPending).toBe(true);
+    await lasso.tracker.clearCalls();
+
+    const cli = await runCli(["status", ticket.id], lasso);
+    expect(cli.stdout).toContain("tracker:   labels not written yet; retried each tick");
+
+    // The tick retries from the Ticket's current state and overwrites what the tracker had.
+    const tick = await checkNow(lasso);
+    expect(tick.changes).toEqual([{ ticket: ticket.id, summary: "mirror pushed" }]);
+    expect((await detailOf(lasso, ticket.id)).mirrorPending).toBe(false);
+    expect(argsOf(await lasso.tracker.calls())).toEqual([
+      "jira workitem view APP-12 --fields labels --json",
+      "jira workitem edit --key APP-12 --labels lasso:grill --remove-labels lasso:elsewhere --yes",
+    ]);
+
+    // A restart owes every tracker Ticket a push, so a hand edit made while Lasso was down does not stick.
+    expect(await lasso.stop()).toBe(0);
+    await lasso.tracker.clearCalls();
+    const again = await startLasso({ home: lasso.home, pathDir: lasso.pathDir, port: lasso.port });
+    running.push(again);
+    expect(argsOf(await callsSince(again, 2))).toEqual([
+      "jira workitem view APP-12 --fields labels --json",
+      "jira workitem edit --key APP-12 --labels lasso:grill --remove-labels lasso:elsewhere --yes",
+    ]);
+    await waitFor(async () => ((await detailOf(again, ticket.id)).mirrorPending ? null : true), "the pending mark to clear");
+  });
+
+  it("creates a GitHub label on first use, closes the issue, and toggles lasso:flagged", async () => {
+    const pipeline = `runner: claude
+stages:
+  - name: implement
+    prompt: Do the work.
+  - action: tracker.transition
+    status: closed
+`;
+    const started = await startLassoWithRepos({ web: { tracker: "github", project: "acme/web", pipeline: "gh" } }, {}, { gh: pipeline });
+    running.push(started.lasso);
+    const { lasso } = started;
+    await lasso.tracker.reply({ tool: "gh", match: ["issue view 7", "title,body"], stdout: JSON.stringify({ title: "Fix links", body: "" }) });
+    await lasso.tracker.reply({ tool: "gh", match: ["issue view 7", "--json labels"], stdout: ghLabels("bug"), once: true });
+    await lasso.tracker.reply({ tool: "gh", match: ["issue edit 7", "--add-label lasso:implement"], stderr: "could not add label: 'lasso:implement' not found\n", code: 1, once: true });
+    await lasso.tracker.reply({ tool: "gh", match: ["issue edit 7"], stdout: "" });
+    await lasso.tracker.reply({ tool: "gh", match: ["label create"], stdout: "" });
+    await lasso.tracker.reply({ tool: "gh", match: ["issue close 7"], stdout: "" });
+
+    const ticket = await admit(lasso, "acme/web#7");
+    expect(ticket.mirrorPending).toBe(false);
+    expect(argsOf(await lasso.tracker.calls())).toEqual([
+      "issue view 7 --repo acme/web --json title,body",
+      "issue view 7 --repo acme/web --json labels",
+      "issue edit 7 --repo acme/web --add-label lasso:implement",
+      "label create lasso:implement --repo acme/web --color 5319E7 --description Set by Lasso --force",
+      "issue edit 7 --repo acme/web --add-label lasso:implement",
+    ]);
+    await lasso.tracker.clearCalls();
+
+    // implement fails (no script): Flagged, and the tracker shows it.
+    await lasso.tracker.reply({ tool: "gh", match: ["issue view 7", "--json labels"], stdout: ghLabels("bug", "lasso:implement") });
+    await checkNow(lasso);
+    const flagged = await waitFor(async () => { const d = await detailOf(lasso, ticket.id); return d.flag ? d : null; }, "the Flag");
+    expect(flagged.flag!.reason).toBe("outcome.interrupted");
+    const calls = argsOf(await callsSince(lasso, 2)).filter((c) => !c.startsWith("issue view"));
+    expect(calls).toEqual(["issue edit 7 --repo acme/web --add-label lasso:flagged"]);
+  });
+
+  it("Flags a failed transition as a failed action Session", async () => {
+    const { lasso } = await jiraLasso([
+      { tool: "acli", match: ["workitem view APP-12", "--fields labels"], stdout: jiraLabels() },
+      { tool: "acli", match: ["workitem transition", "--status In Progress"], stderr: "✗ Error: transition is not valid from Backlog\n", code: 1 },
+    ]);
+    const ticket = await admit(lasso, "APP-12");
+    await pull(lasso, ticket.id, "skip");
+    await lasso.tracker.clearCalls();
+
+    const tick = await checkNow(lasso);
+    expect(tick.changes).toEqual([{ ticket: ticket.id, summary: "Flagged: APP-12: Error: transition is not valid from Backlog" }]);
+    const d = await detailOf(lasso, ticket.id);
+    expect(d.flag).toMatchObject({ reason: "outcome.failed", detail: "APP-12: Error: transition is not valid from Backlog" });
+    expect(d.session).toMatchObject({ stage: "transition-in-progress", mode: "action", outcome: "failed", running: false });
+    expect(d.triggers).toEqual([]);
+    expect(argsOf(await callsSince(lasso, 3))).toEqual([
+      "jira workitem transition --key APP-12 --status In Progress --yes",
+      "jira workitem view APP-12 --fields labels --json",
+      "jira workitem edit --key APP-12 --labels lasso:grill,lasso:flagged --yes",
+    ]);
+  });
+
+  it("closes an action Session left running by a crash and performs the Stage again on the next tick", async () => {
+    const { lasso } = await jiraLasso([{ tool: "acli", match: ["workitem view APP-12", "--fields labels"], stdout: jiraLabels("lasso:grill") }]);
+    const ticket = await admit(lasso, "APP-12");
+    await pull(lasso, ticket.id, "skip");
+    // A transition that never answers: the process is stopped while the action Session is open.
+    await lasso.tracker.reply({ tool: "acli", match: ["workitem transition"], sleepMs: 60_000 }, true);
+    void checkNow(lasso).catch(() => undefined);
+    await waitFor(async () => ((await detailOf(lasso, ticket.id)).session?.mode === "action" ? true : null), "the action Session to open");
+    await lasso.kill();
+
+    const again = await startLasso({ home: lasso.home, pathDir: lasso.pathDir, port: lasso.port });
+    running.push(again);
+    const d = await detailOf(again, ticket.id);
+    expect(d.session).toMatchObject({ stage: "transition-in-progress", mode: "action", running: false, outcome: "interrupted", endedReason: "shutdown" });
+    expect(d.display).toMatchObject({ state: "ready", why: "In Progress starts on the next tick" });
+    await again.tracker.reply({ tool: "acli", match: ["workitem transition"], stdout: "✓ ok\n" }, true);
+    // The startup push comes first on the tick, then the action is performed again.
+    const tick = await checkNow(again);
+    expect(tick.changes.slice(0, 2)).toEqual([
+      { ticket: ticket.id, summary: "mirror pushed" },
+      { ticket: ticket.id, summary: "transition-in-progress: tracker.transition In Progress" },
+    ]);
+    expect((await detailOf(again, ticket.id)).sessions.filter((s) => s.mode === "action").map((s) => [s.stage, s.outcome])).toEqual([
+      ["transition-in-progress", "succeeded"],
+      ["transition-in-progress", "interrupted"],
+    ]);
+  });
+
+  it("Flags an action Stage on a prompt Ticket that has no tracker issue yet", async () => {
+    const started = await startLassoWithRepos({ app: { tracker: "jira", project: "APP", pipeline: "flow" } }, {}, { flow: PIPELINE });
+    running.push(started.lasso);
+    const { lasso } = started;
+    const ticket = await lasso.api<IntakeResult>("/api/tickets", { method: "POST", body: JSON.stringify({ input: "Add dark mode", repo: "app", pipeline: "flow" }) });
+    await pull(lasso, ticket.id, "skip");
+    const tick = await checkNow(lasso);
+    expect(tick.changes).toEqual([{ ticket: ticket.id, summary: "Flagged: transition-in-progress: Ticket has no tracker issue yet" }]);
+    expect(await lasso.tracker.calls()).toEqual([]);
+    expect((await detailOf(lasso, ticket.id)).flag!.reason).toBe("outcome.failed");
+  });
+});

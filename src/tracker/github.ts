@@ -1,7 +1,14 @@
 import { runTool, failureReason, parseJson } from "./exec.ts";
-import { TrackerError, type Issue, type Tracker } from "./tracker.ts";
+import { TrackerError, type Issue, type LabelChange, type Tracker } from "./tracker.ts";
 
 const STATUSES = ["open", "closed"];
+const LABEL_COLOR = "5319E7";
+
+function split(reference: string): { repo: string; number: string } {
+  const m = /^(.+)#(\d+)$/.exec(reference);
+  if (!m) throw new TrackerError(`${reference} is not owner/repo#n`);
+  return { repo: m[1]!, number: m[2]! };
+}
 
 /** GitHub issues through the gh CLI. `project` is owner/repo. */
 export class GithubTracker implements Tracker {
@@ -16,9 +23,8 @@ export class GithubTracker implements Tracker {
   }
 
   async fetchIssue(reference: string): Promise<Issue> {
-    const m = /^(.+)#(\d+)$/.exec(reference);
-    if (!m) throw new TrackerError(`${reference} is not owner/repo#n`);
-    const r = await runTool("gh", ["issue", "view", m[2]!, "--repo", m[1]!, "--json", "title,body"]);
+    const { repo, number } = split(reference);
+    const r = await runTool("gh", ["issue", "view", number, "--repo", repo, "--json", "title,body"]);
     if (r.code !== 0) throw new TrackerError(`${reference}: ${failureReason("gh", r)}`);
     const parsed = parseJson<{ title?: unknown; body?: unknown }>("gh", reference, r.stdout, (m) => new TrackerError(m));
     const title = typeof parsed.title === "string" ? parsed.title.trim() : "";
@@ -28,6 +34,40 @@ export class GithubTracker implements Tracker {
       title,
       body: typeof parsed.body === "string" && parsed.body.trim() ? parsed.body : null,
     };
+  }
+
+  async transition(reference: string, status: string): Promise<void> {
+    const { repo, number } = split(reference);
+    const wanted = status.trim().toLowerCase();
+    if (!STATUSES.includes(wanted)) throw new TrackerError(`${reference}: GitHub accepts only open and closed, not ${status}`);
+    const r = await runTool("gh", ["issue", wanted === "closed" ? "close" : "reopen", number, "--repo", repo]);
+    if (r.code !== 0) throw new TrackerError(`${reference}: ${failureReason("gh", r)}`);
+  }
+
+  async labels(reference: string): Promise<string[]> {
+    const { repo, number } = split(reference);
+    const r = await runTool("gh", ["issue", "view", number, "--repo", repo, "--json", "labels"]);
+    if (r.code !== 0) throw new TrackerError(`${reference}: ${failureReason("gh", r)}`);
+    const parsed = parseJson<{ labels?: unknown }>("gh", reference, r.stdout, (m) => new TrackerError(m));
+    return Array.isArray(parsed.labels) ? parsed.labels.map((l: { name?: unknown }) => String(l?.name ?? "")).filter(Boolean) : [];
+  }
+
+  /** A label GitHub does not know yet is created on first use, then the edit is tried once more. */
+  async editLabels(reference: string, { add, remove }: LabelChange): Promise<void> {
+    const { repo, number } = split(reference);
+    const args = ["issue", "edit", number, "--repo", repo];
+    if (add.length) args.push("--add-label", add.join(","));
+    if (remove.length) args.push("--remove-label", remove.join(","));
+    const first = await runTool("gh", args);
+    if (first.code === 0) return;
+    const missing = add.filter((label) => first.stderr.includes(`'${label}' not found`));
+    if (!missing.length) throw new TrackerError(`${reference}: ${failureReason("gh", first)}`);
+    for (const label of missing) {
+      const created = await runTool("gh", ["label", "create", label, "--repo", repo, "--color", LABEL_COLOR, "--description", "Set by Lasso", "--force"]);
+      if (created.code !== 0) throw new TrackerError(`${reference}: ${failureReason("gh", created)}`);
+    }
+    const again = await runTool("gh", args);
+    if (again.code !== 0) throw new TrackerError(`${reference}: ${failureReason("gh", again)}`);
   }
 
   async checkStatus(status: string): Promise<string | null> {

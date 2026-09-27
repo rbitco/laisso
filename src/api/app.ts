@@ -75,9 +75,8 @@ export function createApp(deps: AppDeps): Hono {
   app.post("/api/tickets", async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as Partial<IntakeRequest>;
     const { ticket, branchExisted } = await intake.admit({ input: body.input ?? "", repo: body.repo, pipeline: body.pipeline });
-    const first = deps.progress.current(ticket);
-    if (!("problem" in first)) deps.progress.entered(ticket, first.stage);
-    const result: IntakeResult = { ...ticketView(ticket, viewContext), branchExisted };
+    await deps.progress.admitted(ticket);
+    const result: IntakeResult = { ...ticketView(deps.tickets.get(ticket.id)!, viewContext), branchExisted };
     return c.json(result, 201);
   });
 

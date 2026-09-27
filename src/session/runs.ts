@@ -67,7 +67,7 @@ export class Runs {
       const resolved = this.deps.progress.runnable(ticket);
       if (resolved === null) continue;
       if ("problem" in resolved) {
-        this.deps.progress.flag(ticket.id, "pipeline.missing", resolved.problem);
+        await this.deps.progress.flag(ticket.id, "pipeline.missing", resolved.problem);
         changes.push({ ticket: ticket.id, summary: `Flagged: ${resolved.problem}` });
         continue;
       }
@@ -78,7 +78,7 @@ export class Runs {
       } catch (error) {
         // The Runner never started, so there is no Session to blame: runner.unavailable, not outcome.*.
         const detail = error instanceof Error ? error.message : String(error);
-        this.deps.progress.flag(ticket.id, "runner.unavailable", detail);
+        await this.deps.progress.flag(ticket.id, "runner.unavailable", detail);
         changes.push({ ticket: ticket.id, summary: `Flagged: ${detail}` });
       }
     }
@@ -244,7 +244,7 @@ export class Runs {
     else verdict = await this.judge(live.stage, end, live.request.cwd);
     const row = this.deps.sessions.end(sessionId, end);
     this.deps.log.info("session.ended", { session: sessionId, ticket: row.ticket, stage: row.stage, outcome: row.outcome, reason: row.ended_reason, cost: row.cost_usd });
-    if (verdict) this.apply(row.ticket, verdict);
+    if (verdict) await this.apply(row.ticket, verdict);
     live.resolve(row);
   }
 
@@ -257,11 +257,11 @@ export class Runs {
     return artifact.present ? "advance" : { flag: "artifact.missing", detail: `${stage.artifact}: ${artifact.detail}` };
   }
 
-  private apply(ticketId: string, verdict: Verdict): void {
+  private async apply(ticketId: string, verdict: Verdict): Promise<void> {
     const ticket = this.deps.tickets.get(ticketId);
     if (!ticket || ticket.state !== "active") return;
-    if (verdict === "advance") this.deps.progress.finished(ticket);
-    else this.deps.progress.flag(ticket.id, verdict.flag, verdict.detail);
+    if (verdict === "advance") await this.deps.progress.finished(ticket);
+    else await this.deps.progress.flag(ticket.id, verdict.flag, verdict.detail);
   }
 }
 

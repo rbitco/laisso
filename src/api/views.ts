@@ -52,6 +52,8 @@ export interface TicketView {
   pr: string | null;
   display: { state: DisplayState; label: string; why: string };
   triggers: Trigger[];
+  /** True while a label push to the tracker is owed and the tick will retry it. */
+  mirrorPending: boolean;
   createdAt: string;
   updatedAt: string;
   url: string;
@@ -117,7 +119,7 @@ export function ticketView(ticket: TicketRow, ctx: ViewContext): TicketView {
   const stage = index >= 0 ? pipeline!.stages[index]! : null;
   const human = stage?.kind === "runner" && stage.human;
   const latest = ctx.latestSession(ticket);
-  const display = displayState(ticket, human, latest);
+  const display = displayState(ticket, stage, latest);
   const triggers = ticketTriggers(ticket, stage, latest);
   return {
     id: ticket.id,
@@ -143,6 +145,7 @@ export function ticketView(ticket: TicketRow, ctx: ViewContext): TicketView {
     pr: ticket.pr,
     display: { ...display, label: DISPLAY_LABEL[display.state] },
     triggers,
+    mirrorPending: ticket.mirror_pending !== null,
     createdAt: ticket.created_at,
     updatedAt: ticket.updated_at,
     url: `${ctx.baseUrl}/#${ticket.id}`,
@@ -188,17 +191,19 @@ export function sessionView(row: SessionRow, now: number = Date.now()): SessionV
   };
 }
 
-function displayState(ticket: TicketRow, human: boolean, latest: SessionRow | null): { state: DisplayState; why: string } {
+function displayState(ticket: TicketRow, stage: Stage | null, latest: SessionRow | null): { state: DisplayState; why: string } {
+  const human = stage?.kind === "runner" && stage.human;
+  const name = stage ? stageLabel(stage) : ticket.stage;
   if (ticket.state === "done") return { state: "done", why: "done" };
   if (ticket.state === "abandoned") return { state: "abandoned", why: "abandoned" };
   if (ticket.flagged_at) return { state: "flagged", why: ticket.flag_reason ?? "flagged" };
   if (headlessRunning(latest)) return { state: "running", why: `${latest.stage}, run ${latest.ordinal}` };
-  if (ticket.holding_since) return { state: "holding", why: `Start ${ticket.stage} when ready` };
+  if (ticket.holding_since) return { state: "holding", why: `Start ${name} when ready` };
   if (human) {
     const opened = latest && latest.ended_at === null && latest.mode === "terminal" && latest.stage === ticket.stage ? latest.opened_at : null;
     return { state: "needs_you", why: opened ? `terminal opened ${clockTime(opened)}` : "not started" };
   }
-  return { state: "ready", why: `${ticket.stage} starts on the next tick` };
+  return { state: "ready", why: `${name} starts on the next tick` };
 }
 
 function ticketTriggers(ticket: TicketRow, stage: Stage | null, latest: SessionRow | null): Trigger[] {

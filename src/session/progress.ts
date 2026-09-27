@@ -3,7 +3,8 @@ import type { Logger } from "../server/log.ts";
 import type { Tickets, TicketRow } from "../store/tickets.ts";
 import type { Sessions } from "../store/sessions.ts";
 import type { Notifier } from "../notify/notifier.ts";
-import { loadPipeline, type Pipeline, type RunnerStage, type Stage } from "../pipeline/load.ts";
+import { loadPipeline, type ActionStage, type Pipeline, type RunnerStage, type Stage } from "../pipeline/load.ts";
+import type { Mirror } from "../tracker/mirror.ts";
 import { checkArtifact } from "../artifact/check.ts";
 
 /** A Trigger that cannot pull right now, with the reason for the human. */
@@ -32,6 +33,7 @@ export interface ProgressDeps {
   sessions: Sessions;
   log: Logger;
   notifier: Notifier;
+  mirror: Mirror;
 }
 
 /**
@@ -61,11 +63,31 @@ export class Progress {
 
   /** The headless Stage the tick should start for this Ticket, null when there is nothing to start, or the problem. */
   runnable(ticket: TicketRow): { pipeline: Pipeline; stage: RunnerStage } | { problem: string } | null {
-    if (ticket.flagged_at || ticket.holding_since || this.deps.sessions.running(ticket.id).length) return null;
+    if (!this.idle(ticket)) return null;
     const current = this.current(ticket);
     if ("problem" in current) return current;
     if (current.stage.kind !== "runner" || current.stage.human) return null;
     return { pipeline: current.pipeline, stage: current.stage };
+  }
+
+  /** The action Stage the tick should perform for this Ticket now, or null. */
+  dueAction(ticket: TicketRow): ActionStage | null {
+    if (!this.idle(ticket)) return null;
+    const current = this.current(ticket);
+    if ("problem" in current || current.stage.kind !== "action") return null;
+    return current.stage;
+  }
+
+  /** Nothing stops the tick from acting on this Ticket: active, not Flagged, not holding, no Session running. */
+  private idle(ticket: TicketRow): boolean {
+    return ticket.state === "active" && !ticket.flagged_at && !ticket.holding_since && this.deps.sessions.running(ticket.id).length === 0;
+  }
+
+  /** A Ticket just admitted: its first Stage is current, and the tracker learns of it before intake answers. */
+  async admitted(ticket: TicketRow): Promise<void> {
+    const current = this.current(ticket);
+    if (!("problem" in current)) this.entered(ticket, current.stage);
+    await this.deps.mirror.push(ticket.id);
   }
 
   /** The current Stage of an active, unflagged Ticket, or the TriggerError that says why a Trigger cannot pull. */
@@ -90,14 +112,19 @@ export class Progress {
     if (stage.kind === "runner" && stage.human) this.deps.notifier.post("human", ticket, `${stage.name} needs you`);
   }
 
-  /** The current Stage finished: move on, hold for Start, or finish the Ticket. */
-  finished(ticket: TicketRow): void {
+  /**
+   * The current Stage finished: move on, hold for Start, or finish the Ticket. The mirror push is
+   * awaited so a Trigger answers, and a tick reports, only once the tracker has been told; that
+   * puts one or two tracker CLI calls on the path of Mark done, Skip, Stop and shutdown.
+   */
+  async finished(ticket: TicketRow): Promise<void> {
     const current = this.current(ticket);
     if ("problem" in current) return this.flag(ticket.id, "pipeline.missing", current.problem);
     const next = current.pipeline.stages[current.index + 1];
     if (!next) {
-      this.deps.tickets.update(ticket.id, { state: "done", holding_since: null });
+      const done = this.deps.tickets.update(ticket.id, { state: "done", holding_since: null });
       this.deps.log.info("ticket.done", { ticket: ticket.id });
+      await this.deps.mirror.push(done.id);
       return;
     }
     const holds = current.stage.kind === "runner" && !current.stage.advance;
@@ -105,6 +132,7 @@ export class Progress {
     this.deps.log.info("ticket.advanced", { ticket: ticket.id, stage: next.name, holding: holds });
     if (holds) this.deps.notifier.post("gate", updated, `${current.stage.name} finished; Start ${next.name} when ready`);
     else this.entered(updated, next);
+    await this.deps.mirror.push(updated.id);
   }
 
   /** The Start trigger: release a holding Ticket into its current Stage. */
@@ -129,23 +157,24 @@ export class Progress {
     if (fresh.stage !== stage.name) throw new TriggerError(`${stage.name} already finished`);
     this.endHumanSessions(fresh);
     this.deps.log.info("ticket.marked_done", { ticket: ticket.id, stage: stage.name, override });
-    this.finished(fresh);
+    await this.finished(fresh);
     return this.deps.tickets.get(ticket.id)!;
   }
 
   /** Skip: the human Stage finishes without its artifact. */
-  skip(ticket: TicketRow): TicketRow {
+  async skip(ticket: TicketRow): Promise<TicketRow> {
     const { stage } = this.humanStage(ticket);
     this.endHumanSessions(ticket);
     this.deps.log.info("ticket.skipped", { ticket: ticket.id, stage: stage.name });
-    this.finished(ticket);
+    await this.finished(ticket);
     return this.deps.tickets.get(ticket.id)!;
   }
 
-  flag(ticketId: string, reason: string, detail: string | null): void {
+  async flag(ticketId: string, reason: string, detail: string | null): Promise<void> {
     const flagged = this.deps.tickets.update(ticketId, { flagged_at: new Date().toISOString(), flag_reason: reason, flag_detail: detail });
     this.deps.log.info("ticket.flagged", { ticket: ticketId, reason, detail });
     this.deps.notifier.post("flagged", flagged, detail ? `${reason}: ${detail}` : reason);
+    await this.deps.mirror.push(flagged.id);
   }
 
   /** Terminal Session rows end only by a human's act (spec: human Stages): no Outcome, no reason. */

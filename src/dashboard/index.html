@@ -150,7 +150,7 @@
     const row = el('article', { class: 'ticket', 'data-id': t.id }, [
       el('span', { class: 'pill ' + t.display.state, text: t.display.label || t.display.state }),
       el('div', {}, [el('div', { class: 'ref', text: t.reference || t.shortId }), el('div', { class: 'repo', text: t.repo })]),
-      el('div', { class: 'stage', text: t.stage.name + ' · ' + (t.stage.index + 1) + '/' + t.stage.total }),
+      el('div', { class: 'stage', text: t.stage.label + ' · ' + (t.stage.index + 1) + '/' + t.stage.total }),
       el('span', {}),
       el('div', {}, [el('div', { text: t.title }), el('div', { class: 'why', text: t.display.why })]),
       el('div', { class: 'stage', text: relative(t.updatedAt) }),
@@ -224,9 +224,13 @@
         el('div', { class: 'paths' }, [copyChip('worktree', t.worktree), copyChip('session id', s.id), s.transcriptPath ? copyChip('transcript', s.transcriptPath) : el('span')]));
       return pane;
     }
-    const out = el('pre', { text: '' });
     const final = el('div', { class: 'final' + (s.outcome === 'succeeded' ? ' ok' : ''), text: s.finalMessage || '' });
     final.hidden = !s.finalMessage;
+    if (s.mode === 'action') {
+      pane.replaceChildren(head, el('div', { class: 'hint', text: 'Lasso performed this Stage itself; there is no Runner output.' }), final);
+      return pane;
+    }
+    const out = el('pre', { text: '' });
     const paths = el('div', { class: 'paths' }, [
       copyChip('worktree', t.worktree),
       s.stdoutPath ? copyChip('stdout', s.stdoutPath) : el('span'),
@@ -308,7 +312,7 @@
     const children = [
       back,
       el('h2', { text: (t.reference ? t.reference + ' · ' : '') + t.title }),
-      el('div', {}, [el('span', { class: 'pill ' + t.display.state, text: t.display.label }), ' ', el('span', { class: 'why', text: t.display.why })]),
+      el('div', {}, [el('span', { class: 'pill ' + t.display.state, text: t.display.label }), ' ', el('span', { class: 'why', text: t.display.why + (t.mirrorPending ? ' · tracker labels not written yet' : '') })]),
       stations,
     ];
     if (t.flag) children.push(el('p', { class: 'notice', text: t.flag.reason + (t.flag.detail ? ': ' + t.flag.detail : '') }));
