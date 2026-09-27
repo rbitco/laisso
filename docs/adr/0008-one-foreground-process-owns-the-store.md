@@ -35,11 +35,12 @@ validates intake beats a CLI that can race the server.
   Ticket on its own. Wall time and spend still count what was used.
 - On startup, before the first tick, Lasso reconciles Session rows
   still marked running: a headless row whose pid is alive is killed by
-  process group and recorded as interrupted with reason `shutdown`; a
-  terminal Session, which outlives `lasso`, is checked with the
-  adapter's `findSession`, kept live if still running, and otherwise
-  closed from the Runner's own transcript. The first tick then runs at
-  once rather than after the cadence.
+  process group and recorded as interrupted with reason `shutdown`. A
+  terminal Session outlives `lasso` and is left untouched: it ends only
+  when the human marks its Stage done, skips, or abandons, never from
+  the Runner exiting, and Lasso never reads the Runner's transcript to
+  close it (ADR 0003). The first tick then runs at once rather than
+  after the cadence.
 - The port is a flag and a `config.yaml` key; the dashboard URL is
   stable enough to bookmark.
 - Lasso logs one line per event to stdout and to `~/.lasso/lasso.log`,
