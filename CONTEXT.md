@@ -38,6 +38,12 @@ agent may continue. It carries the reason, starts no new Session, and clears
 only when a human retries, resumes, extends, marks done, skips, or abandons.
 _Avoid_: blocked, stuck, escalated
 
+**Attention**:
+The condition of a Ticket that is waiting on a human: Flagged, running a
+human-in-the-loop Stage, or holding at a Stage that does not auto-advance.
+The dashboard lists these first and Lasso notifies once as each begins.
+_Avoid_: pending, waiting, needs review, action required
+
 **Abandoned**:
 A Ticket a human has dropped before its Pipeline finished. It leaves Lasso's
 attention without counting as done and cannot be reopened; the same issue
