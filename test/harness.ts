@@ -2,9 +2,10 @@
 //
 // Each test gets a temporary Lasso home, the server spawned as a child process,
 // a PATH directory for fake executables, and a fake notifier on that PATH that
-// records what it was asked to post. Later slices add a fake Runner and the gh
-// and acli shims to the same directory. Time is driven by check-now, never by
-// timers: the harness config sets a tick cadence long enough never to fire.
+// records what it was asked to post, and gh and acli shims that answer from
+// canned replies and record every invocation. Later slices add a fake Runner
+// to the same directory. Time is driven by check-now, never by timers: the
+// harness config sets a tick cadence long enough never to fire.
 
 import { spawn, execFile, execFileSync, type ChildProcess } from "node:child_process";
 import { mkdtemp, mkdir, writeFile, rm, readFile } from "node:fs/promises";
@@ -16,7 +17,11 @@ import { stringify } from "yaml";
 const REPO_ROOT = path.resolve(import.meta.dirname, "..");
 const BIN = path.join(REPO_ROOT, "bin", "lasso.js");
 
-import type { Config } from "../src/server/config.ts";
+import type { Config, RepoConfig } from "../src/server/config.ts";
+import { parsePipeline } from "../src/pipeline/load.ts";
+import { DEFAULT_PIPELINE_YAML } from "../src/pipeline/default.ts";
+
+const DEFAULT_PIPELINE_STATUSES = [...new Set(parsePipeline("default", DEFAULT_PIPELINE_YAML).stages.flatMap((s) => (s.kind === "action" ? [s.status] : [])))];
 
 /** What a test writes to config.yaml: any subset of the real Config. */
 export type LassoConfig = {
@@ -39,6 +44,8 @@ export interface Lasso {
   page(route: string): Promise<Response>;
   /** The notifications the fake notifier recorded, oldest first. */
   notifications(): Promise<Array<{ title: string; body: string; url?: string }>>;
+  /** The gh and acli shims: canned replies in, recorded invocations out. */
+  tracker: TrackerShim;
   /** SIGINT the server and wait for exit; the home is left in place. */
   stop(): Promise<number | null>;
   /** Stop and delete the home. */
@@ -62,7 +69,125 @@ export async function makeHome(config: LassoConfig = {}): Promise<{ home: string
   await mkdir(pathDir, { recursive: true });
   await writeConfig(home, { tick: 3600, ...config });
   await installFakeNotifier(pathDir);
+  await installTrackerShims(pathDir);
   return { home, pathDir };
+}
+
+export interface TrackerReply {
+  tool: "gh" | "acli";
+  /** Every string must appear in the invocation's arguments joined by spaces. */
+  match: string[];
+  stdout?: string;
+  stderr?: string;
+  code?: number;
+}
+
+export interface TrackerCall {
+  tool: "gh" | "acli";
+  args: string[];
+}
+
+export interface TrackerShim {
+  /** Add a canned reply; the first reply whose `match` strings all appear wins. */
+  reply(reply: TrackerReply): Promise<void>;
+  /** Every gh and acli invocation so far, oldest first. */
+  calls(): Promise<TrackerCall[]>;
+  /** Forget recorded calls (replies stay). */
+  clearCalls(): Promise<void>;
+}
+
+const REPLIES_FILE = "tracker-replies.json";
+const CALLS_FILE = "tracker-calls.jsonl";
+
+async function installTrackerShims(pathDir: string): Promise<void> {
+  // Both shims record argv and answer from the same replies file. An
+  // invocation nothing matches exits 1 so a test fails on an unexpected call.
+  const script = (tool: string) => `#!/usr/bin/env node
+const fs = require("node:fs");
+const path = require("node:path");
+const args = process.argv.slice(2);
+fs.appendFileSync(path.join(__dirname, ${JSON.stringify(CALLS_FILE)}), JSON.stringify({ tool: ${JSON.stringify(tool)}, args }) + "\\n");
+let replies = [];
+try { replies = JSON.parse(fs.readFileSync(path.join(__dirname, ${JSON.stringify(REPLIES_FILE)}), "utf8")); } catch {}
+const joined = args.join(" ");
+const hit = replies.find((r) => r.tool === ${JSON.stringify(tool)} && r.match.every((m) => joined.includes(m)));
+if (!hit) { process.stderr.write("shim: no reply for ${tool} " + joined + "\\n"); process.exit(1); }
+if (hit.stdout) process.stdout.write(hit.stdout);
+if (hit.stderr) process.stderr.write(hit.stderr);
+process.exit(hit.code ?? 0);
+`;
+  await writeFile(path.join(pathDir, "gh"), script("gh"), { mode: 0o755 });
+  await writeFile(path.join(pathDir, "acli"), script("acli"), { mode: 0o755 });
+}
+
+export function trackerShim(pathDir: string): TrackerShim {
+  const repliesFile = path.join(pathDir, REPLIES_FILE);
+  const callsFile = path.join(pathDir, CALLS_FILE);
+  return {
+    async reply(reply) {
+      let replies: TrackerReply[] = [];
+      try {
+        replies = JSON.parse(await readFile(repliesFile, "utf8"));
+      } catch {
+        // first reply
+      }
+      replies.push(reply);
+      await writeFile(repliesFile, JSON.stringify(replies));
+    },
+    calls: () => readJsonl<TrackerCall>(callsFile),
+    async clearCalls() {
+      await rm(callsFile, { force: true });
+    },
+  };
+}
+
+/** One record per line; a file nothing has written yet reads as empty. */
+async function readJsonl<T>(file: string): Promise<T[]> {
+  try {
+    const text = await readFile(file, "utf8");
+    return text.split("\n").filter(Boolean).map((line) => JSON.parse(line) as T);
+  } catch {
+    return [];
+  }
+}
+
+export interface RepoSpec {
+  tracker?: RepoConfig["tracker"];
+  /** Defaults to the repo name upper-cased for JIRA, owner/name for GitHub. */
+  project?: string;
+  pipeline?: string;
+}
+
+export interface LassoWithRepos {
+  lasso: Lasso;
+  repos: Record<string, Awaited<ReturnType<typeof makeRepo>>>;
+}
+
+/**
+ * A running Lasso whose config names one real temp git repo per entry, plus
+ * any extra config and Pipelines. The default Pipeline transitions through
+ * three JIRA statuses; the acli shim is seeded to accept each so a reference
+ * intake into a JIRA repo passes the status check without every test saying so.
+ */
+export async function startLassoWithRepos(specs: Record<string, RepoSpec>, extra: LassoConfig = {}, pipelines: Record<string, string> = {}): Promise<LassoWithRepos> {
+  const { home, pathDir } = await makeHome();
+  const repos: LassoWithRepos["repos"] = {};
+  const config: Record<string, RepoConfig> = {};
+  for (const [name, spec] of Object.entries(specs)) {
+    repos[name] = await makeRepo(path.join(home, "..", "repos"), name);
+    const tracker = spec.tracker ?? "jira";
+    config[name] = { tracker, project: spec.project ?? (tracker === "jira" ? name.toUpperCase() : `owner/${name}`), path: repos[name].path, pipeline: spec.pipeline ?? "default" };
+  }
+  await writeConfig(home, { tick: 3600, repos: config, ...extra });
+  for (const [name, yaml] of Object.entries(pipelines)) {
+    await mkdir(path.join(home, "pipelines"), { recursive: true });
+    await writeFile(path.join(home, "pipelines", `${name}.yaml`), yaml);
+  }
+  const lasso = await startLasso({ home, pathDir });
+  for (const status of DEFAULT_PIPELINE_STATUSES) {
+    await lasso.tracker.reply({ tool: "acli", match: ["workitem search", `status = "${status}"`], stdout: "[]" });
+  }
+  return { lasso, repos };
 }
 
 export async function writeConfig(home: string, config: LassoConfig): Promise<void> {
@@ -147,17 +272,8 @@ export async function startLasso(opts: StartOptions = {}): Promise<Lasso> {
       return (text ? JSON.parse(text) : undefined) as T;
     },
     page: (route) => fetch(url + route),
-    async notifications() {
-      try {
-        const text = await readFile(path.join(pathDir, "notifications.jsonl"), "utf8");
-        return text
-          .split("\n")
-          .filter(Boolean)
-          .map((line) => JSON.parse(line));
-      } catch {
-        return [];
-      }
-    },
+    tracker: trackerShim(pathDir),
+    notifications: () => readJsonl(path.join(pathDir, "notifications.jsonl")),
     async stop() {
       if (child.exitCode !== null) return child.exitCode;
       child.kill("SIGINT");

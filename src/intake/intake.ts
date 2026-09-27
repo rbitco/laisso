@@ -1,14 +1,15 @@
 import { mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { homedir } from "node:os";
-import type { Config } from "../server/config.ts";
+import type { Config, RepoConfig } from "../server/config.ts";
 import type { LassoHome } from "../server/home.ts";
-import type { Tickets, TicketRow } from "../store/tickets.ts";
+import type { Tickets, TicketRow, NewTicket } from "../store/tickets.ts";
 import { listPipelines, loadPipeline, PipelineError, type Pipeline } from "../pipeline/load.ts";
 import { Git } from "../git.ts";
 import { ulid } from "../ulid.ts";
 import { slugify } from "./slug.ts";
-import { detect, detectKind, type Detection } from "./detect.ts";
+import { detect, type Detection } from "./detect.ts";
+import { trackerFor, TrackerError, type Issue, type Tracker } from "../tracker/tracker.ts";
 
 export class IntakeError extends Error {}
 
@@ -38,8 +39,36 @@ export class Intake {
     this.deps = deps;
   }
 
-  detect(input: string, repo?: string): Detection {
-    return detect(this.deps.config, input, listPipelines(this.deps.home.pipelinesDir), repo);
+  /**
+   * Detection, shown before anything is confirmed. A reference is looked up on
+   * its tracker so the title is known, and once the repo is settled the branch
+   * is named and checked so the confirmation can say it already exists.
+   */
+  async detect(input: string, repoName?: string): Promise<Detection> {
+    const { config, home, tickets } = this.deps;
+    const detection = detect(config, input, listPipelines(home.pipelinesDir), repoName);
+    if (detection.kind === "prompt") return detection;
+
+    const reference = detection.reference!;
+    this.assertNoActiveTicket(reference);
+
+    const chosen = repoName ?? detection.repo.suggestion;
+    const repo = chosen ? this.repoConfig(chosen) : null;
+    if (chosen && !repo) throw new IntakeError(`repo ${chosen} is not in config.yaml`);
+    if (chosen && repo) assertSameTracker(detection.kind, chosen, repo);
+    const tracker = trackerFor(detection.kind, repo?.project);
+    const issue = await fetchIssue(tracker, reference);
+    detection.title = issue.title;
+
+    if (repo) {
+      const branch = this.referenceBranch(tracker, reference, issue.title);
+      const git = new Git(expandHome(repo.path));
+      await git.fetch();
+      const exists = (await git.refExists(`refs/heads/${branch}`)) || (await git.refExists(`refs/remotes/origin/${branch}`));
+      detection.branch = { name: branch, exists };
+      if (exists) detection.notes.push(`existing branch ${branch} will be checked out`);
+    }
+    return detection;
   }
 
   /** Admit a confirmed intake: mint the Ticket, its directory, worktree, and branch. */
@@ -47,12 +76,11 @@ export class Intake {
     const { config, home, tickets } = this.deps;
     const input = (request.input ?? "").trim();
     if (!input) throw new IntakeError("nothing to intake: paste a reference or type a prompt");
-    const { kind, reference } = detectKind(input);
-    if (kind !== "prompt") throw new IntakeError(`reference intake is not available yet (${reference})`);
+    const detection = detect(config, input, listPipelines(home.pipelinesDir), request.repo);
 
-    const repoName = request.repo ?? this.detect(input).repo.suggestion;
+    const repoName = request.repo ?? detection.repo.suggestion;
     if (!repoName) throw new IntakeError("repo is ambiguous: pick one");
-    const repo = config.repos[repoName];
+    const repo = this.repoConfig(repoName);
     if (!repo) throw new IntakeError(`repo ${repoName} is not in config.yaml`);
 
     const pipelineName = request.pipeline ?? repo.pipeline;
@@ -65,8 +93,22 @@ export class Intake {
     }
 
     const id = ulid();
-    const title = input.length > 80 ? input.slice(0, 77).trimEnd() + "..." : input;
-    const branch = branchName(config.branch_prefix, id.slice(-8), slugify(input));
+    let row: Omit<NewTicket, "branch" | "worktree">;
+    let branch: string;
+    if (detection.kind === "prompt") {
+      row = { id, repo: repoName, reference: null, origin: "prompt", prompt: input, title: promptTitle(input), body: null, pipeline: pipeline.name, stage: pipeline.stages[0]!.name };
+      branch = branchName(config.branch_prefix, id.slice(-8), slugify(input));
+    } else {
+      const reference = detection.reference!;
+      this.assertNoActiveTicket(reference);
+      assertSameTracker(detection.kind, repoName, repo);
+      const tracker = trackerFor(repo.tracker, repo.project);
+      const issue = await fetchIssue(tracker, reference);
+      await checkTransitions(pipeline, tracker);
+      row = { id, repo: repoName, reference, origin: "tracker", prompt: null, title: issue.title, body: issue.body, pipeline: pipeline.name, stage: pipeline.stages[0]!.name };
+      branch = this.referenceBranch(tracker, reference, issue.title);
+    }
+
     const ticketDir = path.join(home.ticketsDir, id);
     const worktree = path.join(ticketDir, "worktree");
     mkdirSync(path.join(ticketDir, "sessions"), { recursive: true });
@@ -81,19 +123,7 @@ export class Intake {
     }
 
     try {
-      const ticket = tickets.insert({
-        id,
-        repo: repoName,
-        reference: null,
-        origin: "prompt",
-        prompt: input,
-        title,
-        body: null,
-        pipeline: pipeline.name,
-        stage: pipeline.stages[0]!.name,
-        branch,
-        worktree,
-      });
+      const ticket = tickets.insert({ ...row, branch, worktree });
       return { ticket, branchExisted: existed };
     } catch (error) {
       await git.removeWorktree(worktree).catch(() => undefined);
@@ -101,6 +131,47 @@ export class Intake {
       throw error;
     }
   }
+
+  private repoConfig(name: string): RepoConfig | null {
+    return this.deps.config.repos[name] ?? null;
+  }
+
+  /** One active Ticket per reference; a done or abandoned one may be intaken again. */
+  private assertNoActiveTicket(reference: string): void {
+    const active = this.deps.tickets.activeByReference(reference);
+    if (active) throw new IntakeError(`${reference} already has an active Ticket (${active.id})`);
+  }
+
+  private referenceBranch(tracker: Tracker, reference: string, title: string): string {
+    return branchName(this.deps.config.branch_prefix, tracker.branchKey(reference), slugify(title));
+  }
+}
+
+/** Every tracker.transition status in the Pipeline must be one the tracker knows, or intake is refused with the reason. */
+async function checkTransitions(pipeline: Pipeline, tracker: Tracker): Promise<void> {
+  const statuses = [...new Set(pipeline.stages.flatMap((s) => (s.kind === "action" ? [s.status] : [])))];
+  for (const status of statuses) {
+    const problem = await tracker.checkStatus(status);
+    if (problem) throw new IntakeError(`Pipeline ${pipeline.name}: status "${status}" is not a status in ${tracker.project}: ${problem}`);
+  }
+}
+
+/** A JIRA key cannot land in a GitHub-tracked repo, nor the reverse. */
+function assertSameTracker(kind: Detection["kind"], repoName: string, repo: RepoConfig): void {
+  if (kind !== "prompt" && kind !== repo.tracker) throw new IntakeError(`repo ${repoName} is tracked on ${repo.tracker}, not ${kind}`);
+}
+
+async function fetchIssue(tracker: Tracker, reference: string): Promise<Issue> {
+  try {
+    return await tracker.fetchIssue(reference);
+  } catch (error) {
+    if (error instanceof TrackerError) throw new IntakeError(error.message);
+    throw error;
+  }
+}
+
+function promptTitle(input: string): string {
+  return input.length > 80 ? input.slice(0, 77).trimEnd() + "..." : input;
 }
 
 export function branchName(prefix: string, key: string, slug: string): string {

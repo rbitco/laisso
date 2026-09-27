@@ -32,6 +32,8 @@ export interface TicketView {
   title: string;
   reference: string | null;
   origin: "tracker" | "prompt";
+  /** The issue body pulled at intake, or the prompt text; what a Stage prompt gets to read. */
+  body: string | null;
   repo: string;
   branch: string;
   worktree: string;
@@ -80,6 +82,7 @@ export function ticketView(ticket: TicketRow, ctx: ViewContext): TicketView {
     title: ticket.title,
     reference: ticket.reference,
     origin: ticket.origin,
+    body: ticket.origin === "prompt" ? ticket.prompt : ticket.body,
     repo: ticket.repo,
     branch: ticket.branch,
     worktree: ticket.worktree,

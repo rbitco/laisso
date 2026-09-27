@@ -9,6 +9,12 @@ export interface Detection {
   repo: { suggestion: string | null; choices: string[] };
   /** The Pipeline suggestion follows the chosen repo; `byRepo` lets a client re-pick when the repo changes. */
   pipeline: { suggestion: string; choices: string[]; byRepo: Record<string, string> };
+  /** The issue title for a reference, pulled from the tracker; null for a prompt. */
+  title: string | null;
+  /** The branch intake will use, once the repo is known, and whether it already exists locally or on origin. */
+  branch: { name: string; exists: boolean } | null;
+  /** Things to say before confirming: an existing branch, for instance. */
+  notes: string[];
 }
 
 const JIRA_KEY = /^([A-Z][A-Z0-9]+-\d+)$/;
@@ -58,5 +64,8 @@ export function detect(config: Config, input: string, pipelines: string[], repo?
     reference,
     repo: repoChoice,
     pipeline: { suggestion: (chosenRepo && byRepo[chosenRepo]) || fallback, choices: pipelines, byRepo },
+    title: null,
+    branch: null,
+    notes: [],
   };
 }

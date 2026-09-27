@@ -52,7 +52,7 @@ export function createApp(deps: AppDeps): Hono {
   app.post("/api/intake/detect", async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as { input?: string; repo?: string };
     if (!body.input?.trim()) return c.json({ error: "nothing to intake: paste a reference or type a prompt" }, 400);
-    return c.json(intake.detect(body.input, body.repo));
+    return c.json(await intake.detect(body.input, body.repo));
   });
 
   app.get("/api/tickets", (c) => {

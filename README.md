@@ -28,6 +28,11 @@ pnpm test
 ```
 
 Tests drive the localhost JSON API end to end against a temporary Lasso home,
-with fake executables on `PATH` standing in for anything outside the process
-(so far the notifier; the Runner and the `gh` and `acli` shims arrive with the
-slices that need them). See `test/harness.ts`.
+with fake executables on `PATH` standing in for anything outside the process:
+the notifier, and `gh` and `acli` shims that answer from canned replies a test
+seeds and record every invocation for it to assert on (the fake Runner arrives
+with the slice that needs it). See `test/harness.ts`.
+
+Reference intake talks to the tracker through those same CLIs: `acli jira
+workitem view` and a JQL search per transition status for JIRA, `gh issue view`
+for GitHub. Both must be installed and authenticated for reference Tickets.

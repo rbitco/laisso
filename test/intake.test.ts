@@ -1,8 +1,8 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { existsSync } from "node:fs";
-import { writeFile, mkdir } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import path from "node:path";
-import { startLasso, runCli, makeHome, makeRepo, writeConfig, type Lasso } from "./harness.ts";
+import { startLassoWithRepos, runCli, type Lasso, type LassoConfig } from "./harness.ts";
 import type { Detection } from "../src/intake/detect.ts";
 import type { TicketView, TicketDetail, IntakeResult } from "../src/api/views.ts";
 
@@ -18,22 +18,12 @@ stages:
     artifact: commits-on-branch
 `;
 
-async function lassoWithRepos(names: string[], extra: Record<string, unknown> = {}, pipelines: Record<string, string> = {}) {
-  const { home, pathDir } = await makeHome();
-  const repos: Record<string, unknown> = {};
-  const made: Record<string, Awaited<ReturnType<typeof makeRepo>>> = {};
-  for (const name of names) {
-    made[name] = await makeRepo(path.join(home, "..", "repos"), name);
-    repos[name] = { tracker: "jira", project: name.toUpperCase(), path: made[name].path, pipeline: pipelines[name] ?? "default" };
-  }
-  await writeConfig(home, { tick: 3600, repos, ...extra } as never);
-  if (Object.values(pipelines).includes("fast")) {
-    await mkdir(path.join(home, "pipelines"), { recursive: true });
-    await writeFile(path.join(home, "pipelines", "fast.yaml"), FAST_PIPELINE);
-  }
-  const lasso = await startLasso({ home, pathDir });
-  running.push(lasso);
-  return { lasso, repos: made };
+async function lassoWithRepos(names: string[], extra: LassoConfig = {}, pipelines: Record<string, string> = {}) {
+  const specs = Object.fromEntries(names.map((name) => [name, { pipeline: pipelines[name] }]));
+  const files: Record<string, string> = Object.values(pipelines).includes("fast") ? { fast: FAST_PIPELINE } : {};
+  const started = await startLassoWithRepos(specs, extra, files);
+  running.push(started.lasso);
+  return started;
 }
 
 describe("intake of a prompt Ticket", () => {

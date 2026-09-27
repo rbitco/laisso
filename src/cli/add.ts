@@ -20,7 +20,7 @@ export async function add(opts: AddOptions): Promise<number> {
     if (!input) throw new Error("usage: lasso add <reference | prompt>");
     const detection = await client.post<Detection>("/api/intake/detect", { input, repo: opts.repo });
     const say = opts.json ? console.error : console.log;
-    say(`${detection.kind}${detection.reference ? ` ${detection.reference}` : ""}: ${input}`);
+    say(`${detection.kind}${detection.reference ? ` ${detection.reference}` : ""}: ${detection.title ?? input}`);
 
     let repo = opts.repo ?? detection.repo.suggestion ?? undefined;
     if (!repo) {
@@ -32,6 +32,10 @@ export async function add(opts: AddOptions): Promise<number> {
     const pipeline = opts.pipeline ?? detection.pipeline.byRepo[repo] ?? detection.pipeline.suggestion;
     say(`repo: ${repo}`);
     say(`pipeline: ${pipeline}`);
+    // A reference's branch is only known once the repo is; ask again when the picker chose it.
+    const settled = detection.branch || !detection.reference ? detection : await client.post<Detection>("/api/intake/detect", { input, repo });
+    if (settled.branch) say(`branch: ${settled.branch.name}`);
+    for (const note of settled.notes) say(note);
 
     if (!opts.yes) {
       const answer = await ask("intake this Ticket? [y/N] ");
@@ -46,7 +50,6 @@ export async function add(opts: AddOptions): Promise<number> {
       console.log(JSON.stringify(ticket, null, 2));
       return 0;
     }
-    if (ticket.branchExisted) console.log(`existing branch ${ticket.branch} will be used`);
     console.log(`${ticket.id}  ${ticket.title}`);
     console.log(ticket.url);
     return 0;

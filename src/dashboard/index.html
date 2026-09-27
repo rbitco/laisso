@@ -35,7 +35,7 @@
   .notice { color: var(--warn); }
   .confirm { display: grid; gap: 8px; padding: 12px 16px; border: 1px solid var(--line); border-radius: 8px; margin: 0 0 16px; max-width: 720px; }
   .confirm .row { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
-  .confirm label { color: var(--muted); }
+  .confirm label, .confirm .why { color: var(--muted); }
   .confirm select { padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; }
   .kind { text-transform: uppercase; letter-spacing: 0.06em; font-size: 11px; color: var(--muted); }
   .ticket { display: grid; grid-template-columns: 110px 1fr auto; gap: 4px 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
@@ -186,12 +186,26 @@
       const d = await api('/api/intake/detect', { method: 'POST', body: JSON.stringify({ input }) });
       const repoSelect = select('repo', d.repo.choices, d.repo.suggestion);
       const pipelineSelect = select('pipeline', d.pipeline.choices, d.pipeline.suggestion);
-      // The Pipeline default follows the repo: re-pick it whenever the repo changes.
-      repoSelect.addEventListener('change', () => { const p = d.pipeline.byRepo[repoSelect.value]; if (p) pipelineSelect.value = p; });
+      const notes = el('div', { class: 'notes' });
+      const showNotes = (list) => notes.replaceChildren(...list.map((n) => el('div', { class: 'why', text: n })));
+      showNotes(d.notes);
+      repoSelect.addEventListener('change', async () => {
+        // The Pipeline default follows the repo: re-pick it whenever the repo changes.
+        const p = d.pipeline.byRepo[repoSelect.value];
+        if (p) pipelineSelect.value = p;
+        // A reference's branch depends on the repo: re-detect for the chosen repo to refresh the notes.
+        if (!d.reference) return;
+        showNotes([]);
+        try {
+          const again = await api('/api/intake/detect', { method: 'POST', body: JSON.stringify({ input, repo: repoSelect.value }) });
+          showNotes(again.notes);
+        } catch (e) { showNotice(e.message); }
+      });
       confirmPanel.replaceChildren(
         el('div', { class: 'kind', text: d.kind + (d.reference ? ' ' + d.reference : '') }),
-        el('div', { text: input }),
+        el('div', { text: d.title || input }),
         el('div', { class: 'row' }, [el('label', { text: 'repo' }), repoSelect, el('label', { text: 'pipeline' }), pipelineSelect]),
+        notes,
         el('div', { class: 'row' }, [el('button', { class: 'primary', type: 'submit', text: 'Confirm' }), el('button', { type: 'button', 'data-role': 'cancel', text: 'Cancel' })]),
       );
       confirmPanel.dataset.input = input;
@@ -208,7 +222,7 @@
       const t = await api('/api/tickets', { method: 'POST', body: JSON.stringify({ input: confirmPanel.dataset.input, repo, pipeline: confirmPanel.elements.pipeline.value }) });
       confirmPanel.hidden = true;
       intakeForm.reset();
-      if (t.branchExisted) showNotice('existing branch ' + t.branch + ' will be used');
+      if (t.branchExisted) showNotice('checked out existing branch ' + t.branch);
       location.hash = '';
       await refreshLedger();
     } catch (e) { showNotice(e.message); }
