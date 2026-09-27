@@ -40,8 +40,9 @@ _Avoid_: blocked, stuck, escalated
 
 **Abandoned**:
 A Ticket a human has dropped before its Pipeline finished. It leaves Lasso's
-attention without counting as done.
-_Avoid_: cancelled, closed, dropped, deleted
+attention without counting as done and cannot be reopened; the same issue
+can be intaken again as a new Ticket.
+_Avoid_: cancelled, closed, dropped, deleted, paused
 
 **Pipeline**:
 The ordered list of Stages a Ticket follows, with each Stage's prompt. A
