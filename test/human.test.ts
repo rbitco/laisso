@@ -156,6 +156,11 @@ describe("a human Stage", () => {
     expect(d.session).toMatchObject({ id: opened.session!.id, mode: "terminal", running: true, endedReason: null });
     expect(d.display.why).toMatch(/^terminal opened /);
     expect(d.sessions).toHaveLength(1);
+    // Open terminal after the restart relaunches the same row on its held id.
+    const reopened = await pull(again, ticket.id, "terminal");
+    expect(reopened.session!.id).toBe(opened.session!.id);
+    expect(reopened.sessions).toHaveLength(1);
+    expect(await again.terminals()).toHaveLength(2);
   });
 
   it("skips a human Stage without its artifact", async () => {

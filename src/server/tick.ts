@@ -72,6 +72,11 @@ export class Tick {
     return this.inFlight;
   }
 
+  /** Resolves once any tick in flight is through; at once when none is. Shutdown waits on this so nothing starts after the Sessions are killed. */
+  settle(): Promise<void> {
+    return this.inFlight ? this.inFlight.then(() => undefined) : Promise.resolve();
+  }
+
   status(): TickStatus {
     return {
       tickSeconds: this.tickSeconds,

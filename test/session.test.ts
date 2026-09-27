@@ -185,11 +185,11 @@ describe("a headless Stage", () => {
 
     const again = await startLasso({ home: lasso.home, pathDir: lasso.pathDir, port: lasso.port });
     running.push(again);
-    const d = await detailOf(again, ticket.id);
+    // The health check answers before the startup tick is through, so wait for run 2 to show.
+    const d = await waitFor(async () => { const x = await detailOf(again, ticket.id); return x.session?.ordinal === 2 ? x : null; }, "the startup tick to start run 2");
     expect(d.flag).toBeNull();
     const shut = d.sessions.find((s) => s.endedReason === "shutdown");
     expect(shut).toMatchObject({ ordinal: 1, outcome: "interrupted", endedBy: "outcome" });
-    // The startup tick started run 2.
     expect(d.session).toMatchObject({ ordinal: 2, running: true });
   });
 
@@ -204,10 +204,10 @@ describe("a headless Stage", () => {
 
     const again = await startLasso({ home: lasso.home, pathDir: lasso.pathDir, port: lasso.port });
     running.push(again);
-    const d = await detailOf(again, ticket.id);
-    const orphan = d.sessions.find((s) => s.ordinal === 1);
-    expect(orphan).toMatchObject({ running: false, outcome: "interrupted", endedBy: "outcome", endedReason: "shutdown" });
-    await waitFor(async () => { try { process.kill(call!.pid, 0); return null; } catch { return true; } }, "the orphaned Runner to die");
+    // Reconciliation waits the orphan out before closing its row, so the row closes only once the process is gone.
+    const d = await waitFor(async () => { const x = await detailOf(again, ticket.id); return x.sessions.find((s) => s.ordinal === 1)?.running === false ? x : null; }, "the orphan's row to close");
+    expect(d.sessions.find((s) => s.ordinal === 1)).toMatchObject({ outcome: "interrupted", endedBy: "outcome", endedReason: "shutdown" });
+    expect(() => process.kill(call!.pid, 0)).toThrow();
     expect(d.flag).toBeNull();
   });
 });

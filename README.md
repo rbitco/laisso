@@ -61,6 +61,16 @@ the PR closes unmerged. A merged PR finishes the Stage; green checks
 with nothing outstanding show as quiet. `lasso check` and the header's
 Check now run a tick and report what changed.
 
+Ctrl-C stops every running headless Session by process group and
+records each as interrupted with reason shutdown before Lasso exits;
+terminal Sessions are left alone. On the next start, before the first
+tick, any Session row still marked running is reconciled the same way
+(a leftover process is killed and waited out first), and the first tick
+runs at once, so queued Tickets and interrupted runs and Rounds resume
+within seconds. Ctrl-C during that first tick is honoured too. A
+Session cut off by shutdown never counts as an attempt, and a Round cut
+off is run again against its own attempts, not the previous Round's.
+
 Pipelines and `config.yaml` can be edited from the dashboard (the
 Pipelines and Config links in the header) or through `/api/pipelines`
 and `/api/config`. Edits change only the fields you touched and keep

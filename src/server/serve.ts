@@ -97,31 +97,38 @@ export async function serve(opts: ServeOptions): Promise<number> {
   log.info("started", { home: home.root, port: config.port, pid: process.pid, version: VERSION });
   console.log(`lasso listening at ${url}`);
 
-  runs.reconcile();
-  actions.reconcile();
-  mirror.markAllPending();
-  await tick.run("startup");
-  tick.start();
+  // Ctrl-C is honoured from here on, before reconciliation and the startup tick: a shutdown that
+  // lands inside them waits for them, so a Session the startup tick spawns is killed and recorded.
+  let resolveExit!: (code: number) => void;
+  const exited = new Promise<number>((resolve) => (resolveExit = resolve));
+  let shuttingDown = false;
+  const startup = (async () => {
+    await runs.reconcile();
+    if (shuttingDown) return;
+    actions.reconcile();
+    mirror.markAllPending();
+    await tick.run("startup");
+    if (!shuttingDown) tick.start();
+  })();
+  const shutdown = (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    log.info("shutdown", { signal });
+    tick.stop();
+    const finished = new Promise<void>((done) => server.close(() => done()));
+    void startup.then(() => tick.settle()).then(() => runs.shutdown()).then(() => finished).then(() => {
+      store.close();
+      releaseLock();
+      resolveExit(0);
+    });
+    setTimeout(() => {
+      releaseLock();
+      resolveExit(0);
+    }, 8000).unref();
+  };
+  process.once("SIGINT", () => shutdown("SIGINT"));
+  process.once("SIGTERM", () => shutdown("SIGTERM"));
 
-  return new Promise<number>((resolve) => {
-    let shuttingDown = false;
-    const shutdown = (signal: string) => {
-      if (shuttingDown) return;
-      shuttingDown = true;
-      log.info("shutdown", { signal });
-      tick.stop();
-      const finished = new Promise<void>((done) => server.close(() => done()));
-      void runs.shutdown().then(() => finished).then(() => {
-        store.close();
-        releaseLock();
-        resolve(0);
-      });
-      setTimeout(() => {
-        releaseLock();
-        resolve(0);
-      }, 8000).unref();
-    };
-    process.once("SIGINT", () => shutdown("SIGINT"));
-    process.once("SIGTERM", () => shutdown("SIGTERM"));
-  });
+  await startup;
+  return exited;
 }

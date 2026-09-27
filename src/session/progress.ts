@@ -76,10 +76,10 @@ export class Progress {
     return { pipeline: current.pipeline, stage: current.stage };
   }
 
-  /** The latest Round's Session ended interrupted or exhausted on its own: the Round is run again (spec: Budget). */
+  /** The latest Round's Session ended interrupted (shutdown included) or exhausted on its own: the Round is run again (spec: Budget). */
   private roundToRerun(ticket: TicketRow, stage: RunnerStage): boolean {
     const last = this.deps.sessions.latestRound(ticket.id, stage.name);
-    return last !== null && last.ended_by === "outcome" && last.ended_reason !== "shutdown" && (last.outcome === "interrupted" || last.outcome === "exhausted");
+    return last !== null && last.ended_by === "outcome" && (last.outcome === "interrupted" || last.outcome === "exhausted");
   }
 
   /** The action Stage the tick should perform for this Ticket now, or null. */

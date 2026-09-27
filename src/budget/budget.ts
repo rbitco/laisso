@@ -70,10 +70,14 @@ function triesOf(rows: SessionRow[], stage: string): SessionRow[] {
   return rows.filter((r) => r.stage === stage && r.mode !== "action" && r.ended_reason !== "shutdown");
 }
 
-/** The attempts at a Stage; in a repeating Stage, those of its latest Round, since each Round starts its attempts afresh. */
+/**
+ * The attempts at a Stage; in a repeating Stage, those of its latest Round, since each Round
+ * starts its attempts afresh. The latest Round is found among every run, shutdown ones included,
+ * so a Round cut off by Ctrl-C is re-run against its own count, not the previous Round's.
+ */
 export function attemptsOf(rows: SessionRow[], stage: string): SessionRow[] {
   const tries = triesOf(rows, stage);
-  const rounds = tries.map((r) => r.round).filter((n): n is number => n !== null);
+  const rounds = rows.filter((r) => r.stage === stage && r.mode !== "action").map((r) => r.round).filter((n): n is number => n !== null);
   if (rounds.length === 0) return tries;
   const latest = Math.max(...rounds);
   return tries.filter((r) => r.round === latest);

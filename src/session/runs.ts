@@ -176,7 +176,8 @@ export class Runs {
 
     child.stdout!.on("data", (chunk: Buffer) => writeSync(fd, chunk));
     child.stderr!.on("data", (chunk: Buffer) => (live.stderr += chunk.toString()));
-    child.once("spawn", () => sessions.setPid(sessionId, child.pid ?? null));
+    // The pid is recorded at once, so a Lasso killed before the spawn event still leaves a reconcilable row.
+    sessions.setPid(sessionId, child.pid ?? null);
     child.once("error", (error) => {
       log.error("session.spawn_failed", { session: sessionId, error: error.message });
       live.spawnError = `${command.argv[0]}: ${error.message}`;
@@ -215,12 +216,15 @@ export class Runs {
     await Promise.all(this.settling);
   }
 
-  /** On startup, rows still marked running belong to a Lasso that is gone: close them as shutdown. */
-  reconcile(): void {
-    for (const row of this.deps.sessions.running()) {
-      if (row.mode !== "headless") continue;
-      // Only the process group is signalled: a lone pid may have been reused by something unrelated since.
-      if (row.pid) signal(-row.pid, "SIGTERM");
+  /**
+   * On startup, rows still marked running belong to a Lasso that is gone: their processes are
+   * killed and waited out, then the rows close as shutdown, all before anything new starts in
+   * the same worktree.
+   */
+  async reconcile(): Promise<void> {
+    const rows = this.deps.sessions.running().filter((row) => row.mode === "headless");
+    await Promise.all(rows.map((row) => (row.pid ? killGroup(row.pid) : Promise.resolve())));
+    for (const row of rows) {
       this.deps.sessions.end(row.id, { ended_by: "outcome", ended_reason: "shutdown", outcome: "interrupted", final_message: null, usage: null, cost_usd: null, transcript_path: row.transcript_path });
       this.deps.log.info("session.reconciled", { session: row.id, ticket: row.ticket });
     }
@@ -285,12 +289,15 @@ export class Runs {
     // A signal death, whoever sent it (exit 143 is SIGTERM under a shell), is an interruption whatever stdout says.
     const terminated = live.exit?.code === 143 || live.exit?.signal != null;
     const signalName = live.exit?.signal ?? "SIGTERM";
-    const outcome: Outcome = live.killReason || live.spawnError || terminated ? { ...parsed, status: "interrupted" } : parsed;
+    // A process that ended on its own during shutdown, before it could be killed, counts as cut off too:
+    // its verdict cannot be acted on now, so the Session is run again on restart and spends no attempt.
+    const reason: EndedReason | null = live.killReason ?? (this.closing && !live.spawnError ? "shutdown" : null);
+    const outcome: Outcome = reason || live.spawnError || terminated ? { ...parsed, status: "interrupted" } : parsed;
     const stderr = live.stderr.trim() || null;
-    const finalMessage = outcome.finalMessage ?? (live.killReason ? `killed: ${live.killReason.replace("_", " ")}` : (live.spawnError ?? (terminated ? `terminated by ${signalName}` : stderr)));
+    const finalMessage = outcome.finalMessage ?? (live.killReason ? `killed: ${live.killReason.replace("_", " ")}` : reason ? "ended during shutdown" : (live.spawnError ?? (terminated ? `terminated by ${signalName}` : stderr)));
     const end: SessionEnd = {
-      ended_by: live.killReason === "stop" || live.killReason === "abandon" ? "human" : "outcome",
-      ended_reason: live.killReason,
+      ended_by: reason === "stop" || reason === "abandon" ? "human" : "outcome",
+      ended_reason: reason,
       outcome: outcome.status,
       final_message: finalMessage,
       usage: outcome.usage ? JSON.stringify(outcome.usage) : null,
@@ -302,7 +309,7 @@ export class Runs {
     // The verdict is reached before the row ends so a reader never sees a
     // Session over and its Ticket not yet advanced or Flagged.
     let verdict: Verdict | null;
-    if (live.killReason === "shutdown" || this.closing) verdict = null;
+    if (reason === "shutdown" || this.closing) verdict = null;
     else if (live.spawnError) verdict = { flag: "runner.unavailable", detail: live.spawnError };
     else verdict = await this.judge(live, end);
     const row = this.deps.sessions.end(sessionId, end);
@@ -358,6 +365,26 @@ export class Runs {
       verdict = verdict.flag.startsWith("budget.") ? { ...verdict, detail } : { flag: refusal.reason, detail };
     }
     await progress.flag(ticket.id, verdict.flag, verdict.detail);
+  }
+}
+
+/** Kill a leftover process group: SIGTERM, a grace period, then SIGKILL. Only the group is signalled: a lone pid may have been reused since. */
+async function killGroup(pid: number): Promise<void> {
+  if (!signal(-pid, "SIGTERM")) return;
+  const deadline = Date.now() + KILL_GRACE_MS;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 50));
+    if (!alive(-pid)) return;
+  }
+  signal(-pid, "SIGKILL");
+}
+
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
   }
 }
 

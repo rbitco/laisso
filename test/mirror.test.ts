@@ -207,6 +207,30 @@ stages:
     expect(retried.sessions.filter((s) => s.stage === "transition-in-progress")).toHaveLength(2);
   });
 
+  it("honours Ctrl-C that lands during the startup tick: the Session it started is recorded as shutdown", async () => {
+    const { lasso } = await jiraLasso([{ tool: "acli", match: ["workitem view APP-12", "--fields labels"], stdout: jiraLabels("lasso:grill") }]);
+    const ticket = await admit(lasso, "APP-12");
+    await lasso.runner.script({ hang: true });
+    await pull(lasso, ticket.id, "skip");
+    await checkNow(lasso);
+    const headless = (d: TicketDetail) => d.sessions.filter((s) => s.mode === "headless").map((s) => [s.ordinal, s.running, s.endedReason]);
+    await waitFor(async () => ((await detailOf(lasso, ticket.id)).session?.mode === "headless" ? true : null), "implement to start");
+    expect(await lasso.stop()).toBe(0);
+    // A slow tracker keeps the startup tick busy long enough for Ctrl-C to land inside it.
+    await lasso.tracker.reply({ tool: "acli", match: ["workitem view APP-12", "--fields labels"], stdout: jiraLabels("lasso:implement"), sleepMs: 1500, once: true }, true);
+
+    const again = await startLasso({ home: lasso.home, pathDir: lasso.pathDir, port: lasso.port });
+    running.push(again);
+    // Node's default handler would exit at once with 130, leaving the Session the tick spawns running.
+    expect(await again.stop()).toBe(0);
+
+    const third = await startLasso({ home: lasso.home, pathDir: lasso.pathDir, port: lasso.port });
+    running.push(third);
+    const d = await waitFor(async () => { const x = await detailOf(third, ticket.id); return headless(x).length === 3 ? x : null; }, "the startup tick to start run 3");
+    expect(d.flag).toBeNull();
+    expect(headless(d)).toEqual([[3, true, null], [2, false, "shutdown"], [1, false, "shutdown"]]);
+  });
+
   it("closes an action Session left running by a crash and performs the Stage again on the next tick", async () => {
     const { lasso } = await jiraLasso([{ tool: "acli", match: ["workitem view APP-12", "--fields labels"], stdout: jiraLabels("lasso:grill") }]);
     const ticket = await admit(lasso, "APP-12");

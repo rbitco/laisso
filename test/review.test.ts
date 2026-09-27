@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
-import { startLassoWithRepos, runCli, waitFor, claudeFixture, type Lasso, type TrackerReply } from "./harness.ts";
+import { startLassoWithRepos, startLasso, runCli, waitFor, claudeFixture, type Lasso, type TrackerReply } from "./harness.ts";
 import type { TicketDetail, IntakeResult } from "../src/api/views.ts";
 import type { TickChange } from "../src/server/tick.ts";
 
@@ -319,6 +319,51 @@ describe("the Review loop", () => {
     expect(extended.budget.rounds).toEqual({ used: 2, limit: 2, source: "ticket" });
     const two = await settled(lasso, ticket.id, 2);
     expect(two.display).toEqual({ state: "quiet", label: "Quiet", why: "PR #7: checks green, nothing outstanding" });
+  });
+
+  it("re-runs a Round cut off by shutdown on the startup tick, with the same snapshot and no attempt spent", async () => {
+    const { lasso, ticket } = await lassoWithTicket();
+    await setScene(lasso, ticket.branch, { ...green, tag: "asked", comments: [{ id: 201, author: "bob", body: "Rename this.", at: T1 }] });
+    await lasso.runner.script({ hang: true });
+    await checkNow(lasso);
+    await launched(lasso, 1);
+    expect(await lasso.stop()).toBe(0);
+
+    const again = await startLasso({ home: lasso.home, pathDir: lasso.pathDir, port: lasso.port });
+    running.push(again);
+    // The health check answers before the startup tick is through, so wait for the re-run to show.
+    const d = await waitFor(async () => { const x = await detailOf(again, ticket.id); return x.sessions.length === 2 ? x : null; }, "the startup tick to re-run the Round");
+    expect(d.sessions.map((s) => [s.ordinal, s.round, s.running, s.endedReason])).toEqual([[2, 1, true, null], [1, 1, false, "shutdown"]]);
+    expect(d.session!.feedback).toEqual([expect.objectContaining({ kind: "comment", id: "201", addressed: null })]);
+    expect(d.budget.attempts).toEqual({ used: 1, limit: 2, source: "global" });
+    expect(d.budget.rounds).toEqual({ used: 1, limit: 5, source: "global" });
+    const [, second] = await launched(again, 2);
+    expect(second!.argv[2]).toContain("Round 1: 1 item.");
+  });
+
+  it("re-runs a Round past the first after shutdown without charging the earlier Round's attempts", async () => {
+    const { lasso, ticket } = await lassoWithTicket(PIPELINE.replace("artifact: pr-merged", "artifact: pr-merged\n    budget: { attempts: 1 }"));
+    const first: Scene = { ...green, tag: "first", comments: [{ id: 201, author: "bob", body: "Rename this.", at: T1 }] };
+    const replied: Scene = { ...first, tag: "replied", comments: [...first.comments!, { id: 202, author: "lasso-bot", body: `Renamed.\n${marker(ticket.id, 1)}`, at: T2 }] };
+    await setScene(lasso, ticket.branch, first);
+    await lasso.runner.script({ stdout: claudeFixture("success.json"), commands: swapTo(lasso, await sceneFile(lasso, ticket.branch, "replied", replied)) });
+    await checkNow(lasso);
+    const one = await settled(lasso, ticket.id);
+    expect(one.budget.attempts).toEqual({ used: 1, limit: 1, source: "pipeline" });
+
+    await setScene(lasso, ticket.branch, { ...replied, tag: "more", comments: [...replied.comments!, { id: 203, author: "bob", body: "One more thing.", at: T3 }] });
+    await lasso.runner.script({ hang: true });
+    await checkNow(lasso);
+    await launched(lasso, 2);
+    expect(await lasso.stop()).toBe(0);
+
+    const again = await startLasso({ home: lasso.home, pathDir: lasso.pathDir, port: lasso.port });
+    running.push(again);
+    const d = await waitFor(async () => { const x = await detailOf(again, ticket.id); return x.sessions.length === 3 ? x : null; }, "the startup tick to re-run Round 2");
+    expect(d.flag).toBeNull();
+    expect(d.sessions.map((s) => [s.ordinal, s.round, s.running, s.endedReason])).toEqual([[3, 2, true, null], [2, 2, false, "shutdown"], [1, 1, false, null]]);
+    expect(d.budget.attempts).toEqual({ used: 1, limit: 1, source: "pipeline" });
+    expect(d.budget.rounds).toEqual({ used: 2, limit: 5, source: "global" });
   });
 
   it("lasso check reports what changed, or nothing new", async () => {

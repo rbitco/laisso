@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { readFile, writeFile, rm } from "node:fs/promises";
 import path from "node:path";
-import { startLassoWithRepos, waitFor, claudeFixture, type Lasso, type LassoConfig } from "./harness.ts";
+import { startLassoWithRepos, startLasso, waitFor, claudeFixture, type Lasso, type LassoConfig } from "./harness.ts";
 import type { TicketDetail, TicketView, IntakeResult } from "../src/api/views.ts";
 import type { TickChange } from "../src/server/tick.ts";
 
@@ -154,5 +154,32 @@ describe("the concurrency cap", () => {
     expect(summaries((await checkNow(lasso)).changes)).toEqual(["started implement"]);
     expect((await detailOf(lasso, b.id)).display.state).toBe("running");
     expect((await detailOf(lasso, a.id)).display).toMatchObject({ state: "queued", why: "1 in line; notes starts when a slot frees" });
+  });
+
+  it("records every running Session as shutdown on Ctrl-C; the startup tick fills the slots, the one in line first", async () => {
+    const lasso = await lassoWith({ concurrency: 2 });
+    await lasso.runner.script({ hang: true });
+    const a = await intake(lasso, "work", "A");
+    const b = await intake(lasso, "work", "B");
+    const c = await intake(lasso, "work", "C");
+    await checkNow(lasso);
+    expect((await ledger(lasso)).map((t) => [t.id, t.display.state]).sort()).toEqual([[a.id, "running"], [b.id, "running"], [c.id, "queued"]]);
+    expect(await lasso.stop()).toBe(0);
+
+    const again = await startLasso({ home: lasso.home, pathDir: lasso.pathDir, port: lasso.port });
+    running.push(again);
+    // The health check answers before the startup tick is through, so wait for its work to show.
+    // C waited in line longest and goes first; the interrupted A and B rejoin the line behind it, A first.
+    const states = await waitFor(async () => {
+      const rows = (await ledger(again)).map((t) => [t.id, t.display.state, t.display.why]).sort();
+      return rows.filter((r) => r[1] === "running").length === 2 ? rows : null;
+    }, "the startup tick to fill both slots");
+    expect(states).toEqual([[a.id, "running", "implement, run 2"], [b.id, "queued", "1 in line; implement starts when a slot frees"], [c.id, "running", "implement, run 1"]]);
+    for (const t of [a, b]) {
+      const d = await detailOf(again, t.id);
+      expect(d.sessions.find((s) => s.ordinal === 1)).toMatchObject({ running: false, outcome: "interrupted", endedBy: "outcome", endedReason: "shutdown" });
+      expect(d.budget.attempts.used).toBe(t === a ? 1 : 0);
+      expect(d.flag).toBeNull();
+    }
   });
 });

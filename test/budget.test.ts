@@ -174,7 +174,7 @@ describe("spend and Rounds", () => {
     const { startLasso } = await import("./harness.ts");
     const again = await startLasso({ home: lasso.home, pathDir: lasso.pathDir, port: lasso.port });
     running.push(again);
-    const d = await detailOf(again, ticket.id);
+    const d = await waitFor(async () => { const x = await detailOf(again, ticket.id); return x.session?.ordinal === 2 ? x : null; }, "the startup tick to start run 2");
     expect(d.flag).toBeNull();
     expect(d.session).toMatchObject({ ordinal: 2, running: true });
     expect(d.budget.attempts).toEqual({ used: 1, limit: 1, source: "global" });
