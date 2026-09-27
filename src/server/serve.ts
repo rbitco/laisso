@@ -5,6 +5,7 @@ import { loadConfig } from "./config.ts";
 import { acquireLock, AlreadyRunning } from "./lock.ts";
 import { createLogger } from "./log.ts";
 import { Store } from "../store/store.ts";
+import { Tickets } from "../store/tickets.ts";
 import { Tick } from "./tick.ts";
 import { createApp } from "../api/app.ts";
 
@@ -33,8 +34,9 @@ export async function serve(opts: ServeOptions): Promise<number> {
   }
 
   const store = new Store(home.dbFile);
+  const tickets = new Tickets(store.db);
   const tick = new Tick(config.tick, log, async () => []);
-  const app = createApp({ store, config, tick, version: VERSION });
+  const app = createApp({ config, home, tick, tickets, version: VERSION });
 
   if (defaults.wroteConfig) log.info("config.written", { file: home.configFile });
   if (defaults.wrotePipeline) log.info("pipeline.written", { name: "default" });

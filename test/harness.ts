@@ -6,7 +6,7 @@
 // and acli shims to the same directory. Time is driven by check-now, never by
 // timers: the harness config sets a tick cadence long enough never to fire.
 
-import { spawn, execFile, type ChildProcess } from "node:child_process";
+import { spawn, execFile, execFileSync, type ChildProcess } from "node:child_process";
 import { mkdtemp, mkdir, writeFile, rm, readFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -215,4 +215,37 @@ export function runCli(
     if (ctx.stdin !== undefined) child.stdin?.end(ctx.stdin);
     else child.stdin?.end();
   });
+}
+
+// --- git ---------------------------------------------------------------------
+
+export interface TempRepo {
+  /** The bare origin. */
+  origin: string;
+  /** The local checkout Lasso is configured with; worktrees hang off it. */
+  path: string;
+  defaultBranch: string;
+  git(args: string[], cwd?: string): string;
+}
+
+/** A real git origin (bare) plus a clone with one commit on `main`, for intake tests. */
+export async function makeRepo(root: string, name = "app"): Promise<TempRepo> {
+  const git = (args: string[], cwd = clone) =>
+    execFileSync("git", args, {
+      cwd,
+      encoding: "utf8",
+      env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" },
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+  const origin = path.join(root, `${name}.git`);
+  const clone = path.join(root, name);
+  await mkdir(root, { recursive: true });
+  git(["init", "--bare", "-b", "main", origin], root);
+  git(["clone", "-q", origin, clone], root);
+  await writeFile(path.join(clone, "README.md"), `# ${name}\n`);
+  git(["add", "README.md"]);
+  git(["commit", "-q", "-m", "init"]);
+  git(["push", "-q", "-u", "origin", "main"]);
+  git(["remote", "set-head", "origin", "main"]);
+  return { origin, path: clone, defaultBranch: "main", git };
 }

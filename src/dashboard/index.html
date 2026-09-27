@@ -33,6 +33,27 @@
   [data-role="ledger"] { display: grid; gap: 8px; }
   .empty { color: var(--muted); padding: 32px 0; text-align: center; }
   .notice { color: var(--warn); }
+  .confirm { display: grid; gap: 8px; padding: 12px 16px; border: 1px solid var(--line); border-radius: 8px; margin: 0 0 16px; max-width: 720px; }
+  .confirm .row { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
+  .confirm label { color: var(--muted); }
+  .confirm select { padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; }
+  .kind { text-transform: uppercase; letter-spacing: 0.06em; font-size: 11px; color: var(--muted); }
+  .ticket { display: grid; grid-template-columns: 110px 1fr auto; gap: 4px 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+  .ticket:hover { border-color: var(--accent); }
+  .pill { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--pill); white-space: nowrap; align-self: start; }
+  .pill.needs_you, .pill.flagged { background: var(--accent); color: #fff; }
+  .ticket .ref { font-variant-numeric: tabular-nums; }
+  .ticket .why, .ticket .repo { color: var(--muted); font-size: 12px; }
+  .ticket .stage { color: var(--muted); font-size: 12px; text-align: right; }
+  .detail { display: grid; gap: 12px; }
+  .detail dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; }
+  .detail dt { color: var(--muted); }
+  .detail dd { margin: 0; font-family: ui-monospace, monospace; font-size: 13px; word-break: break-all; }
+  .stations { display: flex; flex-wrap: wrap; gap: 6px; }
+  .station { padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; font-size: 12px; color: var(--muted); }
+  .station.current { border-color: var(--accent); color: var(--accent); }
+  .station.done { color: var(--ok); border-color: var(--ok); }
+  a.back { color: var(--muted); }
 </style>
 </head>
 <body>
@@ -48,15 +69,20 @@
   </div>
 </header>
 <main>
-  <section data-role="ledger" aria-label="Tickets"></section>
   <p data-role="notice" class="notice" hidden></p>
+  <form data-role="confirm" class="confirm" hidden></form>
+  <section data-role="ledger" aria-label="Tickets"></section>
+  <section data-role="detail" class="detail" hidden></section>
 </main>
 <script>
 (function () {
   const $ = (sel) => document.querySelector(sel);
   const ledger = $('[data-role="ledger"]');
+  const detail = $('[data-role="detail"]');
+  const confirmPanel = $('[data-role="confirm"]');
   const tickStatus = $('[data-role="tick-status"]');
   const notice = $('[data-role="notice"]');
+  const intakeForm = $('form[data-role="intake"]');
 
   async function api(route, init) {
     const res = await fetch(route, Object.assign({ headers: { 'content-type': 'application/json' } }, init || {}));
@@ -64,6 +90,15 @@
     const body = text ? JSON.parse(text) : null;
     if (!res.ok) throw new Error((body && body.error) || (res.status + ' ' + route));
     return body;
+  }
+
+  function el(tag, attrs, children) {
+    const node = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs || {})) {
+      if (k === 'class') node.className = v; else if (k === 'text') node.textContent = v; else node.setAttribute(k, v);
+    }
+    for (const child of children || []) node.appendChild(typeof child === 'string' ? document.createTextNode(child) : child);
+    return node;
   }
 
   function relative(iso) {
@@ -74,6 +109,8 @@
     return m < 60 ? m + 'm ago' : Math.round(m / 60) + 'h ago';
   }
 
+  function showNotice(msg) { notice.textContent = msg || ''; notice.hidden = !msg; }
+
   async function refreshTick() {
     try {
       const t = await api('/api/tick');
@@ -82,31 +119,110 @@
     } catch (e) { tickStatus.textContent = 'tick: unreachable'; }
   }
 
+  function ticketRow(t) {
+    const row = el('article', { class: 'ticket', 'data-id': t.id }, [
+      el('span', { class: 'pill ' + t.display.state, text: t.display.label || t.display.state }),
+      el('div', {}, [el('div', { class: 'ref', text: t.reference || t.shortId }), el('div', { class: 'repo', text: t.repo })]),
+      el('div', { class: 'stage', text: t.stage.name + ' · ' + (t.stage.index + 1) + '/' + t.stage.total }),
+      el('span', {}),
+      el('div', {}, [el('div', { text: t.title }), el('div', { class: 'why', text: t.display.why })]),
+      el('div', { class: 'stage', text: relative(t.updatedAt) }),
+    ]);
+    row.addEventListener('click', () => { location.hash = t.id; });
+    return row;
+  }
+
   async function refreshLedger() {
     const tickets = await api('/api/tickets');
     ledger.replaceChildren();
     if (!tickets.length) {
-      const p = document.createElement('p');
-      p.className = 'empty';
-      p.textContent = 'No active Tickets. Paste a reference or a prompt above to start one.';
-      ledger.appendChild(p);
+      ledger.appendChild(el('p', { class: 'empty', text: 'No active Tickets. Paste a reference or a prompt above to start one.' }));
+      return;
     }
+    for (const t of tickets) ledger.appendChild(ticketRow(t));
   }
 
-  function showNotice(msg) { notice.textContent = msg; notice.hidden = !msg; }
+  async function showDetail(id) {
+    let t;
+    try { t = await api('/api/tickets/' + encodeURIComponent(id)); }
+    catch (e) { showNotice(e.message); location.hash = ''; return; }
+    const back = el('a', { class: 'back', href: '#', text: '← all Tickets' });
+    const stations = el('div', { class: 'stations' }, t.stages.map((s, i) =>
+      el('span', { class: 'station' + (i < t.stage.index ? ' done' : i === t.stage.index ? ' current' : ''), text: s.label })));
+    detail.replaceChildren(
+      back,
+      el('h2', { text: (t.reference ? t.reference + ' · ' : '') + t.title }),
+      el('div', {}, [el('span', { class: 'pill ' + t.display.state, text: t.display.label }), ' ', el('span', { class: 'why', text: t.display.why })]),
+      stations,
+      el('dl', {}, [
+        el('dt', { text: 'repo' }), el('dd', { text: t.repo }),
+        el('dt', { text: 'branch' }), el('dd', { text: t.branch }),
+        el('dt', { text: 'worktree' }), el('dd', { text: t.worktree }),
+        el('dt', { text: 'pipeline' }), el('dd', { text: t.pipeline }),
+        el('dt', { text: 'id' }), el('dd', { text: t.id }),
+      ]),
+    );
+    ledger.hidden = true; detail.hidden = false;
+  }
+
+  function route() {
+    const id = location.hash.replace(/^#/, '');
+    if (id) showDetail(id); else { detail.hidden = true; ledger.hidden = false; refreshLedger(); }
+  }
+
+  function select(name, choices, suggestion) {
+    const s = el('select', { name });
+    if (!suggestion) s.appendChild(el('option', { value: '', text: 'pick one' }));
+    for (const c of choices) { const o = el('option', { value: c, text: c }); if (c === suggestion) o.selected = true; s.appendChild(o); }
+    return s;
+  }
+
+  intakeForm.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const input = intakeForm.elements.input.value.trim();
+    if (!input) return;
+    showNotice('');
+    try {
+      const d = await api('/api/intake/detect', { method: 'POST', body: JSON.stringify({ input }) });
+      const repoSelect = select('repo', d.repo.choices, d.repo.suggestion);
+      const pipelineSelect = select('pipeline', d.pipeline.choices, d.pipeline.suggestion);
+      // The Pipeline default follows the repo: re-pick it whenever the repo changes.
+      repoSelect.addEventListener('change', () => { const p = d.pipeline.byRepo[repoSelect.value]; if (p) pipelineSelect.value = p; });
+      confirmPanel.replaceChildren(
+        el('div', { class: 'kind', text: d.kind + (d.reference ? ' ' + d.reference : '') }),
+        el('div', { text: input }),
+        el('div', { class: 'row' }, [el('label', { text: 'repo' }), repoSelect, el('label', { text: 'pipeline' }), pipelineSelect]),
+        el('div', { class: 'row' }, [el('button', { class: 'primary', type: 'submit', text: 'Confirm' }), el('button', { type: 'button', 'data-role': 'cancel', text: 'Cancel' })]),
+      );
+      confirmPanel.dataset.input = input;
+      confirmPanel.hidden = false;
+      confirmPanel.querySelector('[data-role="cancel"]').addEventListener('click', () => { confirmPanel.hidden = true; });
+    } catch (e) { showNotice(e.message); }
+  });
+
+  confirmPanel.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const repo = confirmPanel.elements.repo.value;
+    if (!repo) { showNotice('repo is ambiguous: pick one'); return; }
+    try {
+      const t = await api('/api/tickets', { method: 'POST', body: JSON.stringify({ input: confirmPanel.dataset.input, repo, pipeline: confirmPanel.elements.pipeline.value }) });
+      confirmPanel.hidden = true;
+      intakeForm.reset();
+      if (t.branchExisted) showNotice('existing branch ' + t.branch + ' will be used');
+      location.hash = '';
+      await refreshLedger();
+    } catch (e) { showNotice(e.message); }
+  });
 
   $('[data-role="check-now"]').addEventListener('click', async () => {
-    try { await api('/api/check-now', { method: 'POST' }); await refreshTick(); await refreshLedger(); }
+    try { await api('/api/check-now', { method: 'POST' }); await refreshTick(); route(); }
     catch (e) { showNotice(e.message); }
   });
 
-  $('form[data-role="intake"]').addEventListener('submit', async (ev) => {
-    ev.preventDefault();
-    showNotice('Intake is not available yet.');
-  });
-
-  refreshTick(); refreshLedger();
+  window.addEventListener('hashchange', route);
+  refreshTick(); route();
   setInterval(refreshTick, 5000);
+  setInterval(() => { if (!ledger.hidden) refreshLedger(); }, 10000);
 })();
 </script>
 </body>

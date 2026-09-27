@@ -36,4 +36,33 @@ export class Store {
   }
 }
 
-const MIGRATIONS: Array<(db: DatabaseSync) => void> = [];
+const MIGRATIONS: Array<(db: DatabaseSync) => void> = [
+  (db) => {
+    db.exec(`
+      CREATE TABLE tickets (
+        id TEXT PRIMARY KEY,
+        repo TEXT NOT NULL,
+        reference TEXT,
+        origin TEXT NOT NULL CHECK (origin IN ('tracker', 'prompt')),
+        prompt TEXT,
+        title TEXT NOT NULL,
+        body TEXT,
+        pipeline TEXT NOT NULL,
+        stage TEXT NOT NULL,
+        state TEXT NOT NULL CHECK (state IN ('active', 'done', 'abandoned')),
+        flagged_at TEXT,
+        flag_reason TEXT,
+        flag_detail TEXT,
+        unflagged_at TEXT,
+        pr TEXT,
+        branch TEXT NOT NULL,
+        worktree TEXT NOT NULL,
+        feedback_watermark TEXT,
+        mirror_pending TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE UNIQUE INDEX tickets_active_reference ON tickets (reference) WHERE state = 'active' AND reference IS NOT NULL;
+    `);
+  },
+];

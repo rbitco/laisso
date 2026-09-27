@@ -1,19 +1,36 @@
 import { Hono } from "hono";
-import type { Store } from "../store/store.ts";
 import type { Config } from "../server/config.ts";
+import type { LassoHome } from "../server/home.ts";
 import type { Tick } from "../server/tick.ts";
+import type { Tickets, TicketRow } from "../store/tickets.ts";
+import { Intake, IntakeError, type IntakeRequest } from "../intake/intake.ts";
+import { loadPipeline, type Pipeline } from "../pipeline/load.ts";
 import { dashboardHtml } from "../dashboard/page.ts";
+import { ticketView, ticketDetail, sortForLedger, type ViewContext, type IntakeResult } from "./views.ts";
 
 export interface AppDeps {
-  store: Store;
   config: Config;
+  home: LassoHome;
   tick: Tick;
+  tickets: Tickets;
   version: string;
 }
 
 /** The one JSON API under /api. The dashboard page and the CLI are both clients of it. */
 export function createApp(deps: AppDeps): Hono {
   const app = new Hono();
+  const intake = new Intake({ config: deps.config, home: deps.home, tickets: deps.tickets });
+  const baseUrl = `http://localhost:${deps.config.port}`;
+  const viewContext: ViewContext = {
+    baseUrl,
+    pipelineFor: (ticket: TicketRow): Pipeline | null => {
+      try {
+        return loadPipeline(deps.home.pipelinesDir, ticket.pipeline);
+      } catch {
+        return null;
+      }
+    },
+  };
 
   // Every response carries the version, so a client can tell Lasso from a stranger on the port.
   app.use("*", async (c, next) => {
@@ -21,15 +38,40 @@ export function createApp(deps: AppDeps): Hono {
     c.header("x-lasso-version", deps.version);
   });
 
+  app.onError((error, c) => {
+    if (error instanceof IntakeError) return c.json({ error: error.message }, 400);
+    console.error(error);
+    return c.json({ error: error.message }, 500);
+  });
+
   app.get("/api/health", (c) => c.json({ ok: true, pid: process.pid, version: deps.version }));
 
-  app.get("/api/tickets", (c) => c.json([]));
-
-  app.get("/api/tickets/:id", (c) => c.json({ error: `no Ticket matches ${c.req.param("id")}` }, 404));
-
   app.get("/api/tick", (c) => c.json(deps.tick.status()));
-
   app.post("/api/check-now", async (c) => c.json(await deps.tick.run("check-now")));
+
+  app.post("/api/intake/detect", async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { input?: string; repo?: string };
+    if (!body.input?.trim()) return c.json({ error: "nothing to intake: paste a reference or type a prompt" }, 400);
+    return c.json(intake.detect(body.input, body.repo));
+  });
+
+  app.get("/api/tickets", (c) => {
+    const all = c.req.query("all") === "1" || c.req.query("all") === "true";
+    return c.json(sortForLedger(deps.tickets.list({ all }).map((t) => ticketView(t, viewContext))));
+  });
+
+  app.post("/api/tickets", async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as Partial<IntakeRequest>;
+    const { ticket, branchExisted } = await intake.admit({ input: body.input ?? "", repo: body.repo, pipeline: body.pipeline });
+    const result: IntakeResult = { ...ticketView(ticket, viewContext), branchExisted };
+    return c.json(result, 201);
+  });
+
+  app.get("/api/tickets/:id", (c) => {
+    const ticket = deps.tickets.find(c.req.param("id"));
+    if (!ticket) return c.json({ error: `no Ticket matches ${c.req.param("id")}` }, 404);
+    return c.json(ticketDetail(ticket, viewContext));
+  });
 
   app.get("/", (c) => c.html(dashboardHtml()));
 
