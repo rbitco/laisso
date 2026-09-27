@@ -1,7 +1,7 @@
 import type { LassoHome } from "../server/home.ts";
 import type { Logger } from "../server/log.ts";
 import type { Tickets, TicketRow } from "../store/tickets.ts";
-import type { Sessions } from "../store/sessions.ts";
+import type { Sessions, EndedReason } from "../store/sessions.ts";
 import type { Notifier } from "../notify/notifier.ts";
 import { loadPipeline, type ActionStage, type Pipeline, type RunnerStage, type Stage } from "../pipeline/load.ts";
 import type { Mirror } from "../tracker/mirror.ts";
@@ -40,7 +40,7 @@ export interface ProgressDeps {
  * How a Ticket moves along its Pipeline (ADR 0001): a Stage finishes and the
  * next becomes current, holds for a Start trigger when the finished Stage
  * said `advance: false`, or the Ticket is done after the last. Flags freeze
- * it. Every Attention event notifies once, here.
+ * it until an exit clears them. Every Attention event notifies once, here.
  */
 export class Progress {
   private deps: ProgressDeps;
@@ -107,6 +107,37 @@ export class Progress {
     return { pipeline: current.pipeline, stage: current.stage };
   }
 
+  /** The Stage a Flag exit acts on: where an active, Flagged Ticket stopped. */
+  flaggedStage(ticket: TicketRow): Current {
+    if (ticket.state !== "active") throw new TriggerError(`Ticket ${ticket.reference ?? ticket.id} is ${ticket.state}`);
+    if (!ticket.flagged_at) throw new TriggerError(`Ticket ${ticket.reference ?? ticket.id} is not Flagged`);
+    const current = this.current(ticket);
+    if ("problem" in current) throw new TriggerError(current.problem);
+    return current;
+  }
+
+  /** Mark done and Skip act on the human Stage under way, or on whatever Stage a Flagged Ticket stopped at. */
+  private exitStage(ticket: TicketRow): { pipeline: Pipeline; stage: Stage } {
+    return ticket.flagged_at ? this.flaggedStage(ticket) : this.humanStage(ticket);
+  }
+
+  /**
+   * An exit clears the Flag; the Ticket may move again. Synchronous, so the
+   * exit can start what comes next before anything else sees the Ticket
+   * unflagged and idle; the tracker is told afterwards with `pushMirror`.
+   */
+  unflag(ticketId: string, exit: string): TicketRow {
+    const ticket = this.deps.tickets.get(ticketId)!;
+    if (!ticket.flagged_at) throw new TriggerError(`Ticket ${ticket.reference ?? ticket.id} is no longer Flagged`);
+    const cleared = this.deps.tickets.update(ticketId, unflagPatch(ticket, new Date().toISOString()));
+    this.deps.log.info("ticket.unflagged", { ticket: ticketId, exit, reason: ticket.flag_reason });
+    return cleared;
+  }
+
+  async pushMirror(ticketId: string): Promise<void> {
+    await this.deps.mirror.push(ticketId);
+  }
+
   /** A Stage just became current (at intake, or by advancing): a human Stage is an Attention event. */
   entered(ticket: TicketRow, stage: Stage): void {
     if (stage.kind === "runner" && stage.human) this.deps.notifier.post("human", ticket, `${stage.name} needs you`);
@@ -121,14 +152,15 @@ export class Progress {
     const current = this.current(ticket);
     if ("problem" in current) return this.flag(ticket.id, "pipeline.missing", current.problem);
     const next = current.pipeline.stages[current.index + 1];
+    const now = new Date().toISOString();
     if (!next) {
-      const done = this.deps.tickets.update(ticket.id, { state: "done", holding_since: null });
+      const done = this.deps.tickets.update(ticket.id, { state: "done", holding_since: null, ...unflagPatch(ticket, now) });
       this.deps.log.info("ticket.done", { ticket: ticket.id });
       await this.deps.mirror.push(done.id);
       return;
     }
     const holds = current.stage.kind === "runner" && !current.stage.advance;
-    const updated = this.deps.tickets.update(ticket.id, { stage: next.name, holding_since: holds ? new Date().toISOString() : null });
+    const updated = this.deps.tickets.update(ticket.id, { stage: next.name, holding_since: holds ? now : null, ...unflagPatch(ticket, now) });
     this.deps.log.info("ticket.advanced", { ticket: ticket.id, stage: next.name, holding: holds });
     if (holds) this.deps.notifier.post("gate", updated, `${current.stage.name} finished; Start ${next.name} when ready`);
     else this.entered(updated, next);
@@ -145,10 +177,10 @@ export class Progress {
     return released;
   }
 
-  /** Mark <Stage> done: the artifact is checked with warn-and-override, then the human Stage finishes. */
+  /** Mark <Stage> done: the artifact is checked with warn-and-override, then the Stage finishes (a human Stage, or a Flagged one: accept and advance). */
   async markDone(ticket: TicketRow, override: boolean): Promise<TicketRow> {
-    const { stage } = this.humanStage(ticket);
-    if (!override && stage.artifact) {
+    const { stage } = this.exitStage(ticket);
+    if (!override && stage.kind === "runner" && stage.artifact) {
       const verdict = await checkArtifact(stage.artifact, ticket.worktree);
       if (!verdict.present) throw new ArtifactWarning(stage.artifact, verdict.detail ?? "missing");
     }
@@ -156,18 +188,28 @@ export class Progress {
     const fresh = this.deps.tickets.get(ticket.id)!;
     if (fresh.stage !== stage.name) throw new TriggerError(`${stage.name} already finished`);
     this.endHumanSessions(fresh);
-    this.deps.log.info("ticket.marked_done", { ticket: ticket.id, stage: stage.name, override });
+    this.deps.log.info("ticket.marked_done", { ticket: ticket.id, stage: stage.name, override, flagged: fresh.flagged_at !== null });
     await this.finished(fresh);
     return this.deps.tickets.get(ticket.id)!;
   }
 
-  /** Skip: the human Stage finishes without its artifact. */
+  /** Skip: the Stage finishes without its artifact (a human Stage, or a Flagged one: drop and advance). */
   async skip(ticket: TicketRow): Promise<TicketRow> {
-    const { stage } = this.humanStage(ticket);
+    const { stage } = this.exitStage(ticket);
     this.endHumanSessions(ticket);
-    this.deps.log.info("ticket.skipped", { ticket: ticket.id, stage: stage.name });
+    this.deps.log.info("ticket.skipped", { ticket: ticket.id, stage: stage.name, flagged: ticket.flagged_at !== null });
     await this.finished(ticket);
     return this.deps.tickets.get(ticket.id)!;
+  }
+
+  /** Abandon: the Ticket leaves Lasso's attention for good (CONTEXT.md: Abandoned). Worktree, branch and PR cleanup is LASSO-39. */
+  async abandon(ticket: TicketRow): Promise<TicketRow> {
+    if (ticket.state !== "active") throw new TriggerError(`Ticket ${ticket.reference ?? ticket.id} is already ${ticket.state}`);
+    const abandoned = this.deps.tickets.update(ticket.id, { state: "abandoned", holding_since: null, ...unflagPatch(ticket, new Date().toISOString()) });
+    this.endHumanSessions(abandoned, "abandon");
+    this.deps.log.info("ticket.abandoned", { ticket: ticket.id, stage: ticket.stage, flagged: ticket.flagged_at !== null });
+    await this.deps.mirror.push(abandoned.id);
+    return abandoned;
   }
 
   async flag(ticketId: string, reason: string, detail: string | null): Promise<void> {
@@ -177,11 +219,16 @@ export class Progress {
     await this.deps.mirror.push(flagged.id);
   }
 
-  /** Terminal Session rows end only by a human's act (spec: human Stages): no Outcome, no reason. */
-  private endHumanSessions(ticket: TicketRow): void {
+  /** Terminal Session rows end only by a human's act (spec: human Stages): no Outcome, and a reason only for Abandon. */
+  endHumanSessions(ticket: TicketRow, reason: EndedReason | null = null): void {
     for (const row of this.deps.sessions.running(ticket.id)) {
       if (row.mode !== "terminal") continue;
-      this.deps.sessions.end(row.id, { ended_by: "human", ended_reason: null, outcome: null, final_message: null, usage: null, cost_usd: null, transcript_path: row.transcript_path });
+      this.deps.sessions.end(row.id, { ended_by: "human", ended_reason: reason, outcome: null, final_message: null, usage: null, cost_usd: null, transcript_path: row.transcript_path });
     }
   }
+}
+
+/** The fields that clear a Flag, when there is one to clear; the reason goes with it. */
+function unflagPatch(ticket: TicketRow, now: string): Partial<TicketRow> {
+  return ticket.flagged_at ? { flagged_at: null, flag_reason: null, flag_detail: null, unflagged_at: now } : {};
 }

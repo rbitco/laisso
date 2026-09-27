@@ -27,6 +27,16 @@ passing through: `args` (extra argv before the prompt) and, for Codex,
 Codex ignores a skill mention whose path is outside its catalog without
 a word, so set `skillsDir` when the skills live elsewhere.
 
+Every Ticket runs under a Budget: `rounds` (per repeating Stage),
+`attempts` (per Stage), `wallTime` (per headless Session) and `spend`
+(USD per Ticket). `config.yaml` sets the defaults, a Pipeline may
+tighten or loosen them (`budget:` on the Pipeline for `spend`, on a
+Stage for the rest), and Extend on a Ticket overrides both. Lasso
+retries an interrupted or exhausted Session while attempts remain and
+Flags the Ticket when they run out or the spend is used up. A Flagged
+Ticket offers six exits in the dashboard and the API: Retry, Resume,
+Extend, Mark done, Skip and Abandon.
+
 ## Test
 
 ```sh

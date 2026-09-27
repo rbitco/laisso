@@ -33,13 +33,15 @@ export const piAdapter: RunnerAdapter = {
     const env = ticketEnv(request);
     const args = extraArgs(request.runnerOptions);
     if (request.mode === "terminal") {
-      if (request.resume) return { argv: ["pi", "--session-id", request.sessionId, "-a", ...args], cwd: request.cwd, env };
+      if (request.resume) return { argv: ["pi", "--session-id", request.runnerSessionId ?? request.sessionId, "-a", ...args], cwd: request.cwd, env };
       const argv = ["pi", "--session-id", request.sessionId];
       if (request.name) argv.push("-n", request.name);
       argv.push("-a", ...args, prompt);
       return { argv, cwd: request.cwd, env };
     }
-    return { argv: ["pi", "-p", "--mode", "json", "--session-id", request.sessionId, "-a", ...args, prompt], cwd: request.cwd, env };
+    // Pi re-enters a session by the same flag that names a new one; on resume that is the earlier Session's id.
+    const session = request.resume ? request.runnerSessionId ?? request.sessionId : request.sessionId;
+    return { argv: ["pi", "-p", "--mode", "json", "--session-id", session, "-a", ...args, prompt], cwd: request.cwd, env };
   },
 
   parse(stdout: string, request: Pick<RunRequest, "cwd" | "sessionId">): Outcome {

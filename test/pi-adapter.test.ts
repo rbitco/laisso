@@ -55,6 +55,12 @@ describe("pi adapter command", () => {
     expect(cmd.argv.at(-1)!.startsWith("/skill:implement\n")).toBe(true);
   });
 
+  it("resumes a headless run on the earlier Session's id while the new row keeps its own", () => {
+    const cmd = piAdapter.command({ ...request, resume: true, runnerSessionId: "11111111-2222-4333-8444-555555555555" });
+    expect(cmd.argv.slice(0, 6)).toEqual(["pi", "-p", "--mode", "json", "--session-id", "11111111-2222-4333-8444-555555555555"]);
+    expect(cmd.env.LASSO_SESSION).toBe(request.sessionId);
+  });
+
   it("builds an interactive terminal command on the same session id with a display name", () => {
     const cmd = piAdapter.command({ ...request, mode: "terminal", name: "Lasso: APP-12 grill", skills: ["grilling"], prompt: null });
     expect(cmd.argv.slice(0, 6)).toEqual(["pi", "--session-id", request.sessionId, "-n", "Lasso: APP-12 grill", "-a"]);

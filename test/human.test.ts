@@ -54,6 +54,7 @@ describe("a human Stage", () => {
       { action: "terminal", label: "Open terminal" },
       { action: "done", label: "Mark grill done" },
       { action: "skip", label: "Skip grill" },
+      { action: "abandon", label: "Abandon" },
     ]);
     const [hello] = await notified(lasso, 1);
     expect(hello).toEqual({ title: "Add dark mode", body: "grill needs you", url: `${lasso.url}/#${ticket.id}` });
@@ -110,7 +111,7 @@ describe("a human Stage", () => {
     const held = await pull(lasso, ticket.id, "done", { override: true });
     expect(held.stage.name).toBe("implement");
     expect(held.display).toEqual({ state: "holding", label: "Holding", why: "Start implement when ready" });
-    expect(held.triggers).toEqual([{ action: "start", label: "Start implement" }]);
+    expect(held.triggers).toEqual([{ action: "start", label: "Start implement" }, { action: "abandon", label: "Abandon" }]);
     expect(held.session).toMatchObject({ stage: "grill", mode: "terminal", running: false, endedBy: "human", endedReason: null, outcome: null });
     const [, gate] = await notified(lasso, 2);
     expect(gate).toMatchObject({ title: "Add dark mode", body: "grill finished; Start implement when ready" });
@@ -124,7 +125,7 @@ describe("a human Stage", () => {
     await lasso.runner.script({ stdout: claudeFixture("success.json"), commands: [["git", "commit", "-q", "--allow-empty", "-m", "work"]] });
     const started = await pull(lasso, ticket.id, "start");
     expect(started.display.state).toBe("running");
-    expect(started.triggers).toEqual([]);
+    expect(started.triggers).toEqual([{ action: "abandon", label: "Abandon" }]);
 
     const notes = await waitFor(async () => { const d = await detailOf(lasso, ticket.id); return d.stage.name === "notes" ? d : null; }, "implement to finish");
     expect(notes.display).toEqual({ state: "needs_you", label: "Needs you", why: "not started" });
@@ -203,6 +204,6 @@ stages:
     await waitFor(async () => (lasso.stdout().includes("notify.failed") ? true : null), "the failure to be logged");
     expect(lasso.stdout()).toMatch(/WARN notify.failed event=flagged .*terminal-notifier: broken/);
     expect(await lasso.notifications()).toHaveLength(1);
-    expect((await detailOf(lasso, ticket.id)).triggers).toEqual([]);
+    expect((await detailOf(lasso, ticket.id)).triggers.map((x) => x.action)).toEqual(["retry", "resume", "extend", "done", "skip", "abandon"]);
   });
 });

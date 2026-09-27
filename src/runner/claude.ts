@@ -35,20 +35,9 @@ export const claudeAdapter: RunnerAdapter = {
       argv.push(...extraArgs(request.runnerOptions), prompt);
       return { argv, cwd: request.cwd, env };
     }
-    const argv = [
-      "claude",
-      "-p",
-      prompt,
-      "--output-format",
-      "stream-json",
-      "--verbose",
-      "--permission-mode",
-      "acceptEdits",
-      "--permission-prompts",
-      "none",
-      "--session-id",
-      request.sessionId,
-    ];
+    const argv = ["claude", "-p", prompt, "--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits", "--permission-prompts", "none"];
+    // Resume re-enters the earlier session, which keeps its id; a fresh run takes the id Lasso chose.
+    argv.push(...(request.resume ? ["--resume", request.runnerSessionId ?? request.sessionId] : ["--session-id", request.sessionId]));
     if (request.limits.remainingSpendUsd !== undefined) argv.push("--max-budget-usd", String(request.limits.remainingSpendUsd));
     argv.push(...extraArgs(request.runnerOptions));
     return { argv, cwd: request.cwd, env };

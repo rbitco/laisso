@@ -33,6 +33,27 @@
   [data-role="ledger"] { display: grid; gap: 8px; }
   .empty { color: var(--muted); padding: 32px 0; text-align: center; }
   .notice { color: var(--warn); }
+  .flagbox { display: grid; gap: 8px; padding: 12px 16px; border: 2px solid var(--warn); border-radius: 8px; margin: 12px 0; max-width: 720px; }
+  .flagbox .reason { font-weight: 600; color: var(--warn); }
+  .flagbox .last { white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--muted); max-height: 6em; overflow: auto; }
+  .gauges { display: flex; flex-wrap: wrap; gap: 16px; margin: 12px 0; }
+  .gauge { display: grid; justify-items: center; gap: 2px; cursor: pointer; font-size: 12px; color: var(--muted); }
+  .gauge svg { width: 56px; height: 56px; }
+  .gauge .track { fill: none; stroke: var(--line); stroke-width: 6; }
+  .gauge .arc { fill: none; stroke: var(--ok); stroke-width: 6; stroke-linecap: round; transform: rotate(-90deg); transform-origin: 50% 50%; }
+  .gauge.warn .arc { stroke: #c9962b; }
+  .gauge.over .arc { stroke: var(--warn); }
+  .gauge .value { color: var(--ink); font-variant-numeric: tabular-nums; }
+  .rings { display: flex; gap: 4px; align-self: center; }
+  .rings svg { width: 16px; height: 16px; }
+  .rings .track { fill: none; stroke: var(--line); stroke-width: 3; }
+  .rings .arc { fill: none; stroke: var(--ok); stroke-width: 3; transform: rotate(-90deg); transform-origin: 50% 50%; }
+  .rings .warn .arc { stroke: #c9962b; }
+  .rings .over .arc { stroke: var(--warn); }
+  .editor { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; align-items: end; padding: 12px 16px; border: 1px solid var(--line); border-radius: 8px; margin: 0 0 12px; max-width: 720px; }
+  .editor label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+  .editor input { padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; font: inherit; }
+  .editor .row { display: flex; gap: 8px; grid-column: 1 / -1; }
   .confirm { display: grid; gap: 8px; padding: 12px 16px; border: 1px solid var(--line); border-radius: 8px; margin: 0 0 16px; max-width: 720px; }
   .confirm .row { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
   .confirm label, .confirm .why { color: var(--muted); }
@@ -151,7 +172,7 @@
       el('span', { class: 'pill ' + t.display.state, text: t.display.label || t.display.state }),
       el('div', {}, [el('div', { class: 'ref', text: t.reference || t.shortId }), el('div', { class: 'repo', text: t.repo })]),
       el('div', { class: 'stage', text: t.stage.label + ' · ' + (t.stage.index + 1) + '/' + t.stage.total }),
-      el('span', {}),
+      miniRings(t.budget),
       el('div', {}, [el('div', { text: t.title }), el('div', { class: 'why', text: t.display.why })]),
       el('div', { class: 'stage', text: relative(t.updatedAt) }),
     ]);
@@ -174,6 +195,83 @@
     if (s < 60) return s + 's';
     const m = Math.floor(s / 60);
     return m < 60 ? m + 'm' + (s % 60) + 's' : Math.floor(m / 60) + 'h' + (m % 60) + 'm';
+  }
+
+  function svg(tag, attrs) {
+    const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    for (const [k, v] of Object.entries(attrs || {})) node.setAttribute(k, v);
+    return node;
+  }
+
+  // One ring: the arc is the share used, amber from 70 %, red at the limit.
+  function ring(g, size) {
+    const r = size / 2 - 4, c = 2 * Math.PI * r;
+    const share = g.limit > 0 ? Math.min(1, g.used / g.limit) : 1;
+    const node = svg('svg', { viewBox: '0 0 ' + size + ' ' + size, class: share >= 1 ? 'over' : share >= 0.7 ? 'warn' : '' });
+    node.appendChild(svg('circle', { class: 'track', cx: size / 2, cy: size / 2, r }));
+    node.appendChild(svg('circle', { class: 'arc', cx: size / 2, cy: size / 2, r, 'stroke-dasharray': c, 'stroke-dashoffset': c * (1 - share) }));
+    return node;
+  }
+
+  const GAUGES = [
+    ['rounds', 'Rounds', (g) => g.used + '/' + g.limit],
+    ['attempts', 'attempts', (g) => g.used + '/' + g.limit],
+    ['wallTime', 'wall time', (g) => duration(g.used) + '/' + g.limitText],
+    ['spend', 'spend', (g) => '$' + g.used.toFixed(2) + '/$' + g.limit],
+  ];
+
+  // The Ledger's four mini rings, no words.
+  function miniRings(b) {
+    return el('span', { class: 'rings', 'data-role': 'rings', title: GAUGES.map(([k, name, text]) => name + ' ' + text(b[k])).join(' · ') }, GAUGES.map(([k]) => ring(b[k], 16)));
+  }
+
+  // The four ring gauges; any of them opens the inline Ticket-layer editor (Extend). A starred value is set on the Ticket.
+  function gauges(t, openEditor) {
+    return el('div', { class: 'gauges', 'data-role': 'gauges' }, GAUGES.map(([k, name, text]) => {
+      const g = t.budget[k];
+      const share = g.limit > 0 ? g.used / g.limit : 1;
+      const node = el('div', { class: 'gauge' + (share >= 1 ? ' over' : share >= 0.7 ? ' warn' : ''), 'data-gauge': k, title: 'set ' + (g.source === 'ticket' ? 'on this Ticket' : g.source === 'pipeline' ? 'by the Pipeline' : 'globally') + '; click to extend' },
+        [ring(g, 56), el('span', { class: 'value', text: text(g) + (g.source === 'ticket' ? '*' : '') }), el('span', { text: name })]);
+      node.addEventListener('click', openEditor);
+      return node;
+    }));
+  }
+
+  function budgetEditor(t) {
+    const form = el('form', { class: 'editor', 'data-role': 'budget-editor' });
+    form.hidden = true;
+    const fields = GAUGES.map(([k, name]) => {
+      const g = t.budget[k];
+      const input = el('input', { name: k, placeholder: k === 'wallTime' ? g.limitText : String(g.limit), value: t.budget.ticket[k] === null ? '' : String(t.budget.ticket[k]) });
+      return [k, input, el('label', {}, [name + (k === 'spend' ? ' (USD)' : k === 'wallTime' ? ' (30m, 1h)' : ''), input])];
+    });
+    const save = el('button', { class: 'primary', type: 'submit', text: 'Save' });
+    const cancel = el('button', { type: 'button', text: 'Cancel' });
+    cancel.addEventListener('click', () => { form.hidden = true; });
+    form.replaceChildren(...fields.map((f) => f[2]), el('div', { class: 'row' }, [save, cancel, el('span', { class: 'why', text: 'blank falls back to the Pipeline or global value; a running Session keeps the wall time it started with' })]));
+    form.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const body = {};
+      for (const [k, input] of fields) {
+        const raw = input.value.trim();
+        if (raw !== '' && k !== 'wallTime' && !/^\d+(\.\d+)?$/.test(raw)) { showNotice(k + ' must be a number'); input.focus(); return; }
+        body[k] = raw === '' ? null : k === 'wallTime' ? raw : Number(raw);
+      }
+      save.disabled = true;
+      try { await api('/api/tickets/' + encodeURIComponent(t.id) + '/extend', { method: 'POST', body: JSON.stringify(body) }); showDetail(t.id); }
+      catch (e) { showNotice(e.message); save.disabled = false; }
+    });
+    return form;
+  }
+
+  // The Flag box: why, when, the last word from the Runner, and the six exits in the trigger bar below it.
+  function flagBox(t) {
+    const last = t.session && t.session.finalMessage;
+    return el('div', { class: 'flagbox', 'data-role': 'flagbox' }, [
+      el('div', {}, [el('span', { class: 'reason', text: t.flag.reason }), ' ', el('span', { class: 'meta', text: 'Flagged ' + relative(t.flag.at) })]),
+      el('div', { text: t.flag.detail || '' }),
+      last ? el('div', { class: 'last', text: last }) : el('span'),
+    ]);
   }
 
   function copyChip(label, value) {
@@ -274,12 +372,20 @@
     ]);
   }
 
-  // The levers on this Ticket. Mark done met with a missing artifact offers to advance anyway, inline.
-  function triggerBar(t) {
+  // The levers on this Ticket. Mark done met with a missing artifact offers to advance anyway, inline;
+  // Extend opens the Budget editor; Abandon asks for a second click.
+  function triggerBar(t, openEditor) {
     const bar = el('div', { class: 'triggers', 'data-role': 'triggers' });
     const buttons = t.triggers.map((trigger) => {
-      const button = el('button', { type: 'button', text: trigger.label, class: trigger.action === 'terminal' || trigger.action === 'start' ? 'primary' : '' });
-      button.addEventListener('click', () => pull(trigger.action, {}));
+      const primary = trigger.action === 'terminal' || trigger.action === 'start' || trigger.action === 'retry';
+      const button = el('button', { type: 'button', text: trigger.label, class: primary ? 'primary' : '', 'data-action': trigger.action });
+      if (trigger.action === 'extend') button.addEventListener('click', openEditor);
+      else if (trigger.action === 'abandon') button.addEventListener('click', () => {
+        if (button.dataset.armed) { pull('abandon', {}); return; }
+        button.dataset.armed = '1'; button.textContent = 'Abandon for sure?';
+        setTimeout(() => { delete button.dataset.armed; button.textContent = trigger.label; }, 4000);
+      });
+      else button.addEventListener('click', () => pull(trigger.action, {}));
       return button;
     });
     bar.replaceChildren(...buttons);
@@ -316,8 +422,13 @@
       el('div', {}, [el('span', { class: 'pill ' + t.display.state, text: t.display.label }), ' ', el('span', { class: 'why', text: t.display.why + (t.mirrorPending ? ' · tracker labels not written yet' : '') })]),
       stations,
     ];
-    if (t.flag) children.push(el('p', { class: 'notice', text: t.flag.reason + (t.flag.detail ? ': ' + t.flag.detail : '') }));
-    if (t.triggers.length) children.push(triggerBar(t));
+    const editor = budgetEditor(t);
+    const openEditor = () => { editor.hidden = false; editor.querySelector('input').focus(); };
+    // A Flagged Ticket's exits live in its Flag box (spec: the Flag box); otherwise the triggers stand alone.
+    const bar = t.triggers.length ? triggerBar(t, openEditor) : null;
+    if (t.flag) { const box = flagBox(t); if (bar) box.append(bar); children.push(box); }
+    else if (bar) children.push(bar);
+    children.push(gauges(t, openEditor), editor);
     if (t.session) children.push(sessionPane(t, t.session, gen));
     children.push(el('dl', {}, [
       el('dt', { text: 'repo' }), el('dd', { text: t.repo }),

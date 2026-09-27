@@ -29,7 +29,7 @@ export interface RunRequest {
   sessionId: string;
   /** The session id is held from an earlier launch: re-enter it rather than start it. */
   resume?: boolean;
-  /** On resume, the id the Runner gave the held session when it names its own (Codex); Lasso's otherwise. */
+  /** On resume, the session to re-enter when it is not `sessionId`: an earlier Session's id, or the id the Runner gave it (Codex). */
   runnerSessionId?: string;
   /** A human-readable label for terminal Sessions; never an identity. */
   name?: string;

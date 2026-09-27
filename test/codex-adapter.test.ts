@@ -56,6 +56,14 @@ describe("codex adapter command", () => {
     expect(cmd.argv.at(-1)!.startsWith("[$implement](/repo/.agents/skills/implement/SKILL.md)\n[$tdd](/repo/.agents/skills/tdd/SKILL.md)\n\n")).toBe(true);
   });
 
+  it("resumes a headless run through exec resume on the thread id Codex assigned, with the sandbox set top-level", () => {
+    const cmd = codexAdapter.command({ ...request, resume: true, runnerSessionId: "01a0e17d-746e-7123-93ce-e3f3b05e8375" });
+    expect(cmd.argv.slice(0, 9)).toEqual(["codex", "-a", "never", "-s", "workspace-write", "exec", "resume", "--json", "01a0e17d-746e-7123-93ce-e3f3b05e8375"]);
+    expect(cmd.argv).not.toContain("-C");
+    expect(cmd.cwd).toBe(request.cwd);
+    expect(cmd.env.LASSO_SESSION).toBe(request.sessionId);
+  });
+
   it("builds an interactive terminal command in the worktree with the prompt, and resumes by thread id", () => {
     const opened = codexAdapter.command({ ...request, mode: "terminal", name: "Lasso: APP-12 grill", skills: ["grilling"], prompt: null });
     expect(opened.argv.slice(0, 3)).toEqual(["codex", "-s", "workspace-write"]);

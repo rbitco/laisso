@@ -35,6 +35,8 @@ export const codexAdapter: RunnerAdapter = {
       if (request.resume) return { argv: ["codex", "resume", request.runnerSessionId ?? request.sessionId, "-s", "workspace-write", ...args], cwd: request.cwd, env };
       return { argv: ["codex", "-s", "workspace-write", ...args, prompt], cwd: request.cwd, env };
     }
+    // `exec resume` takes no sandbox or cwd of its own: the sandbox goes top-level and the cwd is the process's.
+    if (request.resume) return { argv: ["codex", "-a", "never", "-s", "workspace-write", "exec", "resume", "--json", ...args, request.runnerSessionId ?? request.sessionId, prompt], cwd: request.cwd, env };
     return { argv: ["codex", "-a", "never", "exec", "--json", "-C", request.cwd, "-s", "workspace-write", ...args, prompt], cwd: request.cwd, env };
   },
 

@@ -46,6 +46,7 @@ function renderDetail(t: TicketDetail): string {
     `pipeline:  ${t.pipeline}`,
     `stage:     ${t.stage.label} (${t.stage.index + 1} of ${t.stage.total})`,
     `pr:        ${t.pr ?? "none"}`,
+    `budget:    ${budgetLine(t)}`,
     `url:       ${t.url}`,
     "",
     "stages:",
@@ -60,6 +61,18 @@ function renderDetail(t: TicketDetail): string {
   }
   if (t.sessions.length) lines.push("", "sessions:", ...t.sessions.map((s) => `  ${sessionLine(s)}`));
   return lines.join("\n");
+}
+
+/** The four gauges in words; a starred one is set on the Ticket itself. */
+function budgetLine(t: TicketView): string {
+  const b = t.budget;
+  const star = (source: string) => (source === "ticket" ? "*" : "");
+  return [
+    `rounds ${b.rounds.used}/${b.rounds.limit}${star(b.rounds.source)}`,
+    `attempts ${b.attempts.used}/${b.attempts.limit}${star(b.attempts.source)}`,
+    `wall ${duration(b.wallTime.used)}/${b.wallTime.limitText}${star(b.wallTime.source)}`,
+    `spend $${b.spend.used.toFixed(2)}/$${b.spend.limit}${star(b.spend.source)}`,
+  ].join(" · ");
 }
 
 /** One line per Session: Stage and attempt, how it ended, how long, what it cost. */

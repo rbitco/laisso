@@ -24,6 +24,11 @@ export interface TicketRow {
   worktree: string;
   feedback_watermark: string | null;
   mirror_pending: string | null;
+  /** The Ticket layer of the Budget: Extend sets these; null defers to the Pipeline and the global default. */
+  budget_rounds: number | null;
+  budget_attempts: number | null;
+  budget_wall_time: string | null;
+  budget_spend: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -82,7 +87,7 @@ export class Tickets {
   update(id: string, patch: Partial<Omit<TicketRow, "id" | "created_at">>, now: string = new Date().toISOString()): TicketRow {
     const entries = Object.entries({ ...patch, updated_at: now });
     const sets = entries.map(([k]) => `${k} = ?`).join(", ");
-    this.db.prepare(`UPDATE tickets SET ${sets} WHERE id = ?`).run(...entries.map(([, v]) => v as string | null), id);
+    this.db.prepare(`UPDATE tickets SET ${sets} WHERE id = ?`).run(...entries.map(([, v]) => v as string | number | null), id);
     return this.get(id)!;
   }
 }

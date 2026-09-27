@@ -128,6 +128,8 @@ describe("a headless Stage", () => {
     expect(d.stage.name).toBe("implement");
     expect(d.display.state).toBe("flagged");
     expect(d.flag).toEqual({ reason: "artifact.missing", detail: "commits-on-branch: no commits on the branch beyond origin/main", at: expect.any(String) });
+    // A missing artifact asks at once: no second attempt.
+    expect(d.sessions).toHaveLength(1);
   });
 
   it("Flags outcome.failed with the Runner's message", async () => {
@@ -137,6 +139,8 @@ describe("a headless Stage", () => {
     const d = await settled(lasso, ticket.id);
     expect(d.session).toMatchObject({ outcome: "failed", costUsd: 0 });
     expect(d.flag).toMatchObject({ reason: "outcome.failed", detail: expect.stringContaining("There's an issue with the selected model") });
+    // A failed run asks at once: no second attempt.
+    expect(d.sessions).toHaveLength(1);
   });
 
   it("Flags outcome.exhausted when the Runner hits max turns", async () => {
@@ -144,7 +148,9 @@ describe("a headless Stage", () => {
     await lasso.runner.script({ stdout: claudeFixture("max-turns.json"), exit: 1 });
     await checkNow(lasso);
     const d = await settled(lasso, ticket.id);
-    expect(d.flag).toMatchObject({ reason: "outcome.exhausted", detail: "Reached maximum number of turns (1)" });
+    // Exhausted is retryable: the second attempt runs at once, then the Flag names the attempts used.
+    expect(d.flag).toMatchObject({ reason: "budget.attempts", detail: "implement: 2 of 2 attempts used; Reached maximum number of turns (1)" });
+    expect(d.sessions.map((s) => s.startedBy)).toEqual(["auto", "auto"]);
   });
 
   it("refuses a Pipeline whose wall time is not a duration", async () => {
@@ -156,14 +162,15 @@ describe("a headless Stage", () => {
     expect(await res.json()).toEqual({ error: 'Pipeline bad stage 1: budget.wallTime "45min" is not a duration like 30m, 90s, or 1h30m' });
   });
 
-  it("kills a Session past the Stage's wall time and Flags budget.wall_time", async () => {
-    const { lasso, ticket } = await lassoWithTicket(PIPELINE.replace("artifact: commits-on-branch", "artifact: commits-on-branch\n    budget: { wallTime: 1s }"));
+  it("kills a Session past the Stage's wall time and Flags budget.wall_time once attempts are used", async () => {
+    const { lasso, ticket } = await lassoWithTicket(PIPELINE.replace("artifact: commits-on-branch", "artifact: commits-on-branch\n    budget: { wallTime: 1s, attempts: 1 }"));
     await lasso.runner.script({ hang: true });
     await checkNow(lasso);
     const d = await settled(lasso, ticket.id);
-    expect(d.session).toMatchObject({ outcome: "interrupted", endedBy: "outcome", endedReason: "wall_time" });
+    expect(d.session).toMatchObject({ outcome: "interrupted", endedBy: "outcome", endedReason: "wall_time", ordinal: 1 });
     expect(d.session!.durationMs).toBeGreaterThanOrEqual(900);
-    expect(d.flag).toMatchObject({ reason: "budget.wall_time" });
+    expect(d.flag).toMatchObject({ reason: "budget.wall_time", detail: "implement: 1 of 1 attempts used; killed: wall time" });
+    expect(d.budget.attempts).toEqual({ used: 1, limit: 1, source: "pipeline" });
     const [call] = await lasso.runner.calls();
     expect(() => process.kill(call!.pid, 0)).toThrow();
   });

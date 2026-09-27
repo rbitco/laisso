@@ -1,12 +1,14 @@
 import { shortId, type TicketRow } from "../store/tickets.ts";
 import type { SessionRow } from "../store/sessions.ts";
-import type { Pipeline, Stage } from "../pipeline/load.ts";
+import type { Pipeline, RunnerName, Stage } from "../pipeline/load.ts";
+import type { BudgetView } from "../budget/budget.ts";
+import { adapterFor } from "../runner/adapters.ts";
 
 export type DisplayState = "flagged" | "needs_you" | "holding" | "ready" | "running" | "queued" | "quiet" | "done" | "abandoned";
 
-/** A lever the human can pull on a Ticket right now; the dashboard renders one button per Trigger. */
+/** A lever the human can pull on a Ticket right now; the dashboard renders one button per Trigger. Flagged, the six exits. */
 export interface Trigger {
-  action: "terminal" | "done" | "skip" | "start";
+  action: "terminal" | "done" | "skip" | "start" | "retry" | "resume" | "extend" | "abandon";
   label: string;
 }
 
@@ -52,6 +54,8 @@ export interface TicketView {
   pr: string | null;
   display: { state: DisplayState; label: string; why: string };
   triggers: Trigger[];
+  /** The four gauges as they stand, and the Ticket layer behind them. */
+  budget: BudgetView;
   /** True while a label push to the tracker is owed and the tick will retry it. */
   mirrorPending: boolean;
   createdAt: string;
@@ -105,7 +109,7 @@ export interface ViewContext {
   pipelineFor(ticket: TicketRow): Pipeline | null;
   /** A Ticket's Sessions, newest first. */
   sessionsFor(ticket: TicketRow): SessionRow[];
-  latestSession(ticket: TicketRow): SessionRow | null;
+  budgetFor(ticket: TicketRow, pipeline: Pipeline | null, stage: Stage | null, rows: SessionRow[]): BudgetView;
 }
 
 /** The order the Ledger shows display states in: attention first. */
@@ -120,9 +124,9 @@ export function ticketView(ticket: TicketRow, ctx: ViewContext): TicketView {
   const index = pipeline ? pipeline.stages.findIndex((s) => s.name === ticket.stage) : -1;
   const stage = index >= 0 ? pipeline!.stages[index]! : null;
   const human = stage?.kind === "runner" && stage.human;
-  const latest = ctx.latestSession(ticket);
-  const display = displayState(ticket, stage, latest);
-  const triggers = ticketTriggers(ticket, stage, latest);
+  const rows = ctx.sessionsFor(ticket);
+  const display = displayState(ticket, stage, rows[0] ?? null);
+  const triggers = ticketTriggers(ticket, stage, rows);
   return {
     id: ticket.id,
     shortId: shortId(ticket.id),
@@ -147,6 +151,7 @@ export function ticketView(ticket: TicketRow, ctx: ViewContext): TicketView {
     pr: ticket.pr,
     display: { ...display, label: DISPLAY_LABEL[display.state] },
     triggers,
+    budget: ctx.budgetFor(ticket, pipeline, stage, rows),
     mirrorPending: ticket.mirror_pending !== null,
     createdAt: ticket.created_at,
     updatedAt: ticket.updated_at,
@@ -209,14 +214,35 @@ function displayState(ticket: TicketRow, stage: Stage | null, latest: SessionRow
   return { state: "ready", why: `${name} starts on the next tick` };
 }
 
-function ticketTriggers(ticket: TicketRow, stage: Stage | null, latest: SessionRow | null): Trigger[] {
-  if (ticket.state !== "active" || ticket.flagged_at || !stage) return [];
-  if (ticket.holding_since) return [{ action: "start", label: `Start ${stage.name}` }];
-  if (stage.kind !== "runner" || !stage.human || headlessRunning(latest)) return [];
+function resumableHeadless(rows: SessionRow[], stage: string, runner: RunnerName): boolean {
+  const last = rows.find((r) => r.stage === stage && r.mode === "headless");
+  return last !== undefined && (adapterFor(runner).sessionIds === "lasso" || last.runner_session_id !== null);
+}
+
+function ticketTriggers(ticket: TicketRow, stage: Stage | null, rows: SessionRow[]): Trigger[] {
+  if (ticket.state !== "active") return [];
+  const abandon: Trigger = { action: "abandon", label: "Abandon" };
+  if (!stage) return [abandon];
+  if (ticket.flagged_at) {
+    // Resume needs something to re-enter: a terminal window that opened, or the last headless Session of this
+    // Stage, which a Runner that names its own sessions must have reported an id for.
+    const resumable = stage.kind === "runner" && (stage.human ? rows.some((r) => r.stage === stage.name && r.mode === "terminal" && r.ended_at === null && r.opened_at !== null) : resumableHeadless(rows, stage.name, stage.runner));
+    return [
+      { action: "retry", label: `Retry ${stage.name}` },
+      ...(resumable ? [{ action: "resume" as const, label: `Resume ${stage.name}` }] : []),
+      { action: "extend", label: "Extend Budget" },
+      { action: "done", label: `Mark ${stage.name} done` },
+      { action: "skip", label: `Skip ${stage.name}` },
+      abandon,
+    ];
+  }
+  if (ticket.holding_since) return [{ action: "start", label: `Start ${stage.name}` }, abandon];
+  if (stage.kind !== "runner" || !stage.human || headlessRunning(rows[0] ?? null)) return [abandon];
   return [
     { action: "terminal", label: "Open terminal" },
     { action: "done", label: `Mark ${stage.name} done` },
     { action: "skip", label: `Skip ${stage.name}` },
+    abandon,
   ];
 }
 

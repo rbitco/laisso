@@ -8,6 +8,8 @@ import type { Runs } from "../session/runs.ts";
 import { RunError } from "../session/runs.ts";
 import { ArtifactWarning, TriggerError, type Progress } from "../session/progress.ts";
 import { TerminalError, type Terminal } from "../session/terminal.ts";
+import type { Exits, ExtendRequest } from "../session/exits.ts";
+import type { Budgets } from "../budget/budgets.ts";
 import { Intake, IntakeError, type IntakeRequest } from "../intake/intake.ts";
 import { loadPipeline, type Pipeline } from "../pipeline/load.ts";
 import { dashboardHtml } from "../dashboard/page.ts";
@@ -22,6 +24,8 @@ export interface AppDeps {
   runs: Runs;
   progress: Progress;
   terminal: Terminal;
+  exits: Exits;
+  budgets: Budgets;
   version: string;
 }
 
@@ -40,7 +44,7 @@ export function createApp(deps: AppDeps): Hono {
       }
     },
     sessionsFor: (ticket: TicketRow) => deps.sessions.forTicket(ticket.id),
-    latestSession: (ticket: TicketRow) => deps.sessions.latest(ticket.id),
+    budgetFor: (ticket, pipeline, stage, rows) => deps.budgets.view(ticket, pipeline, stage, rows),
   };
 
   // Every response carries the version, so a client can tell Lasso from a stranger on the port.
@@ -106,6 +110,11 @@ export function createApp(deps: AppDeps): Hono {
     await deps.tick.run("start");
     return deps.tickets.get(released.id)!;
   });
+  // The six exits from a Flag; Mark done and Skip above accept a Flagged Ticket too, and Abandon any active one.
+  trigger("retry", (ticket) => deps.exits.retry(ticket));
+  trigger("resume", (ticket) => deps.exits.resume(ticket));
+  trigger("extend", (ticket, body) => deps.exits.extend(ticket, body as ExtendRequest));
+  trigger("abandon", (ticket) => deps.exits.abandon(ticket));
 
   // A Session of a Ticket, or the 404 that says which is unknown.
   const sessionOf = (ticketKey: string, sessionId: string) => {

@@ -174,7 +174,7 @@ stages:
     await lasso.tracker.reply({ tool: "gh", match: ["issue view 7", "--json labels"], stdout: ghLabels("bug", "lasso:implement") });
     await checkNow(lasso);
     const flagged = await waitFor(async () => { const d = await detailOf(lasso, ticket.id); return d.flag ? d : null; }, "the Flag");
-    expect(flagged.flag!.reason).toBe("outcome.interrupted");
+    expect(flagged.flag!.reason).toBe("budget.attempts");
     const calls = argsOf(await callsSince(lasso, 2)).filter((c) => !c.startsWith("issue view"));
     expect(calls).toEqual(["issue edit 7 --repo acme/web --add-label lasso:flagged"]);
   });
@@ -193,12 +193,18 @@ stages:
     const d = await detailOf(lasso, ticket.id);
     expect(d.flag).toMatchObject({ reason: "outcome.failed", detail: "APP-12: Error: transition is not valid from Backlog" });
     expect(d.session).toMatchObject({ stage: "transition-in-progress", mode: "action", outcome: "failed", running: false });
-    expect(d.triggers).toEqual([]);
+    // An action Stage has nothing to resume: Retry performs it again.
+    expect(d.triggers.map((x) => x.action)).toEqual(["retry", "extend", "done", "skip", "abandon"]);
     expect(argsOf(await callsSince(lasso, 3))).toEqual([
       "jira workitem transition --key APP-12 --status In Progress --yes",
       "jira workitem view APP-12 --fields labels --json",
       "jira workitem edit --key APP-12 --labels lasso:grill,lasso:flagged --yes",
     ]);
+    // Resume has nothing to re-enter on an action Stage; Retry performs the action again and it fails the same way.
+    await expect(pull(lasso, ticket.id, "resume")).rejects.toThrow("transition-in-progress is an action Stage; Retry performs it again");
+    const retried = await pull(lasso, ticket.id, "retry");
+    expect(retried.flag).toMatchObject({ reason: "outcome.failed" });
+    expect(retried.sessions.filter((s) => s.stage === "transition-in-progress")).toHaveLength(2);
   });
 
   it("closes an action Session left running by a crash and performs the Stage again on the next tick", async () => {

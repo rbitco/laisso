@@ -101,4 +101,12 @@ const MIGRATIONS: Array<(db: DatabaseSync) => void> = [
   (db) => {
     db.exec(`ALTER TABLE sessions ADD COLUMN runner_session_id TEXT;`);
   },
+  (db) => {
+    db.exec(`
+      ALTER TABLE tickets ADD COLUMN budget_rounds INTEGER;
+      ALTER TABLE tickets ADD COLUMN budget_attempts INTEGER;
+      ALTER TABLE tickets ADD COLUMN budget_wall_time TEXT;
+      ALTER TABLE tickets ADD COLUMN budget_spend REAL;
+    `);
+  },
 ];

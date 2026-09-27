@@ -117,10 +117,11 @@ stages:
     for (const [runner, ticket] of Object.entries(tickets)) {
       const d = await settled(lasso, ticket.id);
       expect(d.session, runner).toMatchObject({ outcome: "interrupted", endedBy: "outcome", endedReason: null });
-      expect(d.flag, runner).toMatchObject({ reason: "outcome.interrupted" });
+      expect(d.flag, runner).toMatchObject({ reason: "budget.attempts", detail: "implement: 2 of 2 attempts used; OK" });
     }
+    // Interrupted is retryable, so each Runner ran once per attempt.
     const calls = await lasso.runner.calls();
-    expect(calls.map((c) => c.argv[0]).sort()).toEqual(["claude", "codex", "pi"]);
+    expect(calls.map((c) => c.argv[0]).sort()).toEqual(["claude", "claude", "codex", "codex", "pi", "pi"]);
   });
 });
 

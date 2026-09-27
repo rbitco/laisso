@@ -14,6 +14,8 @@ import { adapterFor } from "../runner/adapters.ts";
 import { requestFor, type RunRequest, type Outcome } from "../runner/adapter.ts";
 import { checkArtifact } from "../artifact/check.ts";
 import { parseDuration } from "../duration.ts";
+import type { Budgets } from "../budget/budgets.ts";
+import { spendOf } from "../budget/budget.ts";
 
 export class RunError extends Error {}
 
@@ -24,12 +26,14 @@ export interface RunsDeps {
   sessions: Sessions;
   log: Logger;
   progress: Progress;
+  budgets: Budgets;
 }
 
 type Verdict = "advance" | { flag: string; detail: string | null };
 
 interface Live {
   child: ChildProcess;
+  ticket: string;
   stage: RunnerStage;
   request: RunRequest;
   stdoutPath: string;
@@ -50,11 +54,15 @@ const KILL_GRACE_MS = 5000;
 /**
  * Headless Sessions: Lasso spawns the Runner in the Ticket's worktree, tees
  * its stdout into the Ticket directory, enforces wall time, and turns the
- * parsed Outcome plus the declared artifact into advance or Flag (ADR 0003).
+ * parsed Outcome plus the declared artifact into advance, another attempt,
+ * or Flag (ADR 0003). The Budget is checked before every start; interrupted
+ * and exhausted runs try again while attempts remain (spec: Budget).
  */
 export class Runs {
   private deps: RunsDeps;
   private live = new Map<string, Live>();
+  /** Set once shutdown begins: a Session that ends from here on is neither retried nor Flagged. */
+  private closing = false;
   /** Sessions whose process has closed but whose verdict is still being reached; shutdown waits for these too. */
   private settling = new Set<Promise<void>>();
 
@@ -74,31 +82,56 @@ export class Runs {
         continue;
       }
       const { pipeline, stage } = resolved;
-      try {
-        await this.start(ticket, pipeline, stage, "auto");
-        changes.push({ ticket: ticket.id, summary: `started ${stage.name}` });
-      } catch (error) {
-        // The Runner never started, so there is no Session to blame: runner.unavailable, not outcome.*.
-        const detail = error instanceof Error ? error.message : String(error);
-        await this.deps.progress.flag(ticket.id, "runner.unavailable", detail);
-        changes.push({ ticket: ticket.id, summary: `Flagged: ${detail}` });
-      }
+      changes.push({ ticket: ticket.id, summary: await this.launch(ticket, pipeline, stage, "auto") });
     }
     return changes;
   }
 
-  async start(ticket: TicketRow, pipeline: Pipeline, stage: RunnerStage, startedBy: "auto" | "human"): Promise<SessionRow> {
-    const { config, home, sessions, log } = this.deps;
+  /**
+   * Start the Stage if the Budget allows, else Flag: the one path the tick,
+   * auto-retry and the exits share. Returns the change for the tick log.
+   * Nothing is awaited before the Session exists, so a caller that has just
+   * unflagged the Ticket leaves no gap in which the tick could start it too.
+   */
+  async launch(ticket: TicketRow, pipeline: Pipeline, stage: RunnerStage, startedBy: "auto" | "human", resumeFrom: SessionRow | null = null): Promise<string> {
+    const refusal = this.deps.budgets.refusal(ticket, pipeline, stage);
+    if (refusal) {
+      await this.deps.progress.flag(ticket.id, refusal.reason, refusal.detail);
+      return `Flagged: ${refusal.detail}`;
+    }
+    try {
+      this.start(ticket, pipeline, stage, startedBy, resumeFrom);
+      return `started ${stage.name}`;
+    } catch (error) {
+      // The Runner never started, so there is no Session to blame: runner.unavailable, not outcome.*.
+      const detail = error instanceof Error ? error.message : String(error);
+      await this.deps.progress.flag(ticket.id, "runner.unavailable", detail);
+      return `Flagged: ${detail}`;
+    }
+  }
+
+  /**
+   * A fresh Session of the Stage, or with `resumeFrom` one that re-enters that
+   * earlier Session where the Runner allows (the Resume exit). Synchronous on
+   * purpose: the row and the process both exist when it returns.
+   */
+  start(ticket: TicketRow, pipeline: Pipeline, stage: RunnerStage, startedBy: "auto" | "human", resumeFrom: SessionRow | null = null): SessionRow {
+    const { home, sessions, log, budgets } = this.deps;
+    const running = sessions.running(ticket.id).find((r) => r.mode === "headless");
+    if (running) throw new RunError(`${running.stage} is already running on Ticket ${ticket.reference ?? ticket.id}`);
     const adapter = adapterFor(stage.runner);
     const sessionId = randomUUID();
     const sessionsDir = path.join(home.ticketsDir, ticket.id, "sessions");
     mkdirSync(sessionsDir, { recursive: true });
     const stdoutPath = path.join(sessionsDir, `${sessionId}.stdout`);
 
-    const wallTimeMs = parseDuration(stage.budget.wallTime ?? config.budget.wallTime);
-    const spent = sessions.forTicket(ticket.id).reduce((sum, s) => sum + (s.cost_usd ?? 0), 0);
-    const remainingSpendUsd = Math.max(0, (pipeline.budget.spend ?? config.budget.spend) - spent);
-    const request: RunRequest = { ...requestFor(ticket, stage), mode: "headless", sessionId, limits: { wallTimeMs, remainingSpendUsd } };
+    const budget = budgets.resolve(ticket, pipeline, stage);
+    const wallTimeMs = parseDuration(budget.wallTime.value);
+    const remainingSpendUsd = Math.max(0, budget.spend.value - spendOf(sessions.forTicket(ticket.id)));
+    // The id re-entered is the earliest one in the chain, so a later Resume of this row finds it too.
+    const resumed = resumeFrom ? (resumeFrom.runner_session_id ?? resumeFrom.id) : null;
+    const resume = resumed ? { resume: true, runnerSessionId: resumed } : {};
+    const request: RunRequest = { ...requestFor(ticket, stage), mode: "headless", sessionId, ...resume, limits: { wallTimeMs, remainingSpendUsd } };
     const command = adapter.command(request);
 
     // The stdout file is opened before the row exists, so a row never outlives a process that was never spawned.
@@ -113,6 +146,7 @@ export class Runs {
       stdout_path: stdoutPath,
       limits_honoured: JSON.stringify(adapter.honours.filter((limit) => request.limits[limit] !== undefined)),
     });
+    if (resumed && adapter.sessionIds === "lasso") sessions.setRunnerSession(sessionId, resumed);
 
     const child = spawn(command.argv[0]!, command.argv.slice(1), {
       cwd: command.cwd,
@@ -122,7 +156,7 @@ export class Runs {
     });
     let resolve!: (row: SessionRow) => void;
     const done = new Promise<SessionRow>((r) => (resolve = r));
-    const live: Live = { child, stage, request, stdoutPath, fd, stderr: "", wallTimer: null, killReason: null, spawnError: null, exit: null, done, resolve };
+    const live: Live = { child, ticket: ticket.id, stage, request, stdoutPath, fd, stderr: "", wallTimer: null, killReason: null, spawnError: null, exit: null, done, resolve };
     this.live.set(sessionId, live);
     if (command.stdin !== undefined) child.stdin!.end(command.stdin);
 
@@ -142,8 +176,14 @@ export class Runs {
     live.wallTimer = setTimeout(() => void this.kill(sessionId, "wall_time"), wallTimeMs);
     live.wallTimer.unref();
 
-    log.info("session.started", { session: sessionId, ticket: ticket.id, stage: stage.name, pid: child.pid, argv0: command.argv[0] });
+    log.info("session.started", { session: sessionId, ticket: ticket.id, stage: stage.name, pid: child.pid, argv0: command.argv[0], resumed: resumeFrom?.id ?? null });
     return row;
+  }
+
+  /** Abandon: every running Session of the Ticket is killed with that reason; the Ticket is already past caring. */
+  async killFor(ticketId: string, reason: EndedReason): Promise<void> {
+    const lives = [...this.live.values()].filter((live) => live.ticket === ticketId);
+    await Promise.all(lives.map((live) => this.kill(live.request.sessionId, reason).then(() => live.done)));
   }
 
   /** A human's Stop: kill the process group and record interrupted with reason stop. */
@@ -156,6 +196,7 @@ export class Runs {
 
   /** Ctrl-C: every running Session ends as interrupted with reason shutdown; its Ticket is left as it was. */
   async shutdown(): Promise<void> {
+    this.closing = true;
     await Promise.all([...this.live.keys()].map((id) => this.kill(id, "shutdown").then(() => this.live.get(id)?.done)));
     await Promise.all(this.settling);
   }
@@ -247,12 +288,12 @@ export class Runs {
     // The verdict is reached before the row ends so a reader never sees a
     // Session over and its Ticket not yet advanced or Flagged.
     let verdict: Verdict | null;
-    if (live.killReason === "shutdown") verdict = null;
+    if (live.killReason === "shutdown" || this.closing) verdict = null;
     else if (live.spawnError) verdict = { flag: "runner.unavailable", detail: live.spawnError };
     else verdict = await this.judge(live.stage, end, live.request.cwd);
     const row = this.deps.sessions.end(sessionId, end);
     this.deps.log.info("session.ended", { session: sessionId, ticket: row.ticket, stage: row.stage, outcome: row.outcome, reason: row.ended_reason, cost: row.cost_usd });
-    if (verdict) await this.apply(row.ticket, verdict);
+    if (verdict) await this.apply(row, verdict);
     live.resolve(row);
   }
 
@@ -265,11 +306,27 @@ export class Runs {
     return artifact.present ? "advance" : { flag: "artifact.missing", detail: `${stage.artifact}: ${artifact.detail}` };
   }
 
-  private async apply(ticketId: string, verdict: Verdict): Promise<void> {
-    const ticket = this.deps.tickets.get(ticketId);
+  private async apply(row: SessionRow, verdict: Verdict): Promise<void> {
+    const { tickets, progress, budgets, log } = this.deps;
+    const ticket = tickets.get(row.ticket);
     if (!ticket || ticket.state !== "active") return;
-    if (verdict === "advance") await this.deps.progress.finished(ticket);
-    else await this.deps.progress.flag(ticket.id, verdict.flag, verdict.detail);
+    if (verdict === "advance") return progress.finished(ticket);
+    // Interrupted and exhausted runs try again while attempts remain; a run a human stopped, or one that failed, asks instead.
+    const retryable = row.ended_by === "outcome" && (row.outcome === "interrupted" || row.outcome === "exhausted");
+    const next = retryable ? progress.runnable(ticket) : null;
+    if (next && !("problem" in next)) {
+      const refusal = budgets.refusal(ticket, next.pipeline, next.stage);
+      if (!refusal) {
+        log.info("session.retry", { ticket: ticket.id, stage: next.stage.name, after: row.id, outcome: row.outcome });
+        await this.launch(ticket, next.pipeline, next.stage, "auto");
+        return;
+      }
+      // The Budget is what stops the retry, so the Flag carries its reason and the Outcome as detail;
+      // a Flag already about the Budget (wall time) keeps its own reason. Extend clears either.
+      const detail = [refusal.detail, verdict.detail].filter(Boolean).join("; ");
+      verdict = verdict.flag.startsWith("budget.") ? { ...verdict, detail } : { flag: refusal.reason, detail };
+    }
+    await progress.flag(ticket.id, verdict.flag, verdict.detail);
   }
 }
 
