@@ -38,4 +38,7 @@ an exact list of what each Round owes.
 - Review's declared artifact is a merged PR; merging is a human act.
   Green checks with nothing outstanding is only a displayed state.
 - Agent code review is not a Lasso concept. Any earlier Stage that posts
-  marked PR comments is Feedback like any other.
+  marked PR comments is Feedback like any other. The marker therefore
+  names the Stage as well as the Ticket and Round: the tick excludes only
+  comments posted by the Review Stage's own Rounds, and marked comments
+  from any other Stage stay Feedback until addressed.
