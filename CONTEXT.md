@@ -26,13 +26,16 @@ Pipeline may name any ordered list of Stages.
 _Avoid_: step, phase, state, node
 
 **Budget**:
-The limits on how much effort a Ticket may consume before it is flagged for a
-human. Dimensions are open (revision rounds, runs, tokens, wall time).
+The limits on how much effort a Ticket may consume before it is Flagged:
+Rounds per repeating Stage, attempts per Stage, wall time per Session, and
+agent spend per Ticket. Set globally, per Pipeline, or per Ticket, with the
+most specific value winning.
 _Avoid_: guardrail, boundary, limit, quota
 
 **Flagged**:
 A Ticket that has exhausted its Budget or otherwise needs a human before any
-agent may continue.
+agent may continue. It carries the reason, starts no new Session, and clears
+only when a human retries, resumes, extends, marks done, skips, or abandons.
 _Avoid_: blocked, stuck, escalated
 
 **Abandoned**:
