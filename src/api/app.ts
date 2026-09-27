@@ -15,7 +15,7 @@ import type { Queue } from "../session/queue.ts";
 import { Intake, IntakeError, type IntakeRequest } from "../intake/intake.ts";
 import { loadPipeline, PipelineError, type Pipeline } from "../pipeline/load.ts";
 import { PipelineFiles } from "../pipeline/files.ts";
-import { dashboardHtml } from "../dashboard/page.ts";
+import { dashboardHtml, metroScript } from "../dashboard/page.ts";
 import { ticketView, ticketDetail, sessionView, sortForLedger, pipelineListing, pipelineFileView, type ViewContext, type IntakeResult, type ConfigFile } from "./views.ts";
 import { readFileSync } from "node:fs";
 import { replaceFile } from "../atomic-write.ts";
@@ -194,6 +194,7 @@ export function createApp(deps: AppDeps): Hono {
   });
 
   app.get("/", (c) => c.html(dashboardHtml()));
+  app.get("/metro.js", (c) => c.body(metroScript(), 200, { "content-type": "text/javascript; charset=utf-8" }));
 
   app.notFound((c) => (c.req.path.startsWith("/api/") ? c.json({ error: "not found" }, 404) : c.text("not found", 404)));
 

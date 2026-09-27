@@ -37,6 +37,8 @@ export interface StageView {
   human: boolean;
   index: number;
   total: number;
+  /** Whether the Stage repeats on PR feedback: Rounds, the orbit, and Check PR now belong to it. */
+  repeat: boolean;
 }
 
 export interface TicketView {
@@ -62,6 +64,8 @@ export interface TicketView {
   triggers: Trigger[];
   /** The four gauges as they stand, and the Ticket layer behind them. */
   budget: BudgetView;
+  /** Every Stage of the Pipeline, for the Metro track and diagram; empty when the Pipeline does not load. */
+  stages: Array<Pick<StageView, "name" | "kind" | "label" | "human">>;
   /** True while a label push to the tracker is owed and the tick will retry it. */
   mirrorPending: boolean;
   createdAt: string;
@@ -113,7 +117,6 @@ export interface SessionView {
 
 /** One Ticket with every Stage of its Pipeline and its Sessions, for the detail page. */
 export interface TicketDetail extends TicketView {
-  stages: Array<Pick<StageView, "name" | "kind" | "label" | "human">>;
   /** The latest Session: the pane shows it, running or not. */
   session: SessionView | null;
   /** The timeline, newest first. */
@@ -228,6 +231,7 @@ export function ticketView(ticket: TicketRow, ctx: ViewContext): TicketView {
       human,
       index,
       total: pipeline?.stages.length ?? 0,
+      repeat: stage?.kind === "runner" && stage.repeat === "feedback",
     },
     state: ticket.state,
     flag: ticket.flagged_at ? { at: ticket.flagged_at, reason: ticket.flag_reason ?? "", detail: ticket.flag_detail } : null,
@@ -236,6 +240,7 @@ export function ticketView(ticket: TicketRow, ctx: ViewContext): TicketView {
     queue,
     triggers,
     budget,
+    stages: (pipeline?.stages ?? []).map((s) => ({ name: s.name, kind: s.kind, label: stageLabel(s), human: s.kind === "runner" && s.human })),
     mirrorPending: ticket.mirror_pending !== null,
     createdAt: ticket.created_at,
     updatedAt: ticket.updated_at,
@@ -244,15 +249,8 @@ export function ticketView(ticket: TicketRow, ctx: ViewContext): TicketView {
 }
 
 export function ticketDetail(ticket: TicketRow, ctx: ViewContext): TicketDetail {
-  const pipeline = ctx.pipelineFor(ticket);
-  const stages = (pipeline?.stages ?? []).map((s) => ({
-    name: s.name,
-    kind: s.kind,
-    label: stageLabel(s),
-    human: s.kind === "runner" && s.human,
-  }));
   const sessions = ctx.sessionsFor(ticket).map((row) => sessionView(row, Date.now(), ctx.feedbackFor(row)));
-  return { ...ticketView(ticket, ctx), stages, session: sessions[0] ?? null, sessions };
+  return { ...ticketView(ticket, ctx), session: sessions[0] ?? null, sessions };
 }
 
 export function sessionView(row: SessionRow, now: number = Date.now(), feedback: FeedbackRow[] = []): SessionView {

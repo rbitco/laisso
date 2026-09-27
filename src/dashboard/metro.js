@@ -1,0 +1,175 @@
+// The Metro flow diagram, its mini track for the Ledger, and the small
+// pure helpers the dashboard needs, built from the API's Ticket views as SVG
+// strings. Plain JavaScript on purpose: the page loads it as a module and the
+// tests run the same file in Node against real API data (LASSO-41, the
+// composed variant D of the dashboard prototype).
+
+/** @typedef {import('../api/views.ts').TicketView} TicketView */
+/** @typedef {import('../api/views.ts').TicketDetail} TicketDetail */
+/** @typedef {import('../api/views.ts').SessionView} SessionView */
+/** @typedef {import('../api/views.ts').Trigger} Trigger */
+/** @typedef {TicketView & { sessions?: SessionView[] }} MetroTicket */
+
+/** The colour key each display state paints the current station and the track behind it. */
+export const STATE_COLOUR = { flagged: 'crit', needs_you: 'warn', holding: 'warn', ready: 'warn', running: 'run', queued: 'run', quiet: 'good', done: 'good', abandoned: 'muted' };
+const OUTCOME_COLOUR = { succeeded: 'good', failed: 'crit', exhausted: 'crit', interrupted: 'warn' };
+const COL = { good: 'var(--good)', crit: 'var(--crit)', warn: 'var(--amber)', run: 'var(--run)', accent: 'var(--accent)', muted: 'var(--line)' };
+
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+
+export function duration(ms) {
+  const s = Math.round(ms / 1000);
+  if (s < 60) return s + 's';
+  const m = Math.floor(s / 60);
+  return m < 60 ? m + 'm' + (s % 60) + 's' : Math.floor(m / 60) + 'h' + (m % 60) + 'm';
+}
+
+/**
+ * What one Stage of a Ticket is: done, current, or ahead, with its Sessions (newest first, as the API lists them).
+ * @param {MetroTicket} t
+ * @param {number} index
+ */
+export function stageInfo(t, index) {
+  const stage = t.stages[index];
+  const sessions = (t.sessions || []).filter((s) => s.stage === stage.name);
+  const done = t.state === 'done' || index < t.stage.index;
+  const cur = t.state === 'active' && index === t.stage.index;
+  const rounds = sessions.filter((s) => s.round !== null);
+  return {
+    stage, done, cur, ahead: !done && !cur, sessions,
+    // A terminal Session stays open until the human marks the Stage done; only a headless one is Lasso's work in flight.
+    running: sessions.some((s) => s.running && s.mode === 'headless'),
+    last: sessions[0] || null,
+    attempts: sessions.filter((s) => s.mode !== 'action' && s.round === null),
+    roundsUsed: rounds.reduce((max, s) => Math.max(max, s.round), 0),
+  };
+}
+
+/**
+ * The Sessions timeline filtered to one station, or all of them.
+ * @param {SessionView[]} sessions
+ * @param {string | null} stage
+ * @returns {SessionView[]}
+ */
+export function sessionsForStage(sessions, stage) {
+  return stage ? sessions.filter((s) => s.stage === stage) : sessions;
+}
+
+/**
+ * The one quick action a Ledger row offers: the attention trigger, else Check PR now at a repeating Stage with a PR.
+ * @param {TicketView} t
+ * @returns {{ action: string, label: string } | null}
+ */
+export function quickAction(t) {
+  const primary = t.triggers.find((x) => x.action === 'retry' || x.action === 'start' || x.action === 'terminal');
+  if (primary) return primary;
+  if (t.state === 'active' && t.pr && t.stage.repeat) return { action: 'check', label: 'Check PR now' };
+  return null;
+}
+
+function markers() {
+  return '<defs>' + Object.entries(COL).map(([k, v]) => `<marker id="arr-${k}" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto"><path d="M0 0L10 5L0 10z" fill="${v}"/></marker>`).join('') + '</defs>';
+}
+
+function prIcon(c) {
+  return `<g fill="none" stroke="${c}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="-6" cy="-6" r="2.6"/><circle cx="-6" cy="6" r="2.6"/><circle cx="6" cy="6" r="2.6"/><path d="M-6 -3.4v6.8M6 3.4V0a4 4 0 0 0-4-4h-3.5"/><path d="M1 -6.5L-1.5 -4L1 -1.5"/></g>`;
+}
+
+function octagon(cx, cy, r) {
+  const p = [];
+  for (let j = 0; j < 8; j++) { const a = Math.PI / 8 + j * Math.PI / 4; p.push((cx + r * Math.cos(a)).toFixed(1) + ',' + (cy + r * Math.sin(a)).toFixed(1)); }
+  return p.join(' ');
+}
+
+/**
+ * The Ledger's mini track: a station per Stage, action Stages as ticks, the current one ringed in the state's colour.
+ * @param {TicketView} t
+ * @returns {string}
+ */
+export function metroTrack(t) {
+  let px = 6;
+  const pts = t.stages.map((s) => { const p = { s, cx: px }; px += s.kind === 'action' ? 10 : 20; return p; });
+  if (!pts.length) return `<svg viewBox="0 0 20 18" data-role="track"></svg>`;
+  const ci = t.stage.index;
+  const state = STATE_COLOUR[t.display.state] || 'muted';
+  let o = `<svg viewBox="0 0 ${px} 18" data-role="track" aria-label="${esc(t.stage.label)}, Stage ${ci + 1} of ${pts.length}"><line x1="${pts[0].cx}" y1="9" x2="${pts[pts.length - 1].cx}" y2="9" stroke="var(--surface2)" stroke-width="3"/>`;
+  const reach = t.state === 'done' ? pts.length - 1 : Math.max(0, Math.min(ci, pts.length - 1));
+  if (reach > 0) o += `<line x1="${pts[0].cx}" y1="9" x2="${pts[reach].cx}" y2="9" stroke="${t.state === 'abandoned' ? 'var(--line)' : COL.good}" stroke-width="3" opacity=".85"/>`;
+  pts.forEach(({ s, cx }, i) => {
+    const done = t.state === 'done' || i < ci, cur = t.state === 'active' && i === ci;
+    if (s.kind === 'action') { o += `<rect x="${cx - 1}" y="5" width="2" height="8" fill="${done ? COL.good : 'var(--line)'}"/>`; return; }
+    const c = done ? COL.good : cur ? COL[state] : 'var(--line)';
+    o += cur
+      ? `<circle class="current" cx="${cx}" cy="9" r="5" fill="var(--surface)" stroke="${c}" stroke-width="2.5"/><circle cx="${cx}" cy="9" r="2" fill="${c}"/>`
+      : `<circle class="${done ? 'done' : 'ahead'}" cx="${cx}" cy="9" r="4" fill="${done ? c : 'var(--surface)'}" stroke="${c}" stroke-width="2"/>`;
+  });
+  return o + '</svg>';
+}
+
+/**
+ * The detail's Metro flow diagram: a thick track, station circles for done, current and ahead
+ * Stages, action Stages as ticks, a red octagon for Flagged, the PR feedback orbit with its
+ * Rounds badge, a small orbit counting attempts, a pulsing ring while running, and no
+ * travelling dot. Each station is a node with data-stage, for the timeline filter.
+ * @param {MetroTicket} t
+ * @param {string | null} focus
+ * @returns {string}
+ */
+export function metroDiagram(t, focus) {
+  const baseY = 80;
+  let x = 64;
+  const pts = t.stages.map((s, i) => { const p = { s, i, cx: x }; x += s.kind === 'action' ? 52 : 104; return p; });
+  if (!pts.length) return `<svg viewBox="0 0 100 40" role="img" aria-label="no Stages"><text x="0" y="20" class="sub">This Pipeline does not load.</text></svg>`;
+  const W = pts[pts.length - 1].cx + 130, H = 132;
+  const ci = t.stage.index;
+  const active = t.state === 'active';
+  const state = STATE_COLOUR[t.display.state] || 'muted';
+  let out = markers();
+  out += `<line x1="${pts[0].cx}" y1="${baseY}" x2="${pts[pts.length - 1].cx}" y2="${baseY}" stroke="var(--surface2)" stroke-width="6" stroke-linecap="round"/>`;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i], b = pts[i + 1];
+    const k = (i + 1 < ci || t.state === 'done') ? 'good' : (i + 1 === ci && active) ? state : 'muted';
+    if (k === 'muted') out += `<line class="segment ahead" x1="${a.cx + 14}" y1="${baseY}" x2="${b.cx - 14}" y2="${baseY}" stroke="var(--line)" stroke-width="6" stroke-linecap="round" stroke-dasharray="1 10"/>`;
+    else out += `<line class="segment" x1="${a.cx}" y1="${baseY}" x2="${b.cx}" y2="${baseY}" stroke="${COL[k]}" stroke-width="6" stroke-linecap="round" opacity="${k === 'good' ? '.85' : '1'}"/>`;
+  }
+  pts.forEach(({ s, i, cx }) => {
+    const inf = stageInfo(t, i);
+    const sel = focus === s.name;
+    const name = esc(s.label);
+    if (s.kind === 'action') {
+      const c = inf.done ? COL.good : inf.cur ? COL.accent : 'var(--muted)';
+      out += `<g class="node action${sel ? ' focus' : ''}" data-stage="${esc(s.name)}"><rect x="${cx - 1.5}" y="${baseY - 9}" width="3" height="18" rx="1.5" fill="${c}"/><text class="act" x="${cx}" y="${baseY + 26}" text-anchor="middle">${name}</text><title>action Stage: ${name}</title></g>`;
+      return;
+    }
+    const c = inf.done ? COL.good : inf.cur ? COL[state] : 'var(--muted)';
+    let shape = '';
+    if (sel) shape += `<circle class="focus-ring" cx="${cx}" cy="${baseY}" r="18" fill="none" stroke="${COL.accent}" stroke-width="2" stroke-dasharray="3 3"/>`;
+    if (inf.cur && t.flag) shape += `<polygon class="flagged" points="${octagon(cx, baseY, 13)}" fill="${COL.crit}" stroke="var(--surface)" stroke-width="2"/><text x="${cx}" y="${baseY + 4.5}" text-anchor="middle" class="bang">!</text>`;
+    else if (inf.done) shape += `<circle class="done" cx="${cx}" cy="${baseY}" r="11" fill="${COL.good}" stroke="var(--surface)" stroke-width="2"/><path d="M${cx - 5} ${baseY} l3.5 3.5 l6.5 -7" fill="none" stroke="var(--surface)" stroke-width="2.2"/>`;
+    else if (inf.cur) shape += `<circle class="current${inf.running ? ' pulse' : ''}" cx="${cx}" cy="${baseY}" r="11" fill="var(--surface)" stroke="${c}" stroke-width="3.5"/><circle cx="${cx}" cy="${baseY}" r="4.5" fill="${c}"/>`;
+    else shape += `<circle class="ahead" cx="${cx}" cy="${baseY}" r="9" fill="var(--surface)" stroke="var(--line)" stroke-width="3"/>`;
+    const cls = inf.done ? 'done' : inf.cur ? 'current' : 'ahead';
+    out += `<g class="node ${cls}${sel ? ' focus' : ''}" data-stage="${esc(s.name)}">${shape}<text x="${cx}" y="${baseY + 30}" text-anchor="middle" class="name${inf.cur ? ' cur' : ''}${inf.ahead ? ' dim' : ''}">${name}</text>`;
+    if (inf.roundsUsed) {
+      // The PR feedback orbit: Rounds of a repeating Stage, with Rounds used of the Budget on its badge.
+      const lk = inf.running ? 'run' : (inf.cur && t.flag) ? 'crit' : 'good';
+      const oc = COL[lk], oy = baseY - 31;
+      out += `<path class="orbit rounds" d="M${cx + 8} ${baseY - 8} A24 24 0 1 0 ${cx - 8} ${baseY - 8}" fill="none" stroke="${oc}" stroke-width="2.5" marker-end="url(#arr-${lk})"/>`
+        + `<g transform="translate(${cx},${oy})">${prIcon(oc)}<title>PR feedback drives Rounds of ${name}</title></g>`
+        + `<g class="badge" transform="translate(${cx + 30},${oy})"><rect x="0" y="-9" width="84" height="18" rx="9" fill="${oc}"/><text x="42" y="4" text-anchor="middle" class="badge-text">${inf.roundsUsed} of ${t.budget.rounds.limit} Rounds</text><title>Rounds used of Budget</title></g>`
+        + `<text class="sub" x="${cx}" y="${baseY + 43}" text-anchor="middle">${inf.running ? `Round ${inf.roundsUsed} running` : `${inf.roundsUsed} Round${inf.roundsUsed === 1 ? '' : 's'}`}</text>`;
+    } else if (inf.attempts.length > 1) {
+      const lk = inf.running ? 'run' : OUTCOME_COLOUR[inf.last.outcome] || 'warn';
+      const oc = COL[lk];
+      out += `<path class="orbit attempts" d="M${cx + 7} ${baseY - 9} A14 14 0 1 0 ${cx - 7} ${baseY - 9}" fill="none" stroke="${oc}" stroke-width="2.5" marker-end="url(#arr-${lk})"/><text x="${cx}" y="${baseY - 17}" text-anchor="middle" class="count" style="fill:${oc}">${inf.attempts.length}</text>`
+        + `<text class="sub" x="${cx}" y="${baseY + 43}" text-anchor="middle">${inf.attempts.length} of ${t.budget.attempts.limit} attempts</text>`;
+    } else if (inf.last) {
+      const cost = inf.last.costUsd === null ? '' : ' · $' + inf.last.costUsd.toFixed(2);
+      out += `<text class="sub" x="${cx}" y="${baseY - 20}" text-anchor="middle">${inf.running ? 'running' : duration(inf.last.durationMs)}${cost}</text>`;
+    } else if (inf.cur) {
+      out += `<text class="sub" x="${cx}" y="${baseY - 20}" text-anchor="middle">${esc(t.display.label.toLowerCase())}</text>`;
+    }
+    out += '</g>';
+  });
+  return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Stage flow for ${esc(t.reference || t.shortId)}">${out}</svg>`;
+}

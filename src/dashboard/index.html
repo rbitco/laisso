@@ -6,88 +6,163 @@
 <title>Lasso</title>
 <style>
   :root {
-    --bg: #f6f5f2; --ink: #1d1c1a; --muted: #6b675f; --line: #dcd8cf; --accent: #b3471d;
-    --pill: #e9e5dc; --ok: #2f7a3d; --warn: #b3471d;
+    --bg: #f6f5f2; --surface: #ffffff; --surface2: #ecebe6; --ink: #1d1c1a; --muted: #6b675f; --line: #dcd8cf;
+    --accent: #b3471d; --pill: #e9e5dc;
+    --good: #2f7a3d; --crit: #b3471d; --amber: #b8700c; --run: #2b62b8;
+    --crit-bg: #fbe9e7; --amber-bg: #fdf1dc; --good-bg: #e5f3ea; --run-bg: #e6eefb;
+    --term-bg: #1c1d22; --term-ink: #d7d5cd; --term-dim: #8f8c84; --term-bright: #f2f0ea; --term-line: #33353d; --term-pill: #2e3038; --term-ok: #8fd19a;
     color-scheme: light;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
-      --bg: #17171a; --ink: #ecebe6; --muted: #a09c93; --line: #2d2d33; --accent: #e5714a;
-      --pill: #26262c; --ok: #6fbf7a; --warn: #e5714a; color-scheme: dark;
+      --bg: #17171a; --surface: #1e1e23; --surface2: #27272d; --ink: #ecebe6; --muted: #a09c93; --line: #2d2d33;
+      --accent: #e5714a; --pill: #26262c;
+      --good: #6fbf7a; --crit: #e5714a; --amber: #e0a24a; --run: #7aa6e8;
+      --crit-bg: #3a2320; --amber-bg: #3a2e17; --good-bg: #1d3326; --run-bg: #1d2a40;
+      color-scheme: dark;
     }
   }
   :root[data-theme="dark"] {
-    --bg: #17171a; --ink: #ecebe6; --muted: #a09c93; --line: #2d2d33; --accent: #e5714a;
-    --pill: #26262c; --ok: #6fbf7a; --warn: #e5714a; color-scheme: dark;
+    --bg: #17171a; --surface: #1e1e23; --surface2: #27272d; --ink: #ecebe6; --muted: #a09c93; --line: #2d2d33;
+    --accent: #e5714a; --pill: #26262c;
+    --good: #6fbf7a; --crit: #e5714a; --amber: #e0a24a; --run: #7aa6e8;
+    --crit-bg: #3a2320; --amber-bg: #3a2e17; --good-bg: #1d3326; --run-bg: #1d2a40;
+    color-scheme: dark;
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 ui-sans-serif, system-ui, sans-serif; }
   header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); }
   header h1 { font-size: 16px; margin: 0 16px 0 0; letter-spacing: 0.04em; }
   form[data-role="intake"] { display: flex; gap: 8px; flex: 1 1 320px; }
   form[data-role="intake"] input { flex: 1; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; }
-  button { padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--pill); color: inherit; cursor: pointer; }
+  button { font: inherit; padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--pill); color: inherit; cursor: pointer; }
   button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button.sm { padding: 3px 9px; font-size: 12px; }
+  button:disabled { opacity: 0.6; cursor: default; }
   .tick { display: flex; gap: 8px; align-items: center; color: var(--muted); font-variant-numeric: tabular-nums; }
   main { padding: 16px; }
-  [data-role="ledger"] { display: grid; gap: 8px; }
+  .empty { color: var(--muted); padding: 32px 0; text-align: center; }
+  .notice { color: var(--crit); }
+  .muted { color: var(--muted); }
+  .eyebrow { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; }
+  @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.35; } 100% { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .pulse, .dot.running { animation: none !important; } }
+
+  /* status */
+  .pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--pill); white-space: nowrap; align-self: start; }
+  .pill.flagged { background: var(--crit-bg); color: var(--crit); }
+  .pill.needs_you, .pill.holding, .pill.ready { background: var(--amber-bg); color: var(--amber); }
+  .pill.running, .pill.queued { background: var(--run-bg); color: var(--run); }
+  .pill.quiet, .pill.done { background: var(--good-bg); color: var(--good); }
+  .pill.abandoned { background: var(--surface2); color: var(--muted); }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+  .dot.flagged { background: var(--crit); }
+  .dot.needs_you, .dot.holding, .dot.ready { background: var(--amber); }
+  .dot.running, .dot.queued { background: var(--run); }
+  .dot.running { animation: pulse 1.4s infinite; }
+  .dot.quiet, .dot.done { background: var(--good); }
+
+  /* layout: the Ledger, collapsing to a sidebar when a detail is open */
+  .dwrap { display: grid; grid-template-columns: 1fr; gap: 16px; align-items: start; }
+  .dwrap.open { grid-template-columns: 280px minmax(0, 1fr); }
+  @media (max-width: 800px) { .dwrap.open { grid-template-columns: 1fr; } .dwrap.open .dside { max-height: 220px; overflow: auto; } }
+  .dside { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .dside .back { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); font-size: 12px; }
+  .dside a.back-link { color: var(--muted); text-decoration: none; }
+  .qitem { padding: 8px 12px; border-top: 1px solid var(--line); cursor: pointer; display: flex; gap: 10px; align-items: flex-start; }
+  .back + .qitem { border-top: 0; }
+  .qitem:hover { background: var(--surface2); }
+  .qitem.sel { background: var(--surface2); box-shadow: inset 3px 0 var(--accent); }
+  .qitem .dot { margin-top: 6px; }
+  .qitem .ref { font-size: 11px; color: var(--muted); }
+  .qitem .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .qitem.ended { opacity: 0.55; }
+
+  /* the Ledger */
   .ledger-tools { display: flex; justify-content: flex-end; margin: 0 0 8px; font-size: 13px; color: var(--muted); }
   .ledger-tools label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+  [data-role="ledger"] { display: grid; gap: 8px; }
+  .ticket { display: grid; grid-template-columns: max-content 120px minmax(160px, 1fr) 150px max-content 64px max-content; gap: 4px 14px; align-items: center; padding: 10px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+  .ticket:hover { border-color: var(--accent); }
   .ticket.ended { opacity: 0.55; }
-  .empty { color: var(--muted); padding: 32px 0; text-align: center; }
-  .notice { color: var(--warn); }
-  .flagbox { display: grid; gap: 8px; padding: 12px 16px; border: 2px solid var(--warn); border-radius: 8px; margin: 12px 0; max-width: 720px; }
-  .flagbox .reason { font-weight: 600; color: var(--warn); }
-  .flagbox .last { white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--muted); max-height: 6em; overflow: auto; }
-  .gauges { display: flex; flex-wrap: wrap; gap: 16px; margin: 12px 0; }
-  .gauge { display: grid; justify-items: center; gap: 2px; cursor: pointer; font-size: 12px; color: var(--muted); }
-  .gauge svg { width: 56px; height: 56px; }
-  .gauge .track { fill: none; stroke: var(--line); stroke-width: 6; }
-  .gauge .arc { fill: none; stroke: var(--ok); stroke-width: 6; stroke-linecap: round; transform: rotate(-90deg); transform-origin: 50% 50%; }
-  .gauge.warn .arc { stroke: #c9962b; }
-  .gauge.over .arc { stroke: var(--warn); }
-  .gauge .value { color: var(--ink); font-variant-numeric: tabular-nums; }
+  .ticket .ref { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .ticket .why, .ticket .repo, .ticket .last { color: var(--muted); font-size: 12px; }
+  .ticket .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ticket .why { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ticket .track { display: grid; gap: 2px; }
+  .ticket .track svg { display: block; width: 100%; max-width: 132px; height: 18px; }
+  .ticket .track .stage { color: var(--muted); font-size: 11px; }
+  .ticket .last { font-variant-numeric: tabular-nums; text-align: right; }
+  .ticket .quick { min-width: 0; }
+  @media (max-width: 900px) {
+    .ticket { grid-template-columns: max-content 1fr max-content; }
+    .ticket .track, .ticket .rings, .ticket .last, .ticket .quick { grid-column: span 1; }
+    .ticket .title-cell { grid-column: 1 / -1; }
+  }
   .rings { display: flex; gap: 4px; align-self: center; }
-  .rings svg { width: 16px; height: 16px; }
-  .rings .track { fill: none; stroke: var(--line); stroke-width: 3; }
-  .rings .arc { fill: none; stroke: var(--ok); stroke-width: 3; transform: rotate(-90deg); transform-origin: 50% 50%; }
-  .rings .warn .arc { stroke: #c9962b; }
-  .rings .over .arc { stroke: var(--warn); }
-  .editor { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; align-items: end; padding: 12px 16px; border: 1px solid var(--line); border-radius: 8px; margin: 0 0 12px; max-width: 720px; }
+  .rings svg { width: 18px; height: 18px; }
+  .rings .track, .gauge .track { fill: none; stroke: var(--surface2); stroke-width: 3; }
+  .rings .arc { fill: none; stroke: var(--good); stroke-width: 3; transform: rotate(-90deg); transform-origin: 50% 50%; }
+  .rings .warn .arc { stroke: var(--amber); }
+  .rings .over .arc { stroke: var(--crit); }
+
+  /* the detail */
+  .detail { display: grid; gap: 12px; min-width: 0; }
+  .titlebar { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
+  .titlebar h2 { font-size: 18px; margin: 2px 0; text-wrap: balance; }
+  .titlebar .eyebrow a { color: var(--accent); }
+  .titlebar .right { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .triggers { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .override { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; color: var(--crit); }
+  .override button { border-color: var(--crit); background: transparent; color: var(--crit); }
+  .flow { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px 6px; overflow-x: auto; }
+  .flow svg { display: block; max-width: 100%; height: auto; }
+  @media (max-width: 720px) { .flow svg { max-width: none; } }
+  .flow .node { cursor: pointer; }
+  .flow text { fill: var(--ink); font-size: 12px; font-family: inherit; }
+  .flow text.name { font-weight: 500; }
+  .flow text.name.cur { font-weight: 600; }
+  .flow text.name.dim { fill: var(--muted); }
+  .flow text.sub { fill: var(--muted); font-size: 10.5px; }
+  .flow text.act { fill: var(--muted); font-size: 10px; }
+  .flow text.bang { fill: var(--surface); font-weight: 700; font-size: 13px; }
+  .flow text.badge-text { fill: var(--surface); font-size: 11px; font-weight: 600; }
+  .flow text.count { font-size: 10px; font-weight: 700; }
+  .flow .pulse { animation: pulse 1.4s infinite; }
+  .flow .legend { font-size: 11px; color: var(--muted); padding: 6px 0 0; border-top: 1px solid var(--line); margin-top: 6px; }
+  .flagbox { display: grid; gap: 8px; padding: 12px 16px; border: 1px solid var(--crit); background: var(--crit-bg); border-radius: 8px; }
+  .flagbox .reason { font-weight: 600; color: var(--crit); }
+  .flagbox .last { white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--muted); max-height: 6em; overflow: auto; }
+  .dgrid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr); gap: 12px; align-items: start; }
+  @media (max-width: 900px) { .dgrid { grid-template-columns: 1fr; } }
+  .stack { display: grid; gap: 12px; min-width: 0; }
+  .panel { display: grid; gap: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+  .panel h3 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+  .panel .head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .gauges { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .gauge { display: grid; justify-items: center; gap: 2px; cursor: pointer; font-size: 11px; color: var(--muted); text-align: center; }
+  .gauge svg { width: 56px; height: 56px; }
+  .gauge .arc { fill: none; stroke: var(--good); stroke-width: 6; stroke-linecap: round; transform: rotate(-90deg); transform-origin: 50% 50%; }
+  .gauge.warn .arc { stroke: var(--amber); }
+  .gauge.over .arc { stroke: var(--crit); }
+  .gauge .value { color: var(--ink); font-variant-numeric: tabular-nums; }
+  .editor { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; align-items: end; }
   .editor label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
-  .editor input { padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; font: inherit; }
-  .editor .row { display: flex; gap: 8px; grid-column: 1 / -1; }
+  .editor input { padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; font: inherit; width: 100%; }
+  .editor .row { display: flex; flex-wrap: wrap; gap: 8px; grid-column: 1 / -1; align-items: center; }
   .confirm { display: grid; gap: 8px; padding: 12px 16px; border: 1px solid var(--line); border-radius: 8px; margin: 0 0 16px; max-width: 720px; }
   .confirm .row { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
-  .confirm label, .confirm .why { color: var(--muted); }
+  .confirm label, .why { color: var(--muted); }
   .confirm select { padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; }
   .kind { text-transform: uppercase; letter-spacing: 0.06em; font-size: 11px; color: var(--muted); }
-  .ticket { display: grid; grid-template-columns: 110px 1fr auto; gap: 4px 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
-  .ticket:hover { border-color: var(--accent); }
-  .pill { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--pill); white-space: nowrap; align-self: start; }
-  .pill.needs_you, .pill.flagged { background: var(--accent); color: #fff; }
-  .pill.holding { border: 1px solid var(--accent); color: var(--accent); background: transparent; }
-  .pill.queued { border: 1px solid var(--muted); color: var(--muted); background: transparent; }
-  .triggers { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-  .triggers button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--pill); cursor: pointer; }
-  .triggers button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
-  .triggers button:disabled { opacity: 0.6; cursor: default; }
-  .override { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; color: var(--warn); }
-  .override button { font: inherit; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--warn); background: transparent; color: var(--warn); cursor: pointer; }
-  .ticket .ref { font-variant-numeric: tabular-nums; }
-  .ticket .why, .ticket .repo { color: var(--muted); font-size: 12px; }
-  .ticket .stage { color: var(--muted); font-size: 12px; text-align: right; }
-  .detail { display: grid; gap: 12px; }
-  .detail dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; }
+  .detail dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; font-size: 12px; }
   .detail dt { color: var(--muted); }
-  .detail dd { margin: 0; font-family: ui-monospace, monospace; font-size: 13px; word-break: break-all; }
-  .stations { display: flex; flex-wrap: wrap; gap: 6px; }
-  .station { padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; font-size: 12px; color: var(--muted); }
-  .station.current { border-color: var(--accent); color: var(--accent); }
-  .station.done { color: var(--ok); border-color: var(--ok); }
-  a.back { color: var(--muted); }
-  .pill.running { background: var(--ok); color: #fff; }
-  .session { display: grid; gap: 8px; padding: 12px; border-radius: 8px; background: var(--term-bg); color: var(--term-ink); font-family: ui-monospace, monospace; font-size: 12px; }
+  .detail dd { margin: 0; font-family: ui-monospace, monospace; word-break: break-all; }
+
+  /* the Session pane: a dark terminal */
+  .session { display: grid; gap: 8px; padding: 12px; border-radius: 8px; background: var(--term-bg); color: var(--term-ink); font-family: ui-monospace, monospace; font-size: 12px; min-width: 0; }
   .session .head { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
   .session .head strong { color: var(--term-bright); }
   .session .meta { color: var(--term-dim); }
@@ -96,23 +171,31 @@
   .session .feedback .row { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
   .session .feedback .kind { color: var(--term-dim); font-variant-numeric: tabular-nums; }
   .session .pill { background: var(--term-pill); color: var(--term-bright); }
-  .session .pill.succeeded { background: var(--ok); color: #fff; }
-  .session .pill.failed, .session .pill.exhausted, .session .pill.interrupted { background: var(--warn); color: #fff; }
+  .session .pill.succeeded { background: var(--good); color: #fff; }
+  .session .pill.running { background: var(--run); color: #fff; }
+  .session .pill.failed, .session .pill.exhausted, .session .pill.interrupted { background: var(--crit); color: #fff; }
   .session pre { margin: 0; max-height: 360px; overflow: auto; white-space: pre-wrap; word-break: break-all; color: var(--term-dim); }
   .session .final { color: var(--term-bright); border-top: 1px solid var(--term-line); padding-top: 8px; white-space: pre-wrap; }
   .session .final.ok { color: var(--term-ok); }
   .session .paths { display: flex; flex-wrap: wrap; gap: 6px; }
   .session .paths button { font: inherit; font-size: 11px; padding: 2px 8px; background: var(--term-pill); color: var(--term-dim); border-color: var(--term-line); }
-  .session button.stop { background: var(--warn); color: #fff; border-color: var(--warn); font: inherit; }
+  .session button.stop { background: var(--crit); color: #fff; border-color: var(--crit); font: inherit; }
   .session .hint { color: var(--term-dim); }
-  .timeline { display: grid; gap: 4px; }
-  .timeline h3 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
-  .timeline .row { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; font-variant-numeric: tabular-nums; font-size: 13px; }
-  .timeline .row .meta { color: var(--muted); }
+
+  /* the Sessions timeline */
+  .timeline { list-style: none; margin: 4px 0 0 6px; padding: 0 0 0 16px; border-left: 2px solid var(--line); display: grid; gap: 6px; font-size: 12px; }
+  .timeline li { position: relative; padding: 2px 6px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+  .timeline li::before { content: ""; position: absolute; left: -23px; top: 7px; width: 10px; height: 10px; border-radius: 50%; background: var(--c, var(--muted)); box-shadow: 0 0 0 2px var(--surface); }
+  .timeline .when { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .timeline .pill { font-size: 11px; padding: 1px 6px; }
+  .timeline .pill.succeeded { background: var(--good-bg); color: var(--good); }
+  .timeline .pill.failed, .timeline .pill.exhausted { background: var(--crit-bg); color: var(--crit); }
+  .timeline .pill.interrupted { background: var(--amber-bg); color: var(--amber); }
+
+  /* Pipelines and Config */
   nav.views { display: flex; gap: 12px; }
   nav.views a { color: var(--muted); text-decoration: none; }
   nav.views a:hover { color: var(--accent); }
-  .panel { display: grid; gap: 12px; }
   .panel h2 { margin: 0; font-size: 16px; }
   .pipelines-grid { display: grid; grid-template-columns: minmax(180px, 240px) 1fr; gap: 16px; align-items: start; }
   @media (max-width: 720px) { .pipelines-grid { grid-template-columns: 1fr; } }
@@ -121,8 +204,8 @@
   .plist a.current { border-color: var(--accent); }
   .plist a .why, .card .why, .panel .why { color: var(--muted); font-size: 12px; }
   .card { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; }
-  .card.problem { border-color: var(--warn); }
-  .card h3 { margin: 0; font-size: 13px; display: flex; gap: 8px; align-items: baseline; }
+  .card.problem { border-color: var(--crit); }
+  .card h3 { margin: 0; font-size: 13px; display: flex; gap: 8px; align-items: baseline; text-transform: none; letter-spacing: 0; color: var(--ink); }
   .card h3 .kind { font-weight: normal; }
   .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; align-items: end; }
   .fields label, .fields .check { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
@@ -133,7 +216,7 @@
   textarea.raw { width: 100%; min-height: 360px; padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
   .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   .bar .path { font-family: ui-monospace, monospace; font-size: 12px; color: var(--muted); word-break: break-all; }
-  :root { --term-bg: #1c1d22; --term-ink: #d7d5cd; --term-dim: #8f8c84; --term-bright: #f2f0ea; --term-line: #33353d; --term-pill: #2e3038; --term-ok: #8fd19a; }
+  .panel.editor-panel { background: transparent; border: 0; padding: 0; }
 </style>
 </head>
 <body>
@@ -152,15 +235,23 @@
 <main>
   <p data-role="notice" class="notice" hidden></p>
   <form data-role="confirm" class="confirm" hidden></form>
-  <div class="ledger-tools" data-role="ledger-tools"><label><input type="checkbox" data-role="show-ended"> Show done and Abandoned</label></div>
-  <section data-role="ledger" aria-label="Tickets"></section>
-  <section data-role="detail" class="detail" hidden></section>
-  <section data-role="pipelines" class="panel" aria-label="Pipelines" hidden></section>
-  <section data-role="config" class="panel" aria-label="Config" hidden></section>
+  <div class="dwrap" data-role="layout">
+    <aside class="dside" data-role="side" hidden></aside>
+    <div class="dmain">
+      <div class="ledger-tools" data-role="ledger-tools"><label><input type="checkbox" data-role="show-ended"> Show done and Abandoned</label></div>
+      <section data-role="ledger" aria-label="Tickets"></section>
+      <section data-role="detail" class="detail" hidden></section>
+      <section data-role="pipelines" class="panel editor-panel" aria-label="Pipelines" hidden></section>
+      <section data-role="config" class="panel editor-panel" aria-label="Config" hidden></section>
+    </div>
+  </div>
 </main>
-<script>
+<script type="module">
+import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } from '/metro.js';
 (function () {
   const $ = (sel) => document.querySelector(sel);
+  const layout = $('[data-role="layout"]');
+  const side = $('[data-role="side"]');
   const ledger = $('[data-role="ledger"]');
   const detail = $('[data-role="detail"]');
   const confirmPanel = $('[data-role="confirm"]');
@@ -169,6 +260,8 @@
   const tickStatus = $('[data-role="tick-status"]');
   const notice = $('[data-role="notice"]');
   const intakeForm = $('form[data-role="intake"]');
+  const showEnded = $('[data-role="show-ended"]');
+  const ledgerTools = $('[data-role="ledger-tools"]');
 
   async function api(route, init) {
     const res = await fetch(route, Object.assign({ headers: { 'content-type': 'application/json' } }, init || {}));
@@ -205,41 +298,6 @@
     } catch (e) { tickStatus.textContent = 'tick: unreachable'; }
   }
 
-  function ticketRow(t) {
-    const row = el('article', { class: 'ticket' + (t.state === 'active' ? '' : ' ended'), 'data-id': t.id }, [
-      el('span', { class: 'pill ' + t.display.state, text: t.display.label || t.display.state }),
-      el('div', {}, [el('div', { class: 'ref', text: t.reference || t.shortId }), el('div', { class: 'repo', text: t.repo })]),
-      el('div', { class: 'stage', text: t.stage.label + ' · ' + (t.stage.index + 1) + '/' + t.stage.total }),
-      miniRings(t.budget),
-      el('div', {}, [el('div', { text: t.title }), el('div', { class: 'why', text: t.display.why })]),
-      el('div', { class: 'stage', text: relative(t.updatedAt) }),
-    ]);
-    row.addEventListener('click', () => { location.hash = t.id; });
-    return row;
-  }
-
-  const showEnded = $('[data-role="show-ended"]');
-  const ledgerTools = $('[data-role="ledger-tools"]');
-  showEnded.addEventListener('change', refreshLedger);
-
-  async function refreshLedger() {
-    // Done and Abandoned Tickets sit behind the toggle, greyed (CONTEXT.md: Ledger).
-    const tickets = await api(showEnded.checked ? '/api/tickets?all=1' : '/api/tickets');
-    ledger.replaceChildren();
-    if (!tickets.length) {
-      ledger.appendChild(el('p', { class: 'empty', text: showEnded.checked ? 'No Tickets yet. Paste a reference or a prompt above to start one.' : 'No active Tickets. Paste a reference or a prompt above to start one.' }));
-      return;
-    }
-    for (const t of tickets) ledger.appendChild(ticketRow(t));
-  }
-
-  function duration(ms) {
-    const s = Math.round(ms / 1000);
-    if (s < 60) return s + 's';
-    const m = Math.floor(s / 60);
-    return m < 60 ? m + 'm' + (s % 60) + 's' : Math.floor(m / 60) + 'h' + (m % 60) + 'm';
-  }
-
   function svg(tag, attrs) {
     const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
     for (const [k, v] of Object.entries(attrs || {})) node.setAttribute(k, v);
@@ -265,7 +323,79 @@
 
   // The Ledger's four mini rings, no words.
   function miniRings(b) {
-    return el('span', { class: 'rings', 'data-role': 'rings', title: GAUGES.map(([k, name, text]) => name + ' ' + text(b[k])).join(' · ') }, GAUGES.map(([k]) => ring(b[k], 16)));
+    return el('span', { class: 'rings', 'data-role': 'rings', title: GAUGES.map(([k, name, text]) => name + ' ' + text(b[k])).join(' · ') }, GAUGES.map(([k]) => ring(b[k], 18)));
+  }
+
+  /** Pull a Trigger on a Ticket; Mark done met with a missing artifact offers to advance anyway through `onOverride`. */
+  async function pullTrigger(t, action, body, onOverride) {
+    if (action === 'check') { await api('/api/check-now', { method: 'POST' }); return; }
+    try { await api('/api/tickets/' + encodeURIComponent(t.id) + '/' + action, { method: 'POST', body: JSON.stringify(body || {}) }); }
+    catch (e) {
+      if (e.status === 409 && e.body && e.body.override && onOverride) { onOverride(e.body); return; }
+      throw e;
+    }
+  }
+
+  // A Ledger row: status pill, reference over repo, title over the why line, the mini Metro track with the Stage
+  // name, four mini rings, last activity, and the one quick action (spec: Ledger).
+  function ticketRow(t) {
+    const track = el('div', { class: 'track', 'data-role': 'track' });
+    track.innerHTML = metroTrack(t);
+    track.appendChild(el('span', { class: 'stage', text: t.stage.label + (t.stage.index < 0 ? '' : ' · ' + (t.stage.index + 1) + '/' + t.stages.length) }));
+    const quick = el('div', { class: 'quick', 'data-role': 'quick' });
+    const action = quickAction(t);
+    if (action) {
+      const button = el('button', { type: 'button', class: 'sm' + (action.action === 'check' ? '' : ' primary'), text: action.label, 'data-action': action.action });
+      button.addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        button.disabled = true;
+        try { await pullTrigger(t, action.action, {}); await refreshLedger(); }
+        catch (e) { showNotice(e.message); button.disabled = false; }
+      });
+      quick.appendChild(button);
+    }
+    const row = el('article', { class: 'ticket' + (t.state === 'active' ? '' : ' ended'), 'data-id': t.id }, [
+      el('span', { class: 'pill ' + t.display.state, 'data-role': 'pill', text: t.display.label || t.display.state }),
+      el('div', {}, [el('div', { class: 'ref', 'data-role': 'ref', text: t.reference || t.shortId }), el('div', { class: 'repo', text: t.repo })]),
+      el('div', { class: 'title-cell' }, [el('div', { class: 'title', text: t.title }), el('div', { class: 'why', 'data-role': 'why', text: t.display.why })]),
+      track,
+      miniRings(t.budget),
+      el('div', { class: 'last', 'data-role': 'last', title: t.updatedAt, text: relative(t.updatedAt) }),
+      quick,
+    ]);
+    row.addEventListener('click', () => { location.hash = t.id; });
+    return row;
+  }
+
+  const listTickets = () => api(showEnded.checked ? '/api/tickets?all=1' : '/api/tickets');
+  const failing = (e) => showNotice(e.message);
+  showEnded.addEventListener('change', () => { if (!ledger.hidden) refreshLedger().catch(failing); else if (!side.hidden && currentTicket) refreshSide(currentTicket).catch(failing); });
+
+  async function refreshLedger() {
+    // The API serves rows in Ledger order: attention first, newest activity within a group. Done and Abandoned
+    // sit behind the toggle, greyed (CONTEXT.md: Ledger).
+    const tickets = await listTickets();
+    ledger.replaceChildren();
+    if (!tickets.length) {
+      ledger.appendChild(el('p', { class: 'empty', text: showEnded.checked ? 'No Tickets yet. Paste a reference or a prompt above to start one.' : 'No active Tickets. Paste a reference or a prompt above to start one.' }));
+      return;
+    }
+    for (const t of tickets) ledger.appendChild(ticketRow(t));
+  }
+
+  // With a detail open the Ledger collapses to this sidebar: one compact line per Ticket, the open one marked.
+  let currentTicket = null;
+  async function refreshSide(id) {
+    const tickets = await listTickets();
+    const back = el('div', { class: 'back' }, [el('a', { class: 'back-link', href: '#', text: '← all Tickets' }), el('span', { class: 'muted', text: tickets.length + ' shown' })]);
+    side.replaceChildren(back, ...tickets.map((t) => {
+      const item = el('div', { class: 'qitem' + (t.id === id ? ' sel' : '') + (t.state === 'active' ? '' : ' ended'), 'data-id': t.id }, [
+        el('span', { class: 'dot ' + t.display.state }),
+        el('div', { style: 'min-width:0' }, [el('div', { class: 'ref', text: (t.reference || t.shortId) + ' · ' + t.repo + ' · ' + t.stage.label }), el('div', { class: 'title', text: t.title })]),
+      ]);
+      item.addEventListener('click', () => { location.hash = t.id; });
+      return item;
+    }));
   }
 
   // The four ring gauges; any of them opens the inline Ticket-layer editor (Extend). A starred value is set on the Ticket.
@@ -307,11 +437,11 @@
     return form;
   }
 
-  // The Flag box: why, when, the last word from the Runner, and the six exits in the trigger bar below it.
+  // The Flag box: why, when, the last word from the Runner, and the six exits below it.
   function flagBox(t) {
     const last = t.session && t.session.finalMessage;
     return el('div', { class: 'flagbox', 'data-role': 'flagbox' }, [
-      el('div', {}, [el('span', { class: 'reason', text: t.flag.reason }), ' ', el('span', { class: 'meta', text: 'Flagged ' + relative(t.flag.at) })]),
+      el('div', {}, [el('span', { class: 'reason', text: t.flag.reason }), ' ', el('span', { class: 'meta muted', text: 'Flagged ' + relative(t.flag.at) })]),
       el('div', { text: t.flag.detail || '' }),
       last ? el('div', { class: 'last', text: last }) : el('span'),
     ]);
@@ -397,9 +527,8 @@
     pane.replaceChildren(head, feedbackList(s.feedback), out, final, paths);
 
     let offset = 0;
-    let stale = false;
     async function tail() {
-      const current = () => gen === detailGen && !stale;
+      const current = () => gen === detailGen;
       try {
         const chunk = await api('/api/tickets/' + encodeURIComponent(t.id) + '/sessions/' + s.id + '/stdout?offset=' + offset);
         if (!current()) return;
@@ -408,7 +537,7 @@
         if (chunk.ended) { if (s.running) showDetail(t.id); return; }
       } catch (e) {
         if (!current()) return;
-        if (!stale) { stale = true; out.textContent += '\n[stdout unavailable: ' + e.message + '; retrying]'; stale = false; }
+        out.textContent += '\n[stdout unavailable: ' + e.message + '; retrying]';
       }
       if (!s.running || !current()) return;
       head.querySelector('[data-role="duration"]').textContent = duration(Date.now() - new Date(s.startedAt).getTime());
@@ -418,26 +547,33 @@
     return pane;
   }
 
-  function timeline(sessions) {
-    return el('div', { class: 'timeline', 'data-role': 'timeline' }, [
-      el('h3', { text: 'Sessions' }),
-      ...sessions.map((s) => el('div', { class: 'row' }, [
-        el('span', { class: 'pill ' + (s.running ? 'running' : s.outcome || ''), text: s.running ? 'running' : (s.outcome || '?') }),
-        el('span', { text: sessionLabel(s) }),
-        el('span', { class: 'meta', text: s.mode + ' · ' + s.startedBy + (s.endedReason ? ' · ' + s.endedReason : '') }),
-        el('span', { class: 'meta', text: duration(s.durationMs) + (s.costUsd === null ? '' : ' · $' + s.costUsd.toFixed(2)) }),
-        el('span', { class: 'meta', text: relative(s.startedAt) }),
-      ])),
-    ]);
+  const OUTCOME_COLOUR = { succeeded: 'var(--good)', failed: 'var(--crit)', exhausted: 'var(--crit)', interrupted: 'var(--amber)' };
+
+  // The Sessions timeline, newest first, action Stages included; a station click narrows it to one Stage.
+  function timeline(t, focus, onFocus) {
+    const sessions = sessionsForStage(t.sessions, focus);
+    const head = el('div', { class: 'head' }, [el('h3', { text: 'Sessions' + (focus ? ' · ' + focus : '') })]);
+    if (focus) {
+      const all = el('button', { type: 'button', class: 'sm', 'data-role': 'stage-filter', text: 'All Stages' });
+      all.addEventListener('click', () => onFocus(null));
+      head.appendChild(all);
+    }
+    const list = el('ul', { class: 'timeline' }, sessions.map((s) => el('li', { style: '--c:' + (s.running ? 'var(--run)' : OUTCOME_COLOUR[s.outcome] || 'var(--muted)') }, [
+      el('span', { class: 'when', text: relative(s.startedAt) }),
+      el('span', { class: 'pill ' + (s.running ? 'running' : s.outcome || ''), text: s.running ? 'running' : (s.outcome || '?') }),
+      el('span', { text: sessionLabel(s) }),
+      el('span', { class: 'muted', text: s.mode + ' · ' + s.startedBy + (s.endedReason ? ' · ' + s.endedReason : '') + ' · ' + duration(s.durationMs) + (s.costUsd === null ? '' : ' · $' + s.costUsd.toFixed(2)) }),
+    ])));
+    return el('div', { class: 'panel', 'data-role': 'timeline' }, [head, sessions.length ? list : el('span', { class: 'muted', text: focus ? 'no Sessions of ' + focus + ' yet' : 'no Sessions yet' })]);
   }
 
   // The levers on this Ticket. Mark done met with a missing artifact offers to advance anyway, inline;
-  // Extend opens the Budget editor; Abandon asks for a second click.
+  // Extend opens the Budget editor; Abandon asks for a second click; Check PR now runs a tick.
   function triggerBar(t, openEditor) {
     const bar = el('div', { class: 'triggers', 'data-role': 'triggers' });
     const buttons = t.triggers.map((trigger) => {
       const primary = trigger.action === 'terminal' || trigger.action === 'start' || trigger.action === 'retry';
-      const button = el('button', { type: 'button', text: trigger.label, class: primary ? 'primary' : '', 'data-action': trigger.action });
+      const button = el('button', { type: 'button', text: trigger.label, class: 'sm' + (primary ? ' primary' : ''), 'data-action': trigger.action });
       if (trigger.action === 'extend') button.addEventListener('click', openEditor);
       else if (trigger.action === 'abandon') button.addEventListener('click', () => {
         if (button.dataset.armed) { pull('abandon', {}); return; }
@@ -447,23 +583,56 @@
       else button.addEventListener('click', () => pull(trigger.action, {}));
       return button;
     });
+    // Check PR now belongs to the repeating Stage: a tick there fetches Feedback and opens a Round (spec: the title bar).
+    if (t.state === 'active' && t.pr && t.stage.repeat) {
+      const check = el('button', { type: 'button', class: 'sm', 'data-role': 'check-pr', text: 'Check PR now' });
+      check.addEventListener('click', () => pull('check', {}));
+      buttons.push(check);
+    }
     bar.replaceChildren(...buttons);
     async function pull(action, body) {
       for (const b of buttons) b.disabled = true;
       try {
-        await api('/api/tickets/' + encodeURIComponent(t.id) + '/' + action, { method: 'POST', body: JSON.stringify(body) });
+        await pullTrigger(t, action, body, (problem) => {
+          for (const b of buttons) b.disabled = false;
+          const anyway = el('button', { type: 'button', class: 'sm', text: 'Advance anyway' });
+          anyway.addEventListener('click', () => { anyway.disabled = true; pull(action, { override: true }); });
+          bar.replaceChildren(...buttons, el('div', { class: 'override', 'data-role': 'override' }, [
+            el('span', { text: 'artifact ' + problem.artifact + ' is missing: ' + problem.detail }), anyway]));
+        });
         showDetail(t.id);
       } catch (e) {
         for (const b of buttons) b.disabled = false;
-        if (e.status === 409 && e.body && e.body.override) {
-          const anyway = el('button', { type: 'button', text: 'Advance anyway' });
-          anyway.addEventListener('click', () => { anyway.disabled = true; pull(action, { override: true }); });
-          bar.replaceChildren(...buttons, el('div', { class: 'override', 'data-role': 'override' }, [
-            el('span', { text: 'artifact ' + e.body.artifact + ' is missing: ' + e.body.detail }), anyway]));
-        } else showNotice(e.message);
+        showNotice(e.message);
       }
     }
     return bar;
+  }
+
+  // Which station the timeline is narrowed to, per Ticket, so a refresh keeps it.
+  const focusByTicket = {};
+
+  // The Metro flow diagram in its panel; a station click narrows the timeline and marks the station.
+  function flowPanel(t, onFocus) {
+    const panel = el('div', { class: 'flow', 'data-role': 'flow' });
+    const drawing = el('div');
+    const legend = el('div', { class: 'legend', text: 'Filled stations are done, the ringed station is current, a stop sign is Flagged, ticks are action Stages. The orbit above a repeating Stage is PR feedback with Rounds used of Budget on its badge; a small orbit counts attempts. Click a station to filter Sessions.' });
+    panel.replaceChildren(drawing, legend);
+    panel.draw = (focus) => {
+      drawing.innerHTML = metroDiagram(t, focus);
+      for (const node of drawing.querySelectorAll('[data-stage]')) node.addEventListener('click', () => onFocus(node.dataset.stage === focus ? null : node.dataset.stage));
+    };
+    return panel;
+  }
+
+  function titleBar(t, openEditor) {
+    const crumbs = el('div', { class: 'eyebrow' }, [el('span', { text: (t.reference || t.shortId) + ' · ' + t.repo + ' · ' + t.branch })]);
+    if (t.pr) crumbs.append(' · ', el('a', { href: t.pr, target: '_blank', rel: 'noopener', 'data-role': 'pr-link', text: 'PR' }));
+    const left = el('div', { style: 'min-width:0' }, [crumbs, el('h2', { text: t.title }), el('div', { class: 'why', text: t.display.why + (t.mirrorPending ? ' · tracker labels not written yet' : '') })]);
+    const right = el('div', { class: 'right' }, [el('span', { class: 'pill ' + t.display.state, text: t.display.label })]);
+    // A Flagged Ticket's exits live in its Flag box (spec: the Flag box); otherwise the triggers stand in the title bar.
+    if (!t.flag) right.appendChild(triggerBar(t, openEditor));
+    return el('div', { class: 'titlebar', 'data-role': 'titlebar' }, [left, right]);
   }
 
   async function showDetail(id) {
@@ -472,33 +641,40 @@
     try { t = await api('/api/tickets/' + encodeURIComponent(id)); }
     catch (e) { showNotice(e.message); location.hash = ''; return; }
     if (gen !== detailGen) return;
-    const back = el('a', { class: 'back', href: '#', text: '← all Tickets' });
-    const stations = el('div', { class: 'stations' }, t.stages.map((s, i) =>
-      el('span', { class: 'station' + (i < t.stage.index ? ' done' : i === t.stage.index ? ' current' : ''), text: s.label })));
-    const children = [
-      back,
-      el('h2', { text: (t.reference ? t.reference + ' · ' : '') + t.title }),
-      el('div', {}, [el('span', { class: 'pill ' + t.display.state, text: t.display.label }), ' ', el('span', { class: 'why', text: t.display.why + (t.mirrorPending ? ' · tracker labels not written yet' : '') })]),
-      stations,
-    ];
+    currentTicket = t.id;
     const editor = budgetEditor(t);
     const openEditor = () => { editor.hidden = false; editor.querySelector('input').focus(); };
-    // A Flagged Ticket's exits live in its Flag box (spec: the Flag box); otherwise the triggers stand alone.
-    const bar = t.triggers.length ? triggerBar(t, openEditor) : null;
-    if (t.flag) { const box = flagBox(t); if (bar) box.append(bar); children.push(box); }
-    else if (bar) children.push(bar);
-    children.push(gauges(t, openEditor), editor);
-    if (t.session) children.push(sessionPane(t, t.session, gen));
-    children.push(el('dl', {}, [
-      el('dt', { text: 'repo' }), el('dd', { text: t.repo }),
-      el('dt', { text: 'branch' }), el('dd', { text: t.branch }),
+    let timelineNode = null;
+    const onFocus = (stage) => {
+      focusByTicket[t.id] = stage;
+      flow.draw(stage);
+      const next = timeline(t, stage, onFocus);
+      timelineNode.replaceWith(next);
+      timelineNode = next;
+    };
+    const flow = flowPanel(t, onFocus);
+    const focus = focusByTicket[t.id] && t.stages.some((s) => s.name === focusByTicket[t.id]) ? focusByTicket[t.id] : null;
+    flow.draw(focus);
+    timelineNode = timeline(t, focus, onFocus);
+    const children = [titleBar(t, openEditor), flow];
+    if (t.flag) { const box = flagBox(t); box.append(triggerBar(t, openEditor)); children.push(box); }
+    const left = el('div', { class: 'stack' });
+    if (t.session) left.appendChild(sessionPane(t, t.session, gen));
+    else left.appendChild(el('div', { class: 'panel muted', text: 'No Session yet.' }));
+    left.appendChild(el('dl', {}, [
       el('dt', { text: 'worktree' }), el('dd', { text: t.worktree }),
       el('dt', { text: 'pipeline' }), el('dd', { text: t.pipeline }),
       el('dt', { text: 'id' }), el('dd', { text: t.id }),
     ]));
-    if (t.sessions.length) children.push(timeline(t.sessions));
+    const right = el('div', { class: 'stack' }, [
+      el('div', { class: 'panel' }, [el('h3', { text: 'Budget' }), gauges(t, openEditor), editor]),
+      timelineNode,
+    ]);
+    children.push(el('div', { class: 'dgrid' }, [left, right]));
     detail.replaceChildren(...children);
     ledger.hidden = true; ledgerTools.hidden = true; detail.hidden = false;
+    side.hidden = false; layout.classList.add('open');
+    refreshSide(t.id).catch((e) => showNotice(e.message));
   }
 
   const RUNNERS = ['claude', 'codex', 'pi'];
@@ -711,10 +887,11 @@
     detailGen++;
     const view = hash === 'config' ? 'config' : hash === 'pipelines' || hash.startsWith('pipelines/') ? 'pipelines' : hash ? 'detail' : 'ledger';
     ledger.hidden = view !== 'ledger'; ledgerTools.hidden = view !== 'ledger'; detail.hidden = view !== 'detail'; pipelinesPanel.hidden = view !== 'pipelines'; configPanel.hidden = view !== 'config';
+    if (view !== 'detail') { side.hidden = true; layout.classList.remove('open'); currentTicket = null; }
     if (view === 'pipelines') showPipelines(hash.startsWith('pipelines/') ? decodeName(hash.slice('pipelines/'.length)) : null);
     else if (view === 'config') showConfig();
     else if (view === 'detail') showDetail(hash);
-    else refreshLedger();
+    else refreshLedger().catch(failing);
   }
 
   function select(name, choices, suggestion) {
@@ -787,7 +964,7 @@
   window.addEventListener('hashchange', route);
   refreshTick(); route();
   setInterval(refreshTick, 5000);
-  setInterval(() => { if (!ledger.hidden) refreshLedger(); }, 10000);
+  setInterval(() => { if (!ledger.hidden) refreshLedger().catch(failing); else if (!side.hidden && currentTicket) refreshSide(currentTicket).catch(failing); }, 10000);
 })();
 </script>
 </body>
