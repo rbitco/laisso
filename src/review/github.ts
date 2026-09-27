@@ -61,6 +61,23 @@ export class PullRequests {
     return typeof parsed.url === "string" ? parsePrUrl(parsed.url) : null;
   }
 
+  /** The Ticket's PR when it is open right now, else null. */
+  async open(target: PrTarget): Promise<PrRef | null> {
+    const r = await runTool("gh", ["pr", "view", target.pr ?? target.branch, "--json", "number,url,state"], { cwd: target.worktree });
+    if (r.code !== 0) {
+      if (!/no pull requests found/i.test(r.stderr)) this.log.info("review.discover_failed", { branch: target.branch, error: failureReason("gh", r) });
+      return null;
+    }
+    const parsed = json<{ url?: unknown; state?: unknown }>(r, "gh pr view");
+    return parsed.state === "OPEN" && typeof parsed.url === "string" ? parsePrUrl(parsed.url) : null;
+  }
+
+  /** Close the PR with a comment (Abandon, ADR 0007). */
+  async close(ref: PrRef, comment: string): Promise<void> {
+    const r = await runTool("gh", ["pr", "close", ref.url, "--comment", comment]);
+    if (r.code !== 0) throw new PullRequestError(`PR #${ref.number}: ${failureReason("gh", r)}`);
+  }
+
   /**
    * Everything one tick needs. Comments are read whole (paged, ETag-cached per
    * page) rather than since the watermark: an unanswered comment from before

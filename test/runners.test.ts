@@ -42,6 +42,8 @@ const settled = (lasso: Lasso, id: string) => waitFor(async () => {
   const d = await detailOf(lasso, id);
   return d.session && !d.session.running ? d : null;
 }, "the Session to end");
+/** Done follows the last Session's end, so it is waited for separately. */
+const finished = (lasso: Lasso, id: string) => waitFor(async () => { const d = await detailOf(lasso, id); return d.state === "done" ? d : null; }, "the Ticket to be done");
 const commit = [["git", "commit", "-q", "--allow-empty", "-m", "work"]];
 
 async function lassoWith(pipelines: Record<string, string>, env?: Record<string, string>) {
@@ -84,8 +86,7 @@ stages:
 
     await lasso.runner.script({ stdout: claudeFixture("success.json"), files: { "NOTES.md": "notes\n" } });
     await checkNow(lasso);
-    d = await settled(lasso, ticket.id);
-    expect(d.state).toBe("done");
+    d = await finished(lasso, ticket.id);
     const calls = await lasso.runner.calls();
     expect(calls.map((c) => c.argv[0])).toEqual(["pi", "claude"]);
     expect(calls[1]!.argv.slice(0, 2)).toEqual(["claude", "-p"]);
@@ -96,13 +97,13 @@ stages:
     const ticket = await intake(lasso, "codex");
     await lasso.runner.script({ stdout: runnerFixture("codex", "success.jsonl"), commands: commit });
     await checkNow(lasso);
-    const d = await settled(lasso, ticket.id);
-    expect(d.state).toBe("done");
+    const d = await finished(lasso, ticket.id);
     expect(d.session).toMatchObject({ outcome: "succeeded", finalMessage: "OK", transcriptPath: null, costUsd: null, runnerSessionId: "01a0e18c-51ac-7eb2-a6c9-cea33285e2d4" });
     const [call] = await lasso.runner.calls();
     expect(call!.argv.slice(0, 9)).toEqual(["codex", "-a", "never", "exec", "--json", "-C", ticket.worktree, "-s", "workspace-write"]);
     expect(call!.argv.at(-1)).toMatch(/^\[\$implement\]\(\/.*\/implement\/SKILL\.md\)\n\nYou are working Lasso Ticket/);
-    expect(call!.cwd).toBe(realpathSync(ticket.worktree));
+    // The worktree is gone once the Ticket is done, so its real path is resolved through the home directory.
+    expect(call!.cwd).toBe(path.join(realpathSync(lasso.home), path.relative(lasso.home, ticket.worktree)));
   });
 
   it("reads exit 143 as interrupted for every Runner, whatever it printed first", async () => {

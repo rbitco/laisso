@@ -137,4 +137,8 @@ const MIGRATIONS: Array<(db: DatabaseSync) => void> = [
       CREATE INDEX feedback_item_session ON feedback_item (session);
     `);
   },
+  // End of life (LASSO-39): when the Ticket became done or Abandoned, for the retention sweep.
+  (db) => {
+    db.exec(`ALTER TABLE tickets ADD COLUMN ended_at TEXT;`);
+  },
 ];

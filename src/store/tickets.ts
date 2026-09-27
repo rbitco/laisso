@@ -36,6 +36,8 @@ export interface TicketRow {
   budget_spend: number | null;
   /** When a tick first found a headless Stage of this Ticket ready to start; the queue is ordered by it. Cleared when a Session starts or the Ticket stops being runnable. */
   runnable_since: string | null;
+  /** When the Ticket became done or Abandoned; the retention sweep counts from it. */
+  ended_at: string | null;
   created_at: string;
   updated_at: string;
 }

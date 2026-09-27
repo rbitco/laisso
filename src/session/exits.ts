@@ -9,6 +9,7 @@ import { parseDuration, DurationError } from "../duration.ts";
 import { TriggerError, type Progress } from "./progress.ts";
 import type { Runs } from "./runs.ts";
 import type { Terminal } from "./terminal.ts";
+import type { Teardown } from "./teardown.ts";
 
 export interface ExitsDeps {
   tickets: Tickets;
@@ -19,6 +20,7 @@ export interface ExitsDeps {
   terminal: Terminal;
   budgets: Budgets;
   tick: Tick;
+  teardown: Teardown;
 }
 
 /** What Extend may set on the Ticket layer; a null clears that dimension back to the Pipeline and global default. */
@@ -97,10 +99,11 @@ export class Exits {
     return updated;
   }
 
-  /** Abandon: the state change, then every running Session of the Ticket is killed with that reason. */
+  /** Abandon: the state change, then every running Session of the Ticket is killed with that reason, then the worktree is torn down (ADR 0007). */
   async abandon(ticket: TicketRow): Promise<TicketRow> {
     const abandoned = await this.deps.progress.abandon(ticket);
     await this.deps.runs.killFor(ticket.id, "abandon");
+    await this.deps.teardown.abandon(abandoned);
     return this.deps.tickets.get(abandoned.id)!;
   }
 

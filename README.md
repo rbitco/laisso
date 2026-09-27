@@ -71,6 +71,19 @@ within seconds. Ctrl-C during that first tick is honoured too. A
 Session cut off by shutdown never counts as an attempt, and a Round cut
 off is run again against its own attempts, not the previous Round's.
 
+A Ticket's end of life is final (ADR 0007). Done, when the last Stage
+completes or Mark done or Skip lands on it, removes the worktree and
+the local branch and clears every `lasso:*` label; the tracker's status
+stays where the Pipeline left it. Abandon kills the Ticket's headless
+Sessions, commits anything uncommitted as `wip: abandoned in Lasso` and
+pushes it when the branch has a remote, removes the worktree, keeps the
+branch, and closes an open PR with a marked comment. There is no
+Reopen: intaking the same issue again makes a new Ticket on the kept
+branch. The per-Ticket directory under `~/.lasso/tickets/` outlives
+both until the tick sweeps it `retention` days later (default 30);
+store rows are never swept. Done and Abandoned Tickets sit greyed
+behind the dashboard's "Show done and Abandoned" toggle.
+
 Pipelines and `config.yaml` can be edited from the dashboard (the
 Pipelines and Config links in the header) or through `/api/pipelines`
 and `/api/config`. Edits change only the fields you touched and keep

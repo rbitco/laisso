@@ -107,7 +107,8 @@ describe("a headless Stage", () => {
       return d.state === "done" ? d : null;
     }, "the Ticket to be done");
     expect(done.display.state).toBe("done");
-    expect(existsSync(`${ticket.worktree}/NOTES.md`)).toBe(true);
+    // Done tears the worktree down (ADR 0007); the artifact was checked before that.
+    await waitFor(async () => (existsSync(ticket.worktree) ? null : true), "the worktree to go");
 
     // The timeline is newest first, one Session per Stage run.
     expect(done.sessions.map((s) => [s.stage, s.ordinal, s.outcome])).toEqual([["notes", 1, "succeeded"], ["implement", 1, "succeeded"]]);

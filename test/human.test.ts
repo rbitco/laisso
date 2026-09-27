@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { startLassoWithRepos, startLasso, runCli, waitFor, claudeFixture, type Lasso, type LassoConfig } from "./harness.ts";
 import type { TicketDetail, IntakeResult } from "../src/api/views.ts";
@@ -142,6 +142,8 @@ describe("a human Stage", () => {
     expect(done.state).toBe("done");
     expect(done.display.state).toBe("done");
     expect(done.triggers).toEqual([]);
+    // Mark done on the last Stage tears the worktree down before answering (ADR 0007).
+    expect(existsSync(ticket.worktree)).toBe(false);
     expect(await lasso.notifications()).toHaveLength(3);
   });
 

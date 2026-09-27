@@ -70,7 +70,38 @@ export class Git {
     return { existed: false };
   }
 
+  /** Remove a worktree, uncommitted changes and all; one already gone from disk is pruned instead. */
   async removeWorktree(dir: string): Promise<void> {
-    await this.exec(["worktree", "remove", "--force", dir]);
+    try {
+      await this.exec(["worktree", "remove", "--force", dir]);
+    } catch (error) {
+      if (!/not a working tree|does not exist|No such file/i.test((error as Error).message)) throw error;
+      await this.exec(["worktree", "prune"]);
+    }
+  }
+
+  /** Delete a local branch whatever its merge state; the worktree that had it must be gone. */
+  deleteBranch(branch: string): Promise<string> {
+    return this.exec(["branch", "-D", "--quiet", branch]);
+  }
+
+  /** Whether origin has the branch, as of a fresh fetch. */
+  async remoteBranchExists(branch: string): Promise<boolean> {
+    await this.fetch();
+    return this.refExists(`refs/remotes/origin/${branch}`);
+  }
+
+  /** Commit everything in a worktree under `message`; false when there was nothing to commit. Falls back to Lasso's own identity where git has none. */
+  async commitAll(dir: string, message: string): Promise<boolean> {
+    if (!(await this.exec(["status", "--porcelain"], dir))) return false;
+    await this.exec(["add", "-A"], dir);
+    const identity = (await this.exec(["config", "--get", "user.email"], dir).catch(() => "")) ? [] : ["-c", "user.name=Lasso", "-c", "user.email=lasso@localhost"];
+    // A salvage commit is not the repo's hooks to refuse.
+    await this.exec([...identity, "commit", "--quiet", "--no-verify", "-m", message], dir);
+    return true;
+  }
+
+  push(dir: string, branch: string): Promise<string> {
+    return this.exec(["push", "--quiet", "origin", branch], dir);
   }
 }

@@ -6,6 +6,7 @@ import type { Notifier } from "../notify/notifier.ts";
 import { loadPipeline, type ActionStage, type Pipeline, type RunnerStage, type Stage } from "../pipeline/load.ts";
 import type { Mirror } from "../tracker/mirror.ts";
 import { checkArtifact, type PrProbe } from "../artifact/check.ts";
+import type { Teardown } from "./teardown.ts";
 
 /** A Trigger that cannot pull right now, with the reason for the human. */
 export class TriggerError extends Error {}
@@ -36,6 +37,7 @@ export interface ProgressDeps {
   mirror: Mirror;
   /** The Ticket's PR for the pr-* artifacts; wired once the Review loop exists. */
   prProbe: (ticket: TicketRow) => PrProbe;
+  teardown: Teardown;
 }
 
 /**
@@ -166,8 +168,11 @@ export class Progress {
     const next = current.pipeline.stages[current.index + 1];
     const now = new Date().toISOString();
     if (!next) {
-      const done = this.deps.tickets.update(ticket.id, { state: "done", holding_since: null, runnable_since: null, ...unflagPatch(ticket, now) });
+      // The row goes done before the worktree goes, so no tick can start a Session in a directory
+      // being removed; a crash in between leaves a done Ticket the retention sweep tidies (ADR 0007).
+      const done = this.deps.tickets.update(ticket.id, { state: "done", ended_at: now, holding_since: null, runnable_since: null, ...unflagPatch(ticket, now) });
       this.deps.log.info("ticket.done", { ticket: ticket.id });
+      await this.deps.teardown.done(done);
       await this.deps.mirror.push(done.id);
       return;
     }
@@ -214,10 +219,11 @@ export class Progress {
     return this.deps.tickets.get(ticket.id)!;
   }
 
-  /** Abandon: the Ticket leaves Lasso's attention for good (CONTEXT.md: Abandoned). Worktree, branch and PR cleanup is LASSO-39. */
+  /** Abandon: the Ticket leaves Lasso's attention for good (CONTEXT.md: Abandoned). Exits kills its Sessions and tears the worktree down after this. */
   async abandon(ticket: TicketRow): Promise<TicketRow> {
     if (ticket.state !== "active") throw new TriggerError(`Ticket ${ticket.reference ?? ticket.id} is already ${ticket.state}`);
-    const abandoned = this.deps.tickets.update(ticket.id, { state: "abandoned", holding_since: null, runnable_since: null, ...unflagPatch(ticket, new Date().toISOString()) });
+    const now = new Date().toISOString();
+    const abandoned = this.deps.tickets.update(ticket.id, { state: "abandoned", ended_at: now, holding_since: null, runnable_since: null, ...unflagPatch(ticket, now) });
     this.endHumanSessions(abandoned, "abandon");
     this.deps.log.info("ticket.abandoned", { ticket: ticket.id, stage: ticket.stage, flagged: ticket.flagged_at !== null });
     await this.deps.mirror.push(abandoned.id);

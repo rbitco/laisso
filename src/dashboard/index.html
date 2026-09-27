@@ -31,6 +31,9 @@
   .tick { display: flex; gap: 8px; align-items: center; color: var(--muted); font-variant-numeric: tabular-nums; }
   main { padding: 16px; }
   [data-role="ledger"] { display: grid; gap: 8px; }
+  .ledger-tools { display: flex; justify-content: flex-end; margin: 0 0 8px; font-size: 13px; color: var(--muted); }
+  .ledger-tools label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+  .ticket.ended { opacity: 0.55; }
   .empty { color: var(--muted); padding: 32px 0; text-align: center; }
   .notice { color: var(--warn); }
   .flagbox { display: grid; gap: 8px; padding: 12px 16px; border: 2px solid var(--warn); border-radius: 8px; margin: 12px 0; max-width: 720px; }
@@ -149,6 +152,7 @@
 <main>
   <p data-role="notice" class="notice" hidden></p>
   <form data-role="confirm" class="confirm" hidden></form>
+  <div class="ledger-tools" data-role="ledger-tools"><label><input type="checkbox" data-role="show-ended"> Show done and Abandoned</label></div>
   <section data-role="ledger" aria-label="Tickets"></section>
   <section data-role="detail" class="detail" hidden></section>
   <section data-role="pipelines" class="panel" aria-label="Pipelines" hidden></section>
@@ -202,7 +206,7 @@
   }
 
   function ticketRow(t) {
-    const row = el('article', { class: 'ticket', 'data-id': t.id }, [
+    const row = el('article', { class: 'ticket' + (t.state === 'active' ? '' : ' ended'), 'data-id': t.id }, [
       el('span', { class: 'pill ' + t.display.state, text: t.display.label || t.display.state }),
       el('div', {}, [el('div', { class: 'ref', text: t.reference || t.shortId }), el('div', { class: 'repo', text: t.repo })]),
       el('div', { class: 'stage', text: t.stage.label + ' · ' + (t.stage.index + 1) + '/' + t.stage.total }),
@@ -214,11 +218,16 @@
     return row;
   }
 
+  const showEnded = $('[data-role="show-ended"]');
+  const ledgerTools = $('[data-role="ledger-tools"]');
+  showEnded.addEventListener('change', refreshLedger);
+
   async function refreshLedger() {
-    const tickets = await api('/api/tickets');
+    // Done and Abandoned Tickets sit behind the toggle, greyed (CONTEXT.md: Ledger).
+    const tickets = await api(showEnded.checked ? '/api/tickets?all=1' : '/api/tickets');
     ledger.replaceChildren();
     if (!tickets.length) {
-      ledger.appendChild(el('p', { class: 'empty', text: 'No active Tickets. Paste a reference or a prompt above to start one.' }));
+      ledger.appendChild(el('p', { class: 'empty', text: showEnded.checked ? 'No Tickets yet. Paste a reference or a prompt above to start one.' : 'No active Tickets. Paste a reference or a prompt above to start one.' }));
       return;
     }
     for (const t of tickets) ledger.appendChild(ticketRow(t));
@@ -489,7 +498,7 @@
     ]));
     if (t.sessions.length) children.push(timeline(t.sessions));
     detail.replaceChildren(...children);
-    ledger.hidden = true; detail.hidden = false;
+    ledger.hidden = true; ledgerTools.hidden = true; detail.hidden = false;
   }
 
   const RUNNERS = ['claude', 'codex', 'pi'];
@@ -701,7 +710,7 @@
     const hash = location.hash.replace(/^#/, '');
     detailGen++;
     const view = hash === 'config' ? 'config' : hash === 'pipelines' || hash.startsWith('pipelines/') ? 'pipelines' : hash ? 'detail' : 'ledger';
-    ledger.hidden = view !== 'ledger'; detail.hidden = view !== 'detail'; pipelinesPanel.hidden = view !== 'pipelines'; configPanel.hidden = view !== 'config';
+    ledger.hidden = view !== 'ledger'; ledgerTools.hidden = view !== 'ledger'; detail.hidden = view !== 'detail'; pipelinesPanel.hidden = view !== 'pipelines'; configPanel.hidden = view !== 'config';
     if (view === 'pipelines') showPipelines(hash.startsWith('pipelines/') ? decodeName(hash.slice('pipelines/'.length)) : null);
     else if (view === 'config') showConfig();
     else if (view === 'detail') showDetail(hash);

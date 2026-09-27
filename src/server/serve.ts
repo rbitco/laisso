@@ -19,6 +19,7 @@ import { Actions } from "../session/actions.ts";
 import { Exits } from "../session/exits.ts";
 import { Budgets } from "../budget/budgets.ts";
 import { Queue } from "../session/queue.ts";
+import { Teardown } from "../session/teardown.ts";
 import { loadPipeline } from "../pipeline/load.ts";
 import { Tick } from "./tick.ts";
 import { createApp } from "../api/app.ts";
@@ -65,16 +66,17 @@ export async function serve(opts: ServeOptions): Promise<number> {
     },
   });
   const prs = new PullRequests(log);
-  const progress: Progress = new Progress({ home, tickets, sessions, log, notifier, mirror, prProbe: (ticket) => () => review.probe(ticket) });
+  const teardown = new Teardown({ config, home, tickets, log, prs });
+  const progress: Progress = new Progress({ home, tickets, sessions, log, notifier, mirror, prProbe: (ticket) => () => review.probe(ticket), teardown });
   const review: Review = new Review({ tickets, sessions, feedback, progress, prs, log });
   const terminal = new Terminal({ home, sessions, log });
   const budgets = new Budgets({ config, sessions });
   const queue = new Queue({ home, tickets, sessions, progress, log, cap: config.concurrency });
   const runs = new Runs({ config, home, tickets, sessions, log, progress, budgets, queue, review });
   const actions = new Actions({ config, tickets, sessions, log, progress });
-  // One tick: owed mirror pushes, then action Stages, then the PR poll (a Round it makes due starts below), then headless starts.
-  const tick = new Tick(config.tick, log, async () => [...(await mirror.retryPending()), ...(await actions.runDue()), ...(await review.poll()), ...(await runs.startRunnable())]);
-  const exits = new Exits({ tickets, sessions, log, progress, runs, terminal, budgets, tick });
+  // One tick: owed mirror pushes, then action Stages, then the PR poll (a Round it makes due starts below), then headless starts, then the retention sweep.
+  const tick = new Tick(config.tick, log, async () => [...(await mirror.retryPending()), ...(await actions.runDue()), ...(await review.poll()), ...(await runs.startRunnable()), ...(await teardown.sweep())]);
+  const exits = new Exits({ tickets, sessions, log, progress, runs, terminal, budgets, tick, teardown });
   const app = createApp({ config, home, tick, tickets, sessions, feedback, runs, progress, terminal, exits, budgets, queue, version: VERSION });
 
   if (defaults.wroteConfig) log.info("config.written", { file: home.configFile });
