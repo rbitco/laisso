@@ -48,6 +48,13 @@ The ordered list of Stages a Ticket follows, with each Stage's prompt. A
 prompt may be no more than a skill call. A Ticket follows exactly one Pipeline.
 _Avoid_: workflow, playbook, template, orchestration
 
+**Artifact**:
+What a Stage must have produced for Lasso to count it done, named from a
+fixed catalogue such as a spec on the tracker, commits on the branch, an
+open PR, or a merged PR. Checked after a Runner succeeds, and with
+warn-and-override when a human marks a Stage done.
+_Avoid_: output, deliverable, result, check
+
 **Runner**:
 The CLI agent that executes one Stage for one Ticket: Claude Code, Codex, or
 Pi. A Pipeline names a Runner per Stage.
