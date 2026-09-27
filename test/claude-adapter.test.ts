@@ -71,6 +71,16 @@ describe("claude adapter command", () => {
     expect(cmd.argv.at(-1)!.startsWith("/grilling\n")).toBe(true);
     expect(cmd.argv).not.toContain("-p");
   });
+
+  it("names the transcript it will keep for a request", () => {
+    expect(claudeAdapter.transcriptPath({ cwd: "/tmp/w t", sessionId: "abc" })).toMatch(/\/\.claude\/projects\/-tmp-w-t\/abc\.jsonl$/);
+  });
+
+  it("re-enters a held session id with --resume and no prompt", () => {
+    const cmd = claudeAdapter.command({ ...request, mode: "terminal", resume: true, name: "Lasso: APP-12 grill" });
+    expect(cmd.argv).toEqual(["claude", "--resume", request.sessionId, "--permission-mode", "acceptEdits"]);
+    expect(cmd.env.LASSO_SESSION).toBe(request.sessionId);
+  });
 });
 
 describe("claude adapter parse", () => {

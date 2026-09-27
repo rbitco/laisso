@@ -50,6 +50,10 @@ export interface Lasso {
   tracker: TrackerShim;
   /** The fake claude Runner: a script in, recorded launches out. */
   runner: RunnerShim;
+  /** The fake osascript: what Terminal.app was told to run, oldest first. */
+  terminals(): Promise<Array<{ script: string; launcher: string | null }>>;
+  /** Make the fake notifier exit 1 from now on, so a post fails. */
+  breakNotifier(): Promise<void>;
   /** SIGINT the server and wait for exit; the home is left in place. */
   stop(): Promise<number | null>;
   /** Stop and delete the home. */
@@ -75,7 +79,23 @@ export async function makeHome(config: LassoConfig = {}): Promise<{ home: string
   await installFakeNotifier(pathDir);
   await installTrackerShims(pathDir);
   await installFakeRunner(pathDir);
+  await installFakeOsascript(pathDir);
   return { home, pathDir };
+}
+
+async function installFakeOsascript(pathDir: string): Promise<void> {
+  // Records each -e script; a `do script "<path>"` line is pulled out as the launcher.
+  const script = `#!/usr/bin/env node
+const fs = require("node:fs");
+const path = require("node:path");
+const args = process.argv.slice(2);
+const script = args.filter((a, i) => args[i - 1] === "-e").join("\\n");
+const m = /do script "((?:[^"\\\\]|\\\\.)*)"/.exec(script);
+const line = m ? m[1].replace(/\\\\(.)/g, "$1") : null;
+const quoted = line && /^'(.*)'$/.exec(line);
+fs.appendFileSync(path.join(__dirname, "osascript-calls.jsonl"), JSON.stringify({ script, launcher: quoted ? quoted[1].replace(/'\\\\''/g, "'") : line }) + "\\n");
+`;
+  await writeFile(path.join(pathDir, "osascript"), script, { mode: 0o755 });
 }
 
 /** What the fake claude does when launched. Fields apply in this order. */
@@ -296,6 +316,7 @@ for (let i = 0; i < args.length; i++) {
   const key = flags[args[i]];
   if (key) { record[key] = args[i + 1] ?? ""; i++; }
 }
+if (fs.existsSync(path.join(__dirname, "notifier-broken"))) { process.stderr.write("terminal-notifier: broken\\n"); process.exit(1); }
 fs.appendFileSync(path.join(__dirname, "notifications.jsonl"), JSON.stringify(record) + "\\n");
 `;
   await writeFile(path.join(pathDir, "terminal-notifier"), script, { mode: 0o755 });
@@ -362,6 +383,8 @@ export async function startLasso(opts: StartOptions = {}): Promise<Lasso> {
     page: (route) => fetch(url + route),
     tracker: trackerShim(pathDir),
     runner: runnerShim(pathDir),
+    terminals: () => readJsonl(path.join(pathDir, "osascript-calls.jsonl")),
+    breakNotifier: () => writeFile(path.join(pathDir, "notifier-broken"), ""),
     notifications: () => readJsonl(path.join(pathDir, "notifications.jsonl")),
     async stop() {
       if (child.exitCode !== null) return child.exitCode;

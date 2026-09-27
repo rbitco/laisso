@@ -17,6 +17,8 @@ export interface TicketRow {
   flag_reason: string | null;
   flag_detail: string | null;
   unflagged_at: string | null;
+  /** Set while the Ticket waits at a Stage for the Start trigger (the previous Stage said advance: false). */
+  holding_since: string | null;
   pr: string | null;
   branch: string;
   worktree: string;
@@ -24,6 +26,11 @@ export interface TicketRow {
   mirror_pending: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/** The tail of the ULID humans quote when a Ticket has no tracker reference. */
+export function shortId(id: string): string {
+  return id.slice(-8);
 }
 
 export type NewTicket = Pick<TicketRow, "id" | "repo" | "reference" | "origin" | "prompt" | "title" | "body" | "pipeline" | "stage" | "branch" | "worktree">;

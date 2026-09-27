@@ -27,6 +27,8 @@ export interface RunRequest {
   mode: "headless" | "terminal";
   /** Lasso-chosen where the Runner allows, or a held id to resume. */
   sessionId: string;
+  /** The session id is held from an earlier launch: re-enter it rather than start it. */
+  resume?: boolean;
   /** A human-readable label for terminal Sessions; never an identity. */
   name?: string;
   limits: RunLimits;
@@ -59,8 +61,41 @@ export interface RunnerAdapter {
   honours: Limit[];
   command(request: RunRequest): Command;
   parse(stdout: string, request: Pick<RunRequest, "cwd" | "sessionId">): Outcome;
+  /** Where the Runner will keep its own transcript for this request; null when the Runner has none. */
+  transcriptPath(request: Pick<RunRequest, "cwd" | "sessionId">): string | null;
   /** The session id a Runner assigned itself, found after launch; null for Runners that take Lasso's id. */
   findSession(query: { cwd: string; launchedAfter: Date }): string | null;
+}
+
+/** The part of a RunRequest that comes from the Ticket and the Stage; the caller adds mode, session id, and limits. */
+export function requestFor(ticket: TicketLike, stage: StageLike): Pick<RunRequest, "stage" | "prompt" | "skills" | "context" | "cwd" | "runnerOptions"> {
+  return {
+    stage: stage.name,
+    prompt: stage.prompt,
+    skills: stage.skills,
+    context: { id: ticket.id, reference: ticket.reference, repo: ticket.repo, branch: ticket.branch, title: ticket.title, body: ticket.origin === "prompt" ? ticket.prompt : ticket.body },
+    cwd: ticket.worktree,
+    runnerOptions: stage.runnerOptions,
+  };
+}
+
+interface TicketLike {
+  id: string;
+  reference: string | null;
+  repo: string;
+  branch: string;
+  title: string;
+  origin: string;
+  prompt: string | null;
+  body: string | null;
+  worktree: string;
+}
+
+interface StageLike {
+  name: string;
+  prompt: string | null;
+  skills: string[];
+  runnerOptions: RunRequest["runnerOptions"];
 }
 
 /** The Ticket context and Stage prompt every Runner sees, with skills in the Runner's own invocation form. */

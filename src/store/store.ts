@@ -92,4 +92,10 @@ const MIGRATIONS: Array<(db: DatabaseSync) => void> = [
       CREATE INDEX sessions_running ON sessions (ended_at) WHERE ended_at IS NULL;
     `);
   },
+  (db) => {
+    db.exec(`
+      ALTER TABLE tickets ADD COLUMN holding_since TEXT;
+      ALTER TABLE sessions ADD COLUMN opened_at TEXT;
+    `);
+  },
 ];

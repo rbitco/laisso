@@ -3,7 +3,7 @@ import path from "node:path";
 import { homedir } from "node:os";
 import type { Config, RepoConfig } from "../server/config.ts";
 import type { LassoHome } from "../server/home.ts";
-import type { Tickets, TicketRow, NewTicket } from "../store/tickets.ts";
+import { shortId, type Tickets, type TicketRow, type NewTicket } from "../store/tickets.ts";
 import { listPipelines, loadPipeline, PipelineError, type Pipeline } from "../pipeline/load.ts";
 import { Git } from "../git.ts";
 import { ulid } from "../ulid.ts";
@@ -97,7 +97,7 @@ export class Intake {
     let branch: string;
     if (detection.kind === "prompt") {
       row = { id, repo: repoName, reference: null, origin: "prompt", prompt: input, title: promptTitle(input), body: null, pipeline: pipeline.name, stage: pipeline.stages[0]!.name };
-      branch = branchName(config.branch_prefix, id.slice(-8), slugify(input));
+      branch = branchName(config.branch_prefix, shortId(id), slugify(input));
     } else {
       const reference = detection.reference!;
       this.assertNoActiveTicket(reference);

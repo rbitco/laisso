@@ -8,6 +8,9 @@ import { Store } from "../store/store.ts";
 import { Tickets } from "../store/tickets.ts";
 import { Sessions } from "../store/sessions.ts";
 import { Runs } from "../session/runs.ts";
+import { Progress } from "../session/progress.ts";
+import { Terminal } from "../session/terminal.ts";
+import { createNotifier } from "../notify/notifier.ts";
 import { Tick } from "./tick.ts";
 import { createApp } from "../api/app.ts";
 
@@ -38,9 +41,12 @@ export async function serve(opts: ServeOptions): Promise<number> {
   const store = new Store(home.dbFile);
   const tickets = new Tickets(store.db);
   const sessions = new Sessions(store.db);
-  const runs = new Runs({ config, home, tickets, sessions, log });
+  const notifier = createNotifier({ config: config.notifications, log, baseUrl: `http://localhost:${config.port}` });
+  const progress = new Progress({ home, tickets, sessions, log, notifier });
+  const terminal = new Terminal({ home, sessions, log });
+  const runs = new Runs({ config, home, tickets, sessions, log, progress });
   const tick = new Tick(config.tick, log, () => runs.startRunnable());
-  const app = createApp({ config, home, tick, tickets, sessions, runs, version: VERSION });
+  const app = createApp({ config, home, tick, tickets, sessions, runs, progress, terminal, version: VERSION });
 
   if (defaults.wroteConfig) log.info("config.written", { file: home.configFile });
   if (defaults.wrotePipeline) log.info("pipeline.written", { name: "default" });

@@ -8,9 +8,10 @@ import type { Logger } from "../server/log.ts";
 import type { TickChange } from "../server/tick.ts";
 import type { Tickets, TicketRow } from "../store/tickets.ts";
 import type { Sessions, SessionRow, SessionEnd, EndedReason } from "../store/sessions.ts";
-import { loadPipeline, type Pipeline, type RunnerStage } from "../pipeline/load.ts";
+import type { Pipeline, RunnerStage } from "../pipeline/load.ts";
+import type { Progress } from "./progress.ts";
 import { adapterFor } from "../runner/adapters.ts";
-import type { RunRequest, Outcome } from "../runner/adapter.ts";
+import { requestFor, type RunRequest, type Outcome } from "../runner/adapter.ts";
 import { checkArtifact } from "../artifact/check.ts";
 import { parseDuration } from "../duration.ts";
 
@@ -22,6 +23,7 @@ export interface RunsDeps {
   tickets: Tickets;
   sessions: Sessions;
   log: Logger;
+  progress: Progress;
 }
 
 type Verdict = "advance" | { flag: string; detail: string | null };
@@ -62,22 +64,21 @@ export class Runs {
   async startRunnable(): Promise<TickChange[]> {
     const changes: TickChange[] = [];
     for (const ticket of this.deps.tickets.list()) {
-      if (ticket.flagged_at || this.deps.sessions.running(ticket.id).length) continue;
-      const resolved = this.currentStage(ticket);
+      const resolved = this.deps.progress.runnable(ticket);
+      if (resolved === null) continue;
       if ("problem" in resolved) {
-        this.flag(ticket.id, "pipeline.missing", resolved.problem);
+        this.deps.progress.flag(ticket.id, "pipeline.missing", resolved.problem);
         changes.push({ ticket: ticket.id, summary: `Flagged: ${resolved.problem}` });
         continue;
       }
       const { pipeline, stage } = resolved;
-      if (stage.kind !== "runner" || stage.human) continue;
       try {
         await this.start(ticket, pipeline, stage, "auto");
         changes.push({ ticket: ticket.id, summary: `started ${stage.name}` });
       } catch (error) {
         // The Runner never started, so there is no Session to blame: runner.unavailable, not outcome.*.
         const detail = error instanceof Error ? error.message : String(error);
-        this.flag(ticket.id, "runner.unavailable", detail);
+        this.deps.progress.flag(ticket.id, "runner.unavailable", detail);
         changes.push({ ticket: ticket.id, summary: `Flagged: ${detail}` });
       }
     }
@@ -95,17 +96,7 @@ export class Runs {
     const wallTimeMs = parseDuration(stage.budget.wallTime ?? config.budget.wallTime);
     const spent = sessions.forTicket(ticket.id).reduce((sum, s) => sum + (s.cost_usd ?? 0), 0);
     const remainingSpendUsd = Math.max(0, (pipeline.budget.spend ?? config.budget.spend) - spent);
-    const request: RunRequest = {
-      stage: stage.name,
-      prompt: stage.prompt,
-      skills: stage.skills,
-      context: { id: ticket.id, reference: ticket.reference, repo: ticket.repo, branch: ticket.branch, title: ticket.title, body: ticket.origin === "prompt" ? ticket.prompt : ticket.body },
-      cwd: ticket.worktree,
-      mode: "headless",
-      sessionId,
-      limits: { wallTimeMs, remainingSpendUsd },
-      runnerOptions: stage.runnerOptions,
-    };
+    const request: RunRequest = { ...requestFor(ticket, stage), mode: "headless", sessionId, limits: { wallTimeMs, remainingSpendUsd } };
     const command = adapter.command(request);
 
     // The stdout file is opened before the row exists, so a row never outlives a process that was never spawned.
@@ -262,45 +253,15 @@ export class Runs {
     if (end.outcome !== "succeeded") {
       return { flag: end.ended_reason === "wall_time" ? "budget.wall_time" : `outcome.${end.outcome}`, detail: end.final_message };
     }
-    const artifact = await checkArtifact(stage.artifact, cwd).catch((error: Error) => ({ present: false, detail: error.message }));
+    const artifact = await checkArtifact(stage.artifact, cwd);
     return artifact.present ? "advance" : { flag: "artifact.missing", detail: `${stage.artifact}: ${artifact.detail}` };
   }
 
   private apply(ticketId: string, verdict: Verdict): void {
     const ticket = this.deps.tickets.get(ticketId);
     if (!ticket || ticket.state !== "active") return;
-    if (verdict === "advance") this.advance(ticket);
-    else this.flag(ticket.id, verdict.flag, verdict.detail);
-  }
-
-  private advance(ticket: TicketRow): void {
-    const resolved = this.currentStage(ticket);
-    if ("problem" in resolved) return this.flag(ticket.id, "pipeline.missing", resolved.problem);
-    const next = resolved.pipeline.stages[resolved.index + 1];
-    if (!next) {
-      this.deps.tickets.update(ticket.id, { state: "done" });
-      this.deps.log.info("ticket.done", { ticket: ticket.id });
-      return;
-    }
-    this.deps.tickets.update(ticket.id, { stage: next.name });
-    this.deps.log.info("ticket.advanced", { ticket: ticket.id, stage: next.name });
-  }
-
-  private flag(ticketId: string, reason: string, detail: string | null): void {
-    this.deps.tickets.update(ticketId, { flagged_at: new Date().toISOString(), flag_reason: reason, flag_detail: detail });
-    this.deps.log.info("ticket.flagged", { ticket: ticketId, reason, detail });
-  }
-
-  private currentStage(ticket: TicketRow): { pipeline: Pipeline; stage: Pipeline["stages"][number]; index: number } | { problem: string } {
-    let pipeline: Pipeline;
-    try {
-      pipeline = loadPipeline(this.deps.home.pipelinesDir, ticket.pipeline);
-    } catch (error) {
-      return { problem: error instanceof Error ? error.message : String(error) };
-    }
-    const index = pipeline.stages.findIndex((s) => s.name === ticket.stage);
-    if (index < 0) return { problem: `Pipeline ${ticket.pipeline} no longer has a Stage named ${ticket.stage}` };
-    return { pipeline, stage: pipeline.stages[index]!, index };
+    if (verdict === "advance") this.deps.progress.finished(ticket);
+    else this.deps.progress.flag(ticket.id, verdict.flag, verdict.detail);
   }
 }
 

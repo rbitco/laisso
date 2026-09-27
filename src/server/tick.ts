@@ -55,7 +55,7 @@ export class Tick {
   }
 
   /** Run one tick now; a tick already in flight is joined, not doubled. */
-  run(trigger: "timer" | "check-now" | "startup" = "check-now"): Promise<TickResult> {
+  run(trigger: "timer" | "check-now" | "startup" | "start" = "check-now"): Promise<TickResult> {
     if (this.inFlight) return this.inFlight;
     this.inFlight = (async () => {
       const started = new Date();

@@ -98,7 +98,7 @@ describe("a headless Stage", () => {
     expect(first.session!.usage).toMatchObject({ output_tokens: 4 });
     expect(first.session!.transcriptPath).toMatch(/3e728ae2-8d99-42f3-a7ba-6066de05d169\.jsonl$/);
     expect(first.stage.name).toBe("notes");
-    expect(first.display).toMatchObject({ state: "ready", why: "waiting to start notes" });
+    expect(first.display).toMatchObject({ state: "ready", why: "notes starts on the next tick" });
 
     await lasso.runner.script({ files: { "NOTES.md": "notes\n" }, stdout: claudeFixture("success.json") });
     await checkNow(lasso);

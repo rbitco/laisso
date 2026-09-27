@@ -25,9 +25,11 @@ export interface SessionRow {
   stdout_path: string | null;
   transcript_path: string | null;
   pid: number | null;
+  /** When a terminal Session's window was last opened (Open terminal, or Resume). */
+  opened_at: string | null;
 }
 
-export type NewSession = Pick<SessionRow, "id" | "ticket" | "stage" | "stage_snapshot" | "mode" | "started_by" | "stdout_path" | "limits_honoured">;
+export type NewSession = Pick<SessionRow, "id" | "ticket" | "stage" | "stage_snapshot" | "mode" | "started_by" | "stdout_path" | "limits_honoured"> & Partial<Pick<SessionRow, "transcript_path">>;
 
 export type SessionEnd = Pick<SessionRow, "ended_by" | "ended_reason" | "outcome" | "final_message" | "usage" | "cost_usd" | "transcript_path">;
 
@@ -43,10 +45,10 @@ export class Sessions {
     const ordinal = this.count(session.ticket, session.stage) + 1;
     this.db
       .prepare(
-        `INSERT INTO sessions (id, ticket, stage, ordinal, stage_snapshot, mode, started_by, started_at, stdout_path, limits_honoured)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO sessions (id, ticket, stage, ordinal, stage_snapshot, mode, started_by, started_at, stdout_path, limits_honoured, transcript_path)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(session.id, session.ticket, session.stage, ordinal, session.stage_snapshot, session.mode, session.started_by, now, session.stdout_path, session.limits_honoured);
+      .run(session.id, session.ticket, session.stage, ordinal, session.stage_snapshot, session.mode, session.started_by, now, session.stdout_path, session.limits_honoured, session.transcript_path ?? null);
     return this.get(session.id)!;
   }
 
@@ -68,6 +70,11 @@ export class Sessions {
     const sql = `SELECT * FROM sessions WHERE ended_at IS NULL` + (ticket ? ` AND ticket = ?` : ``) + ` ORDER BY started_at ASC`;
     const stmt = this.db.prepare(sql);
     return (ticket ? stmt.all(ticket) : stmt.all()) as unknown as SessionRow[];
+  }
+
+  setOpened(id: string, now: string = new Date().toISOString()): SessionRow {
+    this.db.prepare(`UPDATE sessions SET opened_at = ? WHERE id = ?`).run(now, id);
+    return this.get(id)!;
   }
 
   setPid(id: string, pid: number | null): void {

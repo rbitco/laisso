@@ -21,10 +21,14 @@ export async function checkArtifact(artifact: string | null, worktree: string): 
     return existsSync(path.join(worktree, file)) ? { present: true, detail: null } : { present: false, detail: `${file} does not exist in the worktree` };
   }
   if (artifact === "commits-on-branch") {
-    const git = new Git(worktree);
-    const base = await git.defaultBranch();
-    const count = Number(await git.exec(["rev-list", "--count", `origin/${base}..HEAD`]));
-    return count > 0 ? { present: true, detail: null } : { present: false, detail: `no commits on the branch beyond origin/${base}` };
+    try {
+      const git = new Git(worktree);
+      const base = await git.defaultBranch();
+      const count = Number(await git.exec(["rev-list", "--count", `origin/${base}..HEAD`]));
+      return count > 0 ? { present: true, detail: null } : { present: false, detail: `no commits on the branch beyond origin/${base}` };
+    } catch (error) {
+      return { present: false, detail: error instanceof Error ? error.message : String(error) };
+    }
   }
   return { present: false, detail: `${artifact} cannot be checked yet` };
 }

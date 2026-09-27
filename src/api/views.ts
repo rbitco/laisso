@@ -1,13 +1,20 @@
-import type { TicketRow } from "../store/tickets.ts";
+import { shortId, type TicketRow } from "../store/tickets.ts";
 import type { SessionRow } from "../store/sessions.ts";
 import type { Pipeline, Stage } from "../pipeline/load.ts";
 
-export type DisplayState = "flagged" | "needs_you" | "ready" | "running" | "queued" | "quiet" | "done" | "abandoned";
+export type DisplayState = "flagged" | "needs_you" | "holding" | "ready" | "running" | "queued" | "quiet" | "done" | "abandoned";
+
+/** A lever the human can pull on a Ticket right now; the dashboard renders one button per Trigger. */
+export interface Trigger {
+  action: "terminal" | "done" | "skip" | "start";
+  label: string;
+}
 
 /** Human wording for each display state, served so every client shows the same words. */
 export const DISPLAY_LABEL: Record<DisplayState, string> = {
   flagged: "Flagged",
   needs_you: "Needs you",
+  holding: "Holding",
   ready: "Ready to start",
   running: "Running",
   queued: "Queued",
@@ -44,6 +51,7 @@ export interface TicketView {
   flag: { at: string; reason: string; detail: string | null } | null;
   pr: string | null;
   display: { state: DisplayState; label: string; why: string };
+  triggers: Trigger[];
   createdAt: string;
   updatedAt: string;
   url: string;
@@ -66,6 +74,7 @@ export interface SessionView {
   usage: Record<string, unknown> | null;
   /** Which of the requested limits the Runner honoured itself. */
   limitsHonoured: string[];
+  openedAt: string | null;
   stdoutPath: string | null;
   transcriptPath: string | null;
   running: boolean;
@@ -96,7 +105,7 @@ export interface ViewContext {
 }
 
 /** The order the Ledger shows display states in: attention first. */
-export const LEDGER_ORDER: DisplayState[] = ["flagged", "needs_you", "ready", "running", "queued", "quiet", "done", "abandoned"];
+export const LEDGER_ORDER: DisplayState[] = ["flagged", "needs_you", "holding", "ready", "running", "queued", "quiet", "done", "abandoned"];
 
 export function stageLabel(stage: Stage): string {
   return stage.kind === "action" ? stage.status : stage.name;
@@ -109,9 +118,10 @@ export function ticketView(ticket: TicketRow, ctx: ViewContext): TicketView {
   const human = stage?.kind === "runner" && stage.human;
   const latest = ctx.latestSession(ticket);
   const display = displayState(ticket, human, latest);
+  const triggers = ticketTriggers(ticket, stage, latest);
   return {
     id: ticket.id,
-    shortId: ticket.id.slice(-8),
+    shortId: shortId(ticket.id),
     title: ticket.title,
     reference: ticket.reference,
     origin: ticket.origin,
@@ -132,6 +142,7 @@ export function ticketView(ticket: TicketRow, ctx: ViewContext): TicketView {
     flag: ticket.flagged_at ? { at: ticket.flagged_at, reason: ticket.flag_reason ?? "", detail: ticket.flag_detail } : null,
     pr: ticket.pr,
     display: { ...display, label: DISPLAY_LABEL[display.state] },
+    triggers,
     createdAt: ticket.created_at,
     updatedAt: ticket.updated_at,
     url: `${ctx.baseUrl}/#${ticket.id}`,
@@ -169,6 +180,7 @@ export function sessionView(row: SessionRow, now: number = Date.now()): SessionV
     costUsd: row.cost_usd,
     usage: row.usage ? (JSON.parse(row.usage) as Record<string, unknown>) : null,
     limitsHonoured: row.limits_honoured ? (JSON.parse(row.limits_honoured) as string[]) : [],
+    openedAt: row.opened_at,
     stdoutPath: row.stdout_path,
     transcriptPath: row.transcript_path,
     running: row.ended_at === null,
@@ -180,9 +192,33 @@ function displayState(ticket: TicketRow, human: boolean, latest: SessionRow | nu
   if (ticket.state === "done") return { state: "done", why: "done" };
   if (ticket.state === "abandoned") return { state: "abandoned", why: "abandoned" };
   if (ticket.flagged_at) return { state: "flagged", why: ticket.flag_reason ?? "flagged" };
-  if (latest && latest.ended_at === null && latest.mode === "headless") return { state: "running", why: `${latest.stage}, run ${latest.ordinal}` };
-  if (human) return { state: "needs_you", why: "not started" };
-  return { state: "ready", why: `waiting to start ${ticket.stage}` };
+  if (headlessRunning(latest)) return { state: "running", why: `${latest.stage}, run ${latest.ordinal}` };
+  if (ticket.holding_since) return { state: "holding", why: `Start ${ticket.stage} when ready` };
+  if (human) {
+    const opened = latest && latest.ended_at === null && latest.mode === "terminal" && latest.stage === ticket.stage ? latest.opened_at : null;
+    return { state: "needs_you", why: opened ? `terminal opened ${clockTime(opened)}` : "not started" };
+  }
+  return { state: "ready", why: `${ticket.stage} starts on the next tick` };
+}
+
+function ticketTriggers(ticket: TicketRow, stage: Stage | null, latest: SessionRow | null): Trigger[] {
+  if (ticket.state !== "active" || ticket.flagged_at || !stage) return [];
+  if (ticket.holding_since) return [{ action: "start", label: `Start ${stage.name}` }];
+  if (stage.kind !== "runner" || !stage.human || headlessRunning(latest)) return [];
+  return [
+    { action: "terminal", label: "Open terminal" },
+    { action: "done", label: `Mark ${stage.name} done` },
+    { action: "skip", label: `Skip ${stage.name}` },
+  ];
+}
+
+function headlessRunning(latest: SessionRow | null): latest is SessionRow & { mode: "headless"; ended_at: null } {
+  return latest !== null && latest.ended_at === null && latest.mode === "headless";
+}
+
+function clockTime(iso: string): string {
+  const d = new Date(iso);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
 export function sortForLedger(views: TicketView[]): TicketView[] {

@@ -6,6 +6,8 @@ import type { Tickets, TicketRow } from "../store/tickets.ts";
 import type { Sessions } from "../store/sessions.ts";
 import type { Runs } from "../session/runs.ts";
 import { RunError } from "../session/runs.ts";
+import { ArtifactWarning, TriggerError, type Progress } from "../session/progress.ts";
+import { TerminalError, type Terminal } from "../session/terminal.ts";
 import { Intake, IntakeError, type IntakeRequest } from "../intake/intake.ts";
 import { loadPipeline, type Pipeline } from "../pipeline/load.ts";
 import { dashboardHtml } from "../dashboard/page.ts";
@@ -18,6 +20,8 @@ export interface AppDeps {
   tickets: Tickets;
   sessions: Sessions;
   runs: Runs;
+  progress: Progress;
+  terminal: Terminal;
   version: string;
 }
 
@@ -46,7 +50,8 @@ export function createApp(deps: AppDeps): Hono {
   });
 
   app.onError((error, c) => {
-    if (error instanceof IntakeError || error instanceof RunError) return c.json({ error: error.message }, 400);
+    if (error instanceof IntakeError || error instanceof RunError || error instanceof TriggerError || error instanceof TerminalError) return c.json({ error: error.message }, 400);
+    if (error instanceof ArtifactWarning) return c.json({ error: error.message, artifact: error.artifact, detail: error.detail, override: true }, 409);
     console.error(error);
     return c.json({ error: error.message }, 500);
   });
@@ -70,6 +75,8 @@ export function createApp(deps: AppDeps): Hono {
   app.post("/api/tickets", async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as Partial<IntakeRequest>;
     const { ticket, branchExisted } = await intake.admit({ input: body.input ?? "", repo: body.repo, pipeline: body.pipeline });
+    const first = deps.progress.current(ticket);
+    if (!("problem" in first)) deps.progress.entered(ticket, first.stage);
     const result: IntakeResult = { ...ticketView(ticket, viewContext), branchExisted };
     return c.json(result, 201);
   });
@@ -78,6 +85,27 @@ export function createApp(deps: AppDeps): Hono {
     const ticket = deps.tickets.find(c.req.param("id"));
     if (!ticket) return c.json({ error: `no Ticket matches ${c.req.param("id")}` }, 404);
     return c.json(ticketDetail(ticket, viewContext));
+  });
+
+  // The Triggers on a Ticket (spec: Triggers per Ticket). Each answers with the Ticket as it now stands.
+  const trigger = (route: string, pull: (ticket: TicketRow, body: Record<string, unknown>) => Promise<TicketRow> | TicketRow) =>
+    app.post(`/api/tickets/:id/${route}`, async (c) => {
+      const ticket = deps.tickets.find(c.req.param("id"));
+      if (!ticket) return c.json({ error: `no Ticket matches ${c.req.param("id")}` }, 404);
+      const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+      return c.json(ticketDetail(await pull(ticket, body), viewContext));
+    });
+
+  trigger("terminal", async (ticket) => {
+    await deps.terminal.open(ticket, deps.progress.humanStage(ticket).stage);
+    return deps.tickets.get(ticket.id)!;
+  });
+  trigger("done", (ticket, body) => deps.progress.markDone(ticket, body.override === true));
+  trigger("skip", (ticket) => deps.progress.skip(ticket));
+  trigger("start", async (ticket) => {
+    const released = deps.progress.start(ticket);
+    await deps.tick.run("start");
+    return deps.tickets.get(released.id)!;
   });
 
   // A Session of a Ticket, or the 404 that says which is unknown.

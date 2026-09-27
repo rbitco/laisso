@@ -26,6 +26,9 @@ export const claudeAdapter: RunnerAdapter = {
     const prompt = renderPrompt(request, (name) => `/${name}`);
     const env = ticketEnv(request);
     if (request.mode === "terminal") {
+      if (request.resume) {
+        return { argv: ["claude", "--resume", request.sessionId, "--permission-mode", "acceptEdits", ...extraArgs(request.runnerOptions)], cwd: request.cwd, env };
+      }
       const argv = ["claude", "--session-id", request.sessionId, "--permission-mode", "acceptEdits"];
       if (request.name) argv.push("--name", request.name);
       argv.push(...extraArgs(request.runnerOptions), prompt);
@@ -64,7 +67,7 @@ export const claudeAdapter: RunnerAdapter = {
     const result = records.filter((r) => r.type === "result").at(-1) as ResultRecord | undefined;
     const init = records.find((r) => r.type === "system" && r.subtype === "init");
     const sessionId = str(result?.session_id) ?? str(init?.session_id) ?? request.sessionId;
-    const transcriptPath = path.join(homedir(), ".claude", "projects", request.cwd.replace(/[^a-zA-Z0-9]/g, "-"), `${sessionId}.jsonl`);
+    const transcriptPath = claudeAdapter.transcriptPath({ cwd: request.cwd, sessionId });
     if (!result) return { status: "interrupted", sessionId, finalMessage: null, usage: null, costUsd: null, transcriptPath };
     const errors = Array.isArray(result.errors) ? result.errors.map(String) : [];
     const finalMessage = str(result.result) ?? (errors.length ? errors.join("\n") : null);
@@ -76,6 +79,10 @@ export const claudeAdapter: RunnerAdapter = {
       costUsd: typeof result.total_cost_usd === "number" ? result.total_cost_usd : null,
       transcriptPath,
     };
+  },
+
+  transcriptPath(request): string {
+    return path.join(homedir(), ".claude", "projects", request.cwd.replace(/[^a-zA-Z0-9]/g, "-"), `${request.sessionId}.jsonl`);
   },
 
   findSession(): string | null {

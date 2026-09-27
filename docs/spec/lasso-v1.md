@@ -87,7 +87,7 @@ Concurrency
 
 Dashboard
 
-53. As a developer, I want a ledger of active Tickets ordered attention first (Flagged, Needs you, Ready to start, Running, Queued, Quiet), so that what needs me is at the top.
+53. As a developer, I want a ledger of active Tickets ordered attention first (Flagged, Needs you, Holding, Ready to start, Running, Queued, Quiet), so that what needs me is at the top.
 54. As a developer, I want each row to show the status, reference, repo, title, a one-line why, a mini Stage track, four mini Budget rings, last activity, and one quick action, so that I can act without opening the row.
 55. As a developer, I want done and Abandoned Tickets behind a toggle, greyed, so that history is there but out of the way.
 56. As a developer, I want a Ticket detail with a Metro-style Stage flow diagram showing done, current, Flagged, and ahead Stages, the Review orbit with Rounds used, and attempt orbits, so that the shape of the journey is visible at once.
@@ -239,7 +239,7 @@ Store and mirroring (ADR 0001, ADR 0005)
 
 Dashboard (from the prototypes on branch prototype/dashboard, variant D of index.html and design.html)
 
-- Ledger of active Tickets ordered Flagged, Needs you, Ready to start, Running, Queued (by position), Quiet, most recent activity within each group; done and Abandoned behind an off-by-default toggle, greyed. Two-line rows: status pill in words, reference over repo, title over the one-line why, a mini Metro track with the Stage name, four mini ring gauges, last activity, one quick action.
+- Ledger of active Tickets ordered Flagged, Needs you, Holding (a Stage finished with `advance: false`; the why line names the Start trigger), Ready to start, Running, Queued (by position), Quiet, most recent activity within each group; done and Abandoned behind an off-by-default toggle, greyed. Two-line rows: status pill in words, reference over repo, title over the one-line why, a mini Metro track with the Stage name, four mini ring gauges, last activity, one quick action.
 - Clicking a row collapses the ledger to a left sidebar and opens the detail: title bar (reference, repo, branch, PR link, status pill, triggers); Metro flow diagram (thick track, station circles, red octagon for Flagged, action Stages as ticks, PR feedback orbit with a "Rounds used of Budget" badge, attempt orbits, pulsing ring while running, no travelling dot, horizontal scroll under about 720 px; clicking a station filters the Sessions list); Flag box when Flagged with reason, detail, time, last final message, and the six exits; dark terminal Session pane with outcome pill, Stage, Round or attempt, mode, start, duration, cost, live-tailed stdout, a green final line, Stop or Open terminal, and copy chips for stdout, worktree, and transcript paths (no file links); four ring-gauge Budget meters coloured at 70 % and 100 % with an asterisk for a Ticket override and an inline editor on click; a Sessions timeline newest first including action Stages.
 - Header on every view: the intake input, tick status ("last tick / next in") and Check now.
 - Triggers per Ticket: Start <Stage> when waiting on a trigger; Open terminal and Mark <Stage> done for a human Stage; Check PR now on the repeating Stage; Abandon; the six Flag exits when Flagged.
@@ -250,7 +250,7 @@ CLI
 
 Notifications
 
-- A notifier adapter per OS; v1 ships macOS (terminal-notifier when present, osascript fallback). Events, once each: Ticket Flagged, human Stage became current, Stage finished with `advance: false`. Title is the Ticket name, body is the event plus reason, click opens the Ticket detail where the adapter supports a URL. Failures are logged only.
+- A notifier adapter per OS; v1 ships macOS (terminal-notifier when present, osascript fallback). Events, once each: Ticket Flagged, human Stage became current, Stage finished with `advance: false`. Title is the Ticket name (the reference first when it has one, then the title), body is the event plus reason, click opens the Ticket detail where the adapter supports a URL. Failures are logged only.
 
 End of life (ADR 0007)
 

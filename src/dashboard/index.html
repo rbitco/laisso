@@ -42,6 +42,13 @@
   .ticket:hover { border-color: var(--accent); }
   .pill { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--pill); white-space: nowrap; align-self: start; }
   .pill.needs_you, .pill.flagged { background: var(--accent); color: #fff; }
+  .pill.holding { border: 1px solid var(--accent); color: var(--accent); background: transparent; }
+  .triggers { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .triggers button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--pill); cursor: pointer; }
+  .triggers button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .triggers button:disabled { opacity: 0.6; cursor: default; }
+  .override { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; color: var(--warn); }
+  .override button { font: inherit; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--warn); background: transparent; color: var(--warn); cursor: pointer; }
   .ticket .ref { font-variant-numeric: tabular-nums; }
   .ticket .why, .ticket .repo { color: var(--muted); font-size: 12px; }
   .ticket .stage { color: var(--muted); font-size: 12px; text-align: right; }
@@ -68,6 +75,7 @@
   .session .paths { display: flex; flex-wrap: wrap; gap: 6px; }
   .session .paths button { font: inherit; font-size: 11px; padding: 2px 8px; background: var(--term-pill); color: var(--term-dim); border-color: var(--term-line); }
   .session button.stop { background: var(--warn); color: #fff; border-color: var(--warn); font: inherit; }
+  .session .hint { color: var(--term-dim); }
   .timeline { display: grid; gap: 4px; }
   .timeline h3 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
   .timeline .row { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; font-variant-numeric: tabular-nums; font-size: 13px; }
@@ -107,7 +115,7 @@
     const res = await fetch(route, Object.assign({ headers: { 'content-type': 'application/json' } }, init || {}));
     const text = await res.text();
     const body = text ? JSON.parse(text) : null;
-    if (!res.ok) throw new Error((body && body.error) || (res.status + ' ' + route));
+    if (!res.ok) { const err = new Error((body && body.error) || (res.status + ' ' + route)); err.status = res.status; err.body = body; throw err; }
     return body;
   }
 
@@ -192,7 +200,7 @@
       el('span', { class: 'meta', text: s.costUsd === null ? '' : '$' + s.costUsd.toFixed(2) }),
       el('span', { class: 'meta', text: 'started ' + relative(s.startedAt) }),
     ]);
-    if (s.running) {
+    if (s.running && s.mode === 'headless') {
       const stop = el('button', { class: 'stop', type: 'button', text: 'Stop' });
       stop.addEventListener('click', async () => {
         stop.disabled = true;
@@ -200,6 +208,21 @@
         catch (e) { showNotice(e.message); stop.disabled = false; }
       });
       head.appendChild(stop);
+    }
+    if (s.mode === 'terminal') {
+      const opened = s.openedAt ? 'terminal opened ' + relative(s.openedAt) : 'not opened yet';
+      if (s.running && t.triggers.some((x) => x.action === 'terminal')) {
+        const reopen = el('button', { class: 'stop', type: 'button', text: 'Open terminal' });
+        reopen.addEventListener('click', async () => {
+          reopen.disabled = true;
+          try { await api('/api/tickets/' + encodeURIComponent(t.id) + '/terminal', { method: 'POST', body: '{}' }); showDetail(t.id); }
+          catch (e) { showNotice(e.message); reopen.disabled = false; }
+        });
+        head.appendChild(reopen);
+      }
+      pane.replaceChildren(head, el('div', { class: 'hint', text: opened + '. Lasso tracks this Session by its id only: the row ends when you mark the Stage done or skip it.' }),
+        el('div', { class: 'paths' }, [copyChip('worktree', t.worktree), copyChip('session id', s.id), s.transcriptPath ? copyChip('transcript', s.transcriptPath) : el('span')]));
+      return pane;
     }
     const out = el('pre', { text: '' });
     const final = el('div', { class: 'final' + (s.outcome === 'succeeded' ? ' ok' : ''), text: s.finalMessage || '' });
@@ -246,6 +269,33 @@
     ]);
   }
 
+  // The levers on this Ticket. Mark done met with a missing artifact offers to advance anyway, inline.
+  function triggerBar(t) {
+    const bar = el('div', { class: 'triggers', 'data-role': 'triggers' });
+    const buttons = t.triggers.map((trigger) => {
+      const button = el('button', { type: 'button', text: trigger.label, class: trigger.action === 'terminal' || trigger.action === 'start' ? 'primary' : '' });
+      button.addEventListener('click', () => pull(trigger.action, {}));
+      return button;
+    });
+    bar.replaceChildren(...buttons);
+    async function pull(action, body) {
+      for (const b of buttons) b.disabled = true;
+      try {
+        await api('/api/tickets/' + encodeURIComponent(t.id) + '/' + action, { method: 'POST', body: JSON.stringify(body) });
+        showDetail(t.id);
+      } catch (e) {
+        for (const b of buttons) b.disabled = false;
+        if (e.status === 409 && e.body && e.body.override) {
+          const anyway = el('button', { type: 'button', text: 'Advance anyway' });
+          anyway.addEventListener('click', () => { anyway.disabled = true; pull(action, { override: true }); });
+          bar.replaceChildren(...buttons, el('div', { class: 'override', 'data-role': 'override' }, [
+            el('span', { text: 'artifact ' + e.body.artifact + ' is missing: ' + e.body.detail }), anyway]));
+        } else showNotice(e.message);
+      }
+    }
+    return bar;
+  }
+
   async function showDetail(id) {
     const gen = ++detailGen;
     let t;
@@ -262,6 +312,7 @@
       stations,
     ];
     if (t.flag) children.push(el('p', { class: 'notice', text: t.flag.reason + (t.flag.detail ? ': ' + t.flag.detail : '') }));
+    if (t.triggers.length) children.push(triggerBar(t));
     if (t.session) children.push(sessionPane(t, t.session, gen));
     children.push(el('dl', {}, [
       el('dt', { text: 'repo' }), el('dd', { text: t.repo }),

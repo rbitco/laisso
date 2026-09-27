@@ -39,6 +39,7 @@ function renderDetail(t: TicketDetail): string {
   const lines = [
     `${t.reference ?? t.id}  ${t.title}`,
     `state:     ${t.display.label} (${t.display.why})`,
+    ...(t.triggers.length ? [`levers:    ${t.triggers.map((x) => x.label).join(" · ")}`] : []),
     `repo:      ${t.repo}`,
     `branch:    ${t.branch}`,
     `worktree:  ${t.worktree}`,
