@@ -2,6 +2,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { parse } from "yaml";
 import { hyphenate } from "../intake/slug.ts";
+import { parseDuration } from "../duration.ts";
 
 export const RUNNERS = ["claude", "codex", "pi"] as const;
 export type RunnerName = (typeof RUNNERS)[number];
@@ -125,10 +126,19 @@ function parseStage(pipeline: string, entry: unknown, index: number, defaultRunn
     budget: {
       rounds: typeof budget.rounds === "number" ? budget.rounds : undefined,
       attempts: typeof budget.attempts === "number" ? budget.attempts : undefined,
-      wallTime: typeof budget.wallTime === "string" ? budget.wallTime : undefined,
+      wallTime: budget.wallTime === undefined ? undefined : wallTime(budget.wallTime, where),
     },
     runnerOptions: s.runnerOptions && typeof s.runnerOptions === "object" ? (s.runnerOptions as Record<string, unknown>) : {},
   };
+}
+
+function wallTime(value: unknown, where: string): string {
+  try {
+    parseDuration(value);
+  } catch (error) {
+    throw new PipelineError(`${where}: budget.wallTime ${error instanceof Error ? error.message : String(error)}`);
+  }
+  return value as string;
 }
 
 function asRunner(value: unknown, fallback: RunnerName, where: string): RunnerName {
@@ -138,6 +148,15 @@ function asRunner(value: unknown, fallback: RunnerName, where: string): RunnerNa
 }
 
 export function isKnownArtifact(artifact: string): boolean {
-  return (ARTIFACTS as readonly string[]).includes(artifact) || /^file \S+/.test(artifact);
+  return (ARTIFACTS as readonly string[]).includes(artifact) || fileArtifact(artifact) !== null;
+}
+
+/** The worktree-relative path of a `file <path>` artifact, or null when the artifact is not one (or escapes the worktree). */
+export function fileArtifact(artifact: string): string | null {
+  const m = /^file\s+(\S+)$/.exec(artifact);
+  if (!m) return null;
+  const file = m[1]!;
+  if (file.startsWith("/") || file.split("/").includes("..")) return null;
+  return file;
 }
 

@@ -6,6 +6,8 @@ import { acquireLock, AlreadyRunning } from "./lock.ts";
 import { createLogger } from "./log.ts";
 import { Store } from "../store/store.ts";
 import { Tickets } from "../store/tickets.ts";
+import { Sessions } from "../store/sessions.ts";
+import { Runs } from "../session/runs.ts";
 import { Tick } from "./tick.ts";
 import { createApp } from "../api/app.ts";
 
@@ -35,8 +37,10 @@ export async function serve(opts: ServeOptions): Promise<number> {
 
   const store = new Store(home.dbFile);
   const tickets = new Tickets(store.db);
-  const tick = new Tick(config.tick, log, async () => []);
-  const app = createApp({ config, home, tick, tickets, version: VERSION });
+  const sessions = new Sessions(store.db);
+  const runs = new Runs({ config, home, tickets, sessions, log });
+  const tick = new Tick(config.tick, log, () => runs.startRunnable());
+  const app = createApp({ config, home, tick, tickets, sessions, runs, version: VERSION });
 
   if (defaults.wroteConfig) log.info("config.written", { file: home.configFile });
   if (defaults.wrotePipeline) log.info("pipeline.written", { name: "default" });
@@ -58,6 +62,7 @@ export async function serve(opts: ServeOptions): Promise<number> {
   log.info("started", { home: home.root, port: config.port, pid: process.pid, version: VERSION });
   console.log(`lasso listening at ${url}`);
 
+  runs.reconcile();
   await tick.run("startup");
   tick.start();
 
@@ -68,7 +73,8 @@ export async function serve(opts: ServeOptions): Promise<number> {
       shuttingDown = true;
       log.info("shutdown", { signal });
       tick.stop();
-      server.close(() => {
+      const finished = new Promise<void>((done) => server.close(() => done()));
+      void runs.shutdown().then(() => finished).then(() => {
         store.close();
         releaseLock();
         resolve(0);
@@ -76,7 +82,7 @@ export async function serve(opts: ServeOptions): Promise<number> {
       setTimeout(() => {
         releaseLock();
         resolve(0);
-      }, 3000).unref();
+      }, 8000).unref();
     };
     process.once("SIGINT", () => shutdown("SIGINT"));
     process.once("SIGTERM", () => shutdown("SIGTERM"));

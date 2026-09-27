@@ -65,4 +65,31 @@ const MIGRATIONS: Array<(db: DatabaseSync) => void> = [
       CREATE UNIQUE INDEX tickets_active_reference ON tickets (reference) WHERE state = 'active' AND reference IS NOT NULL;
     `);
   },
+  (db) => {
+    db.exec(`
+      CREATE TABLE sessions (
+        id TEXT PRIMARY KEY,
+        ticket TEXT NOT NULL REFERENCES tickets (id),
+        stage TEXT NOT NULL,
+        ordinal INTEGER NOT NULL,
+        stage_snapshot TEXT NOT NULL,
+        mode TEXT NOT NULL CHECK (mode IN ('headless', 'terminal', 'action')),
+        started_by TEXT NOT NULL CHECK (started_by IN ('auto', 'human')),
+        started_at TEXT NOT NULL,
+        ended_at TEXT,
+        ended_by TEXT CHECK (ended_by IN ('outcome', 'human')),
+        ended_reason TEXT CHECK (ended_reason IN ('shutdown', 'wall_time', 'abandon', 'stop')),
+        outcome TEXT CHECK (outcome IN ('succeeded', 'failed', 'exhausted', 'interrupted')),
+        final_message TEXT,
+        usage TEXT,
+        cost_usd REAL,
+        limits_honoured TEXT,
+        stdout_path TEXT,
+        transcript_path TEXT,
+        pid INTEGER
+      );
+      CREATE INDEX sessions_ticket ON sessions (ticket, started_at);
+      CREATE INDEX sessions_running ON sessions (ended_at) WHERE ended_at IS NULL;
+    `);
+  },
 ];

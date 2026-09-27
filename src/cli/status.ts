@@ -1,5 +1,5 @@
 import { createClient } from "./client.ts";
-import type { TicketView, TicketDetail } from "../api/views.ts";
+import type { TicketView, TicketDetail, SessionView } from "../api/views.ts";
 
 export interface StatusOptions {
   portFlag?: number;
@@ -51,5 +51,25 @@ function renderDetail(t: TicketDetail): string {
     ...t.stages.map((s, i) => `  ${i === t.stage.index ? ">" : " "} ${s.label}${s.human ? " (human)" : ""}`),
   ];
   if (t.flag) lines.splice(2, 0, `flag:      ${t.flag.reason}${t.flag.detail ? `: ${t.flag.detail}` : ""}`);
+  if (t.session) {
+    if (t.session.finalMessage) lines.push(`last:      ${t.session.finalMessage.split("\n")[0]}`);
+    if (t.session.stdoutPath) lines.push(`stdout:    ${t.session.stdoutPath}`);
+    if (t.session.transcriptPath) lines.push(`transcript: ${t.session.transcriptPath}`);
+  }
+  if (t.sessions.length) lines.push("", "sessions:", ...t.sessions.map((s) => `  ${sessionLine(s)}`));
   return lines.join("\n");
+}
+
+/** One line per Session: Stage and attempt, how it ended, how long, what it cost. */
+function sessionLine(s: SessionView): string {
+  const ended = s.running ? "running" : `${s.outcome ?? "?"}${s.endedReason ? ` (${s.endedReason})` : ""}`;
+  const cost = s.costUsd === null ? "" : `  $${s.costUsd.toFixed(2)}`;
+  return `${s.stage} #${s.ordinal}  ${s.mode}  ${ended}  ${duration(s.durationMs)}${cost}  ${s.startedAt}`;
+}
+
+function duration(ms: number): string {
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  return m < 60 ? `${m}m${s % 60}s` : `${Math.floor(m / 60)}h${m % 60}m`;
 }

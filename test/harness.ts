@@ -3,11 +3,13 @@
 // Each test gets a temporary Lasso home, the server spawned as a child process,
 // a PATH directory for fake executables, and a fake notifier on that PATH that
 // records what it was asked to post, and gh and acli shims that answer from
-// canned replies and record every invocation. Later slices add a fake Runner
-// to the same directory. Time is driven by check-now, never by timers: the
-// harness config sets a tick cadence long enough never to fire.
+// canned replies and record every invocation, and a fake claude Runner that
+// plays a script (stdout, exit code, commands to run and files to write in its
+// cwd, or hang) and records every launch. Time is driven by check-now, never
+// by timers: the harness config sets a tick cadence long enough never to fire.
 
 import { spawn, execFile, execFileSync, type ChildProcess } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { mkdtemp, mkdir, writeFile, rm, readFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -46,6 +48,8 @@ export interface Lasso {
   notifications(): Promise<Array<{ title: string; body: string; url?: string }>>;
   /** The gh and acli shims: canned replies in, recorded invocations out. */
   tracker: TrackerShim;
+  /** The fake claude Runner: a script in, recorded launches out. */
+  runner: RunnerShim;
   /** SIGINT the server and wait for exit; the home is left in place. */
   stop(): Promise<number | null>;
   /** Stop and delete the home. */
@@ -70,7 +74,91 @@ export async function makeHome(config: LassoConfig = {}): Promise<{ home: string
   await writeConfig(home, { tick: 3600, ...config });
   await installFakeNotifier(pathDir);
   await installTrackerShims(pathDir);
+  await installFakeRunner(pathDir);
   return { home, pathDir };
+}
+
+/** What the fake claude does when launched. Fields apply in this order. */
+export interface RunnerScript {
+  /** Written to stdout, one line at a time; a recorded fixture goes in whole. */
+  stdout?: string;
+  /** Wait this long before writing stdout, so a test can watch the Session run. */
+  delayMs?: number;
+  /** Files to write in the cwd (the worktree), relative path to content. */
+  files?: Record<string, string>;
+  /** Commands to run in the cwd before exiting, such as a git commit. */
+  commands?: string[][];
+  /** Never exit: the Session runs until something kills it. */
+  hang?: boolean;
+  exit?: number;
+}
+
+export interface RunnerCall {
+  pid: number;
+  argv: string[];
+  cwd: string;
+  env: Record<string, string>;
+}
+
+export interface RunnerShim {
+  /** Set what the next launches do; the script stays until replaced. */
+  script(script: RunnerScript): Promise<void>;
+  /** Every launch so far, oldest first. */
+  calls(): Promise<RunnerCall[]>;
+}
+
+const RUNNER_SCRIPT_FILE = "runner-script.json";
+const RUNNER_CALLS_FILE = "runner-calls.jsonl";
+
+async function installFakeRunner(pathDir: string): Promise<void> {
+  // With no script it exits at once with nothing on stdout, which Lasso reads
+  // as interrupted: a test that runs a Stage sets a script first.
+  const script = `#!/usr/bin/env node
+const fs = require("node:fs");
+const path = require("node:path");
+const { execFileSync } = require("node:child_process");
+const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.startsWith("LASSO_")));
+fs.appendFileSync(path.join(__dirname, ${JSON.stringify(RUNNER_CALLS_FILE)}), JSON.stringify({ pid: process.pid, argv: ["claude", ...process.argv.slice(2)], cwd: process.cwd(), env }) + "\\n");
+let script = {};
+try { script = JSON.parse(fs.readFileSync(path.join(__dirname, ${JSON.stringify(RUNNER_SCRIPT_FILE)}), "utf8")); } catch {}
+const gitEnv = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" };
+(async () => {
+  if (script.delayMs) await new Promise((r) => setTimeout(r, script.delayMs));
+  for (const [file, content] of Object.entries(script.files ?? {})) {
+    fs.mkdirSync(path.dirname(path.resolve(file)), { recursive: true });
+    fs.writeFileSync(path.resolve(file), content);
+  }
+  for (const [cmd, ...args] of script.commands ?? []) execFileSync(cmd, args, { env: gitEnv, stdio: ["ignore", "ignore", "inherit"] });
+  if (script.stdout) for (const line of script.stdout.split("\\n")) process.stdout.write(line + "\\n");
+  if (script.hang) { setInterval(() => {}, 1000); return; }
+  process.exit(script.exit ?? 0);
+})();
+`;
+  await writeFile(path.join(pathDir, "claude"), script, { mode: 0o755 });
+}
+
+export function runnerShim(pathDir: string): RunnerShim {
+  return {
+    script: (script) => writeFile(path.join(pathDir, RUNNER_SCRIPT_FILE), JSON.stringify(script)),
+    calls: () => readJsonl<RunnerCall>(path.join(pathDir, RUNNER_CALLS_FILE)),
+  };
+}
+
+/** Poll until `probe` returns a truthy value, or fail with the last value seen. */
+export async function waitFor<T>(probe: () => Promise<T>, what: string, timeoutMs = 10_000): Promise<NonNullable<T>> {
+  const deadline = Date.now() + timeoutMs;
+  let last: T | undefined;
+  while (Date.now() < deadline) {
+    last = await probe();
+    if (last) return last;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  throw new Error(`timed out waiting for ${what}; last saw ${JSON.stringify(last)}`);
+}
+
+/** Output recorded from a real claude run, from test/fixtures/claude. */
+export function claudeFixture(name: string): string {
+  return readFileSync(path.join(import.meta.dirname, "fixtures", "claude", name), "utf8");
 }
 
 export interface TrackerReply {
@@ -273,6 +361,7 @@ export async function startLasso(opts: StartOptions = {}): Promise<Lasso> {
     },
     page: (route) => fetch(url + route),
     tracker: trackerShim(pathDir),
+    runner: runnerShim(pathDir),
     notifications: () => readJsonl(path.join(pathDir, "notifications.jsonl")),
     async stop() {
       if (child.exitCode !== null) return child.exitCode;

@@ -1,0 +1,91 @@
+import type { DatabaseSync } from "node:sqlite";
+import type { OutcomeStatus } from "../runner/adapter.ts";
+
+export type SessionMode = "headless" | "terminal" | "action";
+export type EndedReason = "shutdown" | "wall_time" | "abandon" | "stop";
+
+export interface SessionRow {
+  id: string;
+  ticket: string;
+  stage: string;
+  /** This Session's number within its Stage for its Ticket; the Round number in a repeating Stage. */
+  ordinal: number;
+  stage_snapshot: string;
+  mode: SessionMode;
+  started_by: "auto" | "human";
+  started_at: string;
+  ended_at: string | null;
+  ended_by: "outcome" | "human" | null;
+  ended_reason: EndedReason | null;
+  outcome: OutcomeStatus | null;
+  final_message: string | null;
+  usage: string | null;
+  cost_usd: number | null;
+  limits_honoured: string | null;
+  stdout_path: string | null;
+  transcript_path: string | null;
+  pid: number | null;
+}
+
+export type NewSession = Pick<SessionRow, "id" | "ticket" | "stage" | "stage_snapshot" | "mode" | "started_by" | "stdout_path" | "limits_honoured">;
+
+export type SessionEnd = Pick<SessionRow, "ended_by" | "ended_reason" | "outcome" | "final_message" | "usage" | "cost_usd" | "transcript_path">;
+
+/** One row per Runner process (or action) that worked a Stage of a Ticket; the history the Ticket row lacks (spec: Store). */
+export class Sessions {
+  private db: DatabaseSync;
+
+  constructor(db: DatabaseSync) {
+    this.db = db;
+  }
+
+  insert(session: NewSession, now: string = new Date().toISOString()): SessionRow {
+    const ordinal = this.count(session.ticket, session.stage) + 1;
+    this.db
+      .prepare(
+        `INSERT INTO sessions (id, ticket, stage, ordinal, stage_snapshot, mode, started_by, started_at, stdout_path, limits_honoured)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(session.id, session.ticket, session.stage, ordinal, session.stage_snapshot, session.mode, session.started_by, now, session.stdout_path, session.limits_honoured);
+    return this.get(session.id)!;
+  }
+
+  get(id: string): SessionRow | null {
+    return (this.db.prepare(`SELECT * FROM sessions WHERE id = ?`).get(id) as SessionRow | undefined) ?? null;
+  }
+
+  /** A Ticket's Sessions, newest first. */
+  forTicket(ticket: string): SessionRow[] {
+    return this.db.prepare(`SELECT * FROM sessions WHERE ticket = ? ORDER BY started_at DESC, ordinal DESC`).all(ticket) as unknown as SessionRow[];
+  }
+
+  /** The newest Session of a Ticket, running or not. */
+  latest(ticket: string): SessionRow | null {
+    return (this.db.prepare(`SELECT * FROM sessions WHERE ticket = ? ORDER BY started_at DESC, ordinal DESC LIMIT 1`).get(ticket) as SessionRow | undefined) ?? null;
+  }
+
+  running(ticket?: string): SessionRow[] {
+    const sql = `SELECT * FROM sessions WHERE ended_at IS NULL` + (ticket ? ` AND ticket = ?` : ``) + ` ORDER BY started_at ASC`;
+    const stmt = this.db.prepare(sql);
+    return (ticket ? stmt.all(ticket) : stmt.all()) as unknown as SessionRow[];
+  }
+
+  setPid(id: string, pid: number | null): void {
+    this.db.prepare(`UPDATE sessions SET pid = ? WHERE id = ?`).run(pid, id);
+  }
+
+  end(id: string, end: SessionEnd, now: string = new Date().toISOString()): SessionRow {
+    this.db
+      .prepare(
+        `UPDATE sessions SET ended_at = ?, ended_by = ?, ended_reason = ?, outcome = ?, final_message = ?, usage = ?, cost_usd = ?, transcript_path = ?, pid = NULL
+         WHERE id = ? AND ended_at IS NULL`,
+      )
+      .run(now, end.ended_by, end.ended_reason, end.outcome, end.final_message, end.usage, end.cost_usd, end.transcript_path, id);
+    return this.get(id)!;
+  }
+
+  private count(ticket: string, stage: string): number {
+    const row = this.db.prepare(`SELECT COUNT(*) AS n FROM sessions WHERE ticket = ? AND stage = ?`).get(ticket, stage) as { n: number };
+    return row.n;
+  }
+}

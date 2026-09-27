@@ -54,6 +54,25 @@
   .station.current { border-color: var(--accent); color: var(--accent); }
   .station.done { color: var(--ok); border-color: var(--ok); }
   a.back { color: var(--muted); }
+  .pill.running { background: var(--ok); color: #fff; }
+  .session { display: grid; gap: 8px; padding: 12px; border-radius: 8px; background: var(--term-bg); color: var(--term-ink); font-family: ui-monospace, monospace; font-size: 12px; }
+  .session .head { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
+  .session .head strong { color: var(--term-bright); }
+  .session .meta { color: var(--term-dim); }
+  .session .pill { background: var(--term-pill); color: var(--term-bright); }
+  .session .pill.succeeded { background: var(--ok); color: #fff; }
+  .session .pill.failed, .session .pill.exhausted, .session .pill.interrupted { background: var(--warn); color: #fff; }
+  .session pre { margin: 0; max-height: 360px; overflow: auto; white-space: pre-wrap; word-break: break-all; color: var(--term-dim); }
+  .session .final { color: var(--term-bright); border-top: 1px solid var(--term-line); padding-top: 8px; white-space: pre-wrap; }
+  .session .final.ok { color: var(--term-ok); }
+  .session .paths { display: flex; flex-wrap: wrap; gap: 6px; }
+  .session .paths button { font: inherit; font-size: 11px; padding: 2px 8px; background: var(--term-pill); color: var(--term-dim); border-color: var(--term-line); }
+  .session button.stop { background: var(--warn); color: #fff; border-color: var(--warn); font: inherit; }
+  .timeline { display: grid; gap: 4px; }
+  .timeline h3 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+  .timeline .row { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; font-variant-numeric: tabular-nums; font-size: 13px; }
+  .timeline .row .meta { color: var(--muted); }
+  :root { --term-bg: #1c1d22; --term-ink: #d7d5cd; --term-dim: #8f8c84; --term-bright: #f2f0ea; --term-line: #33353d; --term-pill: #2e3038; --term-ok: #8fd19a; }
 </style>
 </head>
 <body>
@@ -142,32 +161,123 @@
     for (const t of tickets) ledger.appendChild(ticketRow(t));
   }
 
+  function duration(ms) {
+    const s = Math.round(ms / 1000);
+    if (s < 60) return s + 's';
+    const m = Math.floor(s / 60);
+    return m < 60 ? m + 'm' + (s % 60) + 's' : Math.floor(m / 60) + 'h' + (m % 60) + 'm';
+  }
+
+  function copyChip(label, value) {
+    const chip = el('button', { type: 'button', text: label, title: value });
+    chip.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(value); chip.textContent = 'copied'; }
+      catch (e) { chip.textContent = value; }
+      setTimeout(() => { chip.textContent = label; }, 1500);
+    });
+    return chip;
+  }
+
+  // Each showDetail is a generation; a pane whose generation has passed stops polling and never re-renders.
+  let detailGen = 0;
+
+  function sessionPane(t, s, gen) {
+    const pane = el('section', { class: 'session', 'data-role': 'session' });
+    const outcome = s.running ? 'running' : (s.outcome || 'unknown');
+    const head = el('div', { class: 'head' }, [
+      el('span', { class: 'pill ' + outcome, text: outcome + (s.endedReason ? ' · ' + s.endedReason : '') }),
+      el('strong', { text: s.stage + ' #' + s.ordinal }),
+      el('span', { class: 'meta', text: s.mode + ' · ' + s.startedBy }),
+      el('span', { class: 'meta', 'data-role': 'duration', text: duration(s.durationMs) }),
+      el('span', { class: 'meta', text: s.costUsd === null ? '' : '$' + s.costUsd.toFixed(2) }),
+      el('span', { class: 'meta', text: 'started ' + relative(s.startedAt) }),
+    ]);
+    if (s.running) {
+      const stop = el('button', { class: 'stop', type: 'button', text: 'Stop' });
+      stop.addEventListener('click', async () => {
+        stop.disabled = true;
+        try { await api('/api/tickets/' + encodeURIComponent(t.id) + '/sessions/' + s.id + '/stop', { method: 'POST' }); showDetail(t.id); }
+        catch (e) { showNotice(e.message); stop.disabled = false; }
+      });
+      head.appendChild(stop);
+    }
+    const out = el('pre', { text: '' });
+    const final = el('div', { class: 'final' + (s.outcome === 'succeeded' ? ' ok' : ''), text: s.finalMessage || '' });
+    final.hidden = !s.finalMessage;
+    const paths = el('div', { class: 'paths' }, [
+      copyChip('worktree', t.worktree),
+      s.stdoutPath ? copyChip('stdout', s.stdoutPath) : el('span'),
+      s.transcriptPath ? copyChip('transcript', s.transcriptPath) : el('span'),
+    ]);
+    pane.replaceChildren(head, out, final, paths);
+
+    let offset = 0;
+    let stale = false;
+    async function tail() {
+      const current = () => gen === detailGen && !stale;
+      try {
+        const chunk = await api('/api/tickets/' + encodeURIComponent(t.id) + '/sessions/' + s.id + '/stdout?offset=' + offset);
+        if (!current()) return;
+        if (chunk.text) { out.textContent += chunk.text; out.scrollTop = out.scrollHeight; }
+        offset = chunk.offset;
+        if (chunk.ended) { if (s.running) showDetail(t.id); return; }
+      } catch (e) {
+        if (!current()) return;
+        if (!stale) { stale = true; out.textContent += '\n[stdout unavailable: ' + e.message + '; retrying]'; stale = false; }
+      }
+      if (!s.running || !current()) return;
+      head.querySelector('[data-role="duration"]').textContent = duration(Date.now() - new Date(s.startedAt).getTime());
+      setTimeout(tail, 1000);
+    }
+    tail();
+    return pane;
+  }
+
+  function timeline(sessions) {
+    return el('div', { class: 'timeline', 'data-role': 'timeline' }, [
+      el('h3', { text: 'Sessions' }),
+      ...sessions.map((s) => el('div', { class: 'row' }, [
+        el('span', { class: 'pill ' + (s.running ? 'running' : s.outcome || ''), text: s.running ? 'running' : (s.outcome || '?') }),
+        el('span', { text: s.stage + ' #' + s.ordinal }),
+        el('span', { class: 'meta', text: s.mode + ' · ' + s.startedBy + (s.endedReason ? ' · ' + s.endedReason : '') }),
+        el('span', { class: 'meta', text: duration(s.durationMs) + (s.costUsd === null ? '' : ' · $' + s.costUsd.toFixed(2)) }),
+        el('span', { class: 'meta', text: relative(s.startedAt) }),
+      ])),
+    ]);
+  }
+
   async function showDetail(id) {
+    const gen = ++detailGen;
     let t;
     try { t = await api('/api/tickets/' + encodeURIComponent(id)); }
     catch (e) { showNotice(e.message); location.hash = ''; return; }
+    if (gen !== detailGen) return;
     const back = el('a', { class: 'back', href: '#', text: '← all Tickets' });
     const stations = el('div', { class: 'stations' }, t.stages.map((s, i) =>
       el('span', { class: 'station' + (i < t.stage.index ? ' done' : i === t.stage.index ? ' current' : ''), text: s.label })));
-    detail.replaceChildren(
+    const children = [
       back,
       el('h2', { text: (t.reference ? t.reference + ' · ' : '') + t.title }),
       el('div', {}, [el('span', { class: 'pill ' + t.display.state, text: t.display.label }), ' ', el('span', { class: 'why', text: t.display.why })]),
       stations,
-      el('dl', {}, [
-        el('dt', { text: 'repo' }), el('dd', { text: t.repo }),
-        el('dt', { text: 'branch' }), el('dd', { text: t.branch }),
-        el('dt', { text: 'worktree' }), el('dd', { text: t.worktree }),
-        el('dt', { text: 'pipeline' }), el('dd', { text: t.pipeline }),
-        el('dt', { text: 'id' }), el('dd', { text: t.id }),
-      ]),
-    );
+    ];
+    if (t.flag) children.push(el('p', { class: 'notice', text: t.flag.reason + (t.flag.detail ? ': ' + t.flag.detail : '') }));
+    if (t.session) children.push(sessionPane(t, t.session, gen));
+    children.push(el('dl', {}, [
+      el('dt', { text: 'repo' }), el('dd', { text: t.repo }),
+      el('dt', { text: 'branch' }), el('dd', { text: t.branch }),
+      el('dt', { text: 'worktree' }), el('dd', { text: t.worktree }),
+      el('dt', { text: 'pipeline' }), el('dd', { text: t.pipeline }),
+      el('dt', { text: 'id' }), el('dd', { text: t.id }),
+    ]));
+    if (t.sessions.length) children.push(timeline(t.sessions));
+    detail.replaceChildren(...children);
     ledger.hidden = true; detail.hidden = false;
   }
 
   function route() {
     const id = location.hash.replace(/^#/, '');
-    if (id) showDetail(id); else { detail.hidden = true; ledger.hidden = false; refreshLedger(); }
+    if (id) showDetail(id); else { detailGen++; detail.hidden = true; ledger.hidden = false; refreshLedger(); }
   }
 
   function select(name, choices, suggestion) {

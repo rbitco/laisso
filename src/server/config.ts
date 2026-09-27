@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
 import type { LassoHome } from "./home.ts";
+import { parseDuration } from "../duration.ts";
 
 export interface RepoConfig {
   tracker: "jira" | "github";
@@ -74,6 +75,8 @@ notifications:
   gate: true       # a Stage finished and the next waits on Start
 `;
 
+export class ConfigError extends Error {}
+
 export function loadConfig(home: LassoHome, overrides: { port?: number } = {}): Config {
   const raw = readRaw(home.configFile);
   const config: Config = {
@@ -87,6 +90,11 @@ export function loadConfig(home: LassoHome, overrides: { port?: number } = {}): 
     notifications: { ...DEFAULT_CONFIG.notifications, ...asObject(raw.notifications) },
   };
   if (overrides.port !== undefined) config.port = overrides.port;
+  try {
+    parseDuration(config.budget.wallTime);
+  } catch (error) {
+    throw new ConfigError(`${home.configFile}: budget.wallTime ${error instanceof Error ? error.message : String(error)}`);
+  }
   return config;
 }
 

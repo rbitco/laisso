@@ -1,4 +1,5 @@
 import type { TicketRow } from "../store/tickets.ts";
+import type { SessionRow } from "../store/sessions.ts";
 import type { Pipeline, Stage } from "../pipeline/load.ts";
 
 export type DisplayState = "flagged" | "needs_you" | "ready" | "running" | "queued" | "quiet" | "done" | "abandoned";
@@ -48,9 +49,37 @@ export interface TicketView {
   url: string;
 }
 
-/** One Ticket with every Stage of its Pipeline, for the detail page. */
+export interface SessionView {
+  id: string;
+  ticket: string;
+  stage: string;
+  ordinal: number;
+  mode: SessionRow["mode"];
+  startedBy: SessionRow["started_by"];
+  startedAt: string;
+  endedAt: string | null;
+  endedBy: SessionRow["ended_by"];
+  endedReason: SessionRow["ended_reason"];
+  outcome: SessionRow["outcome"];
+  finalMessage: string | null;
+  costUsd: number | null;
+  usage: Record<string, unknown> | null;
+  /** Which of the requested limits the Runner honoured itself. */
+  limitsHonoured: string[];
+  stdoutPath: string | null;
+  transcriptPath: string | null;
+  running: boolean;
+  /** Milliseconds so far, or to the end. */
+  durationMs: number;
+}
+
+/** One Ticket with every Stage of its Pipeline and its Sessions, for the detail page. */
 export interface TicketDetail extends TicketView {
   stages: Array<Pick<StageView, "name" | "kind" | "label" | "human">>;
+  /** The latest Session: the pane shows it, running or not. */
+  session: SessionView | null;
+  /** The timeline, newest first. */
+  sessions: SessionView[];
 }
 
 /** What intake returns: the new Ticket's view plus whether its branch was found rather than made. */
@@ -61,6 +90,9 @@ export interface IntakeResult extends TicketView {
 export interface ViewContext {
   baseUrl: string;
   pipelineFor(ticket: TicketRow): Pipeline | null;
+  /** A Ticket's Sessions, newest first. */
+  sessionsFor(ticket: TicketRow): SessionRow[];
+  latestSession(ticket: TicketRow): SessionRow | null;
 }
 
 /** The order the Ledger shows display states in: attention first. */
@@ -75,7 +107,8 @@ export function ticketView(ticket: TicketRow, ctx: ViewContext): TicketView {
   const index = pipeline ? pipeline.stages.findIndex((s) => s.name === ticket.stage) : -1;
   const stage = index >= 0 ? pipeline!.stages[index]! : null;
   const human = stage?.kind === "runner" && stage.human;
-  const display = displayState(ticket, human);
+  const latest = ctx.latestSession(ticket);
+  const display = displayState(ticket, human, latest);
   return {
     id: ticket.id,
     shortId: ticket.id.slice(-8),
@@ -113,13 +146,41 @@ export function ticketDetail(ticket: TicketRow, ctx: ViewContext): TicketDetail 
     label: stageLabel(s),
     human: s.kind === "runner" && s.human,
   }));
-  return { ...ticketView(ticket, ctx), stages };
+  const sessions = ctx.sessionsFor(ticket).map(sessionView);
+  return { ...ticketView(ticket, ctx), stages, session: sessions[0] ?? null, sessions };
 }
 
-function displayState(ticket: TicketRow, human: boolean): { state: DisplayState; why: string } {
+export function sessionView(row: SessionRow, now: number = Date.now()): SessionView {
+  const started = new Date(row.started_at).getTime();
+  const ended = row.ended_at ? new Date(row.ended_at).getTime() : now;
+  return {
+    id: row.id,
+    ticket: row.ticket,
+    stage: row.stage,
+    ordinal: row.ordinal,
+    mode: row.mode,
+    startedBy: row.started_by,
+    startedAt: row.started_at,
+    endedAt: row.ended_at,
+    endedBy: row.ended_by,
+    endedReason: row.ended_reason,
+    outcome: row.outcome,
+    finalMessage: row.final_message,
+    costUsd: row.cost_usd,
+    usage: row.usage ? (JSON.parse(row.usage) as Record<string, unknown>) : null,
+    limitsHonoured: row.limits_honoured ? (JSON.parse(row.limits_honoured) as string[]) : [],
+    stdoutPath: row.stdout_path,
+    transcriptPath: row.transcript_path,
+    running: row.ended_at === null,
+    durationMs: Math.max(0, ended - started),
+  };
+}
+
+function displayState(ticket: TicketRow, human: boolean, latest: SessionRow | null): { state: DisplayState; why: string } {
   if (ticket.state === "done") return { state: "done", why: "done" };
   if (ticket.state === "abandoned") return { state: "abandoned", why: "abandoned" };
   if (ticket.flagged_at) return { state: "flagged", why: ticket.flag_reason ?? "flagged" };
+  if (latest && latest.ended_at === null && latest.mode === "headless") return { state: "running", why: `${latest.stage}, run ${latest.ordinal}` };
   if (human) return { state: "needs_you", why: "not started" };
   return { state: "ready", why: `waiting to start ${ticket.stage}` };
 }

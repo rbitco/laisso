@@ -3,16 +3,21 @@ import type { Config } from "../server/config.ts";
 import type { LassoHome } from "../server/home.ts";
 import type { Tick } from "../server/tick.ts";
 import type { Tickets, TicketRow } from "../store/tickets.ts";
+import type { Sessions } from "../store/sessions.ts";
+import type { Runs } from "../session/runs.ts";
+import { RunError } from "../session/runs.ts";
 import { Intake, IntakeError, type IntakeRequest } from "../intake/intake.ts";
 import { loadPipeline, type Pipeline } from "../pipeline/load.ts";
 import { dashboardHtml } from "../dashboard/page.ts";
-import { ticketView, ticketDetail, sortForLedger, type ViewContext, type IntakeResult } from "./views.ts";
+import { ticketView, ticketDetail, sessionView, sortForLedger, type ViewContext, type IntakeResult } from "./views.ts";
 
 export interface AppDeps {
   config: Config;
   home: LassoHome;
   tick: Tick;
   tickets: Tickets;
+  sessions: Sessions;
+  runs: Runs;
   version: string;
 }
 
@@ -30,6 +35,8 @@ export function createApp(deps: AppDeps): Hono {
         return null;
       }
     },
+    sessionsFor: (ticket: TicketRow) => deps.sessions.forTicket(ticket.id),
+    latestSession: (ticket: TicketRow) => deps.sessions.latest(ticket.id),
   };
 
   // Every response carries the version, so a client can tell Lasso from a stranger on the port.
@@ -39,7 +46,7 @@ export function createApp(deps: AppDeps): Hono {
   });
 
   app.onError((error, c) => {
-    if (error instanceof IntakeError) return c.json({ error: error.message }, 400);
+    if (error instanceof IntakeError || error instanceof RunError) return c.json({ error: error.message }, 400);
     console.error(error);
     return c.json({ error: error.message }, 500);
   });
@@ -71,6 +78,28 @@ export function createApp(deps: AppDeps): Hono {
     const ticket = deps.tickets.find(c.req.param("id"));
     if (!ticket) return c.json({ error: `no Ticket matches ${c.req.param("id")}` }, 404);
     return c.json(ticketDetail(ticket, viewContext));
+  });
+
+  // A Session of a Ticket, or the 404 that says which is unknown.
+  const sessionOf = (ticketKey: string, sessionId: string) => {
+    const ticket = deps.tickets.find(ticketKey);
+    if (!ticket) return { error: `no Ticket matches ${ticketKey}` };
+    const session = deps.sessions.get(sessionId);
+    if (!session || session.ticket !== ticket.id) return { error: `no Session ${sessionId} on ${ticketKey}` };
+    return { session };
+  };
+
+  app.get("/api/tickets/:id/sessions/:sid/stdout", (c) => {
+    const found = sessionOf(c.req.param("id"), c.req.param("sid"));
+    if ("error" in found) return c.json({ error: found.error }, 404);
+    const offset = Number(c.req.query("offset") ?? 0) || 0;
+    return c.json(deps.runs.readStdout(found.session, offset));
+  });
+
+  app.post("/api/tickets/:id/sessions/:sid/stop", async (c) => {
+    const found = sessionOf(c.req.param("id"), c.req.param("sid"));
+    if ("error" in found) return c.json({ error: found.error }, 404);
+    return c.json(sessionView(await deps.runs.stop(found.session)));
   });
 
   app.get("/", (c) => c.html(dashboardHtml()));
