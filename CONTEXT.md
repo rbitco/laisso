@@ -44,6 +44,10 @@ human-in-the-loop Stage, or holding at a Stage that does not auto-advance.
 The dashboard lists these first and Lasso notifies once as each begins.
 _Avoid_: pending, waiting, needs review, action required
 
+**Ledger**:
+The dashboard's list of active Tickets, ordered so that whatever needs
+Attention comes first. Done and Abandoned Tickets sit behind a toggle.
+
 **Abandoned**:
 A Ticket a human has dropped before its Pipeline finished. It leaves Lasso's
 attention without counting as done and cannot be reopened; the same issue

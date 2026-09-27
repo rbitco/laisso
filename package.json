@@ -1,0 +1,25 @@
+{
+  "name": "lasso",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Drives a Ticket through a Pipeline of Stages using a coding-agent Runner.",
+  "bin": { "lasso": "bin/lasso.js" },
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "start": "node bin/lasso.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.14.0",
+    "hono": "^4.7.0",
+    "yaml": "^2.7.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.1.0"
+  }
+}

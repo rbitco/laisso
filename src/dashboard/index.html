@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lasso</title>
+<style>
+  :root {
+    --bg: #f6f5f2; --ink: #1d1c1a; --muted: #6b675f; --line: #dcd8cf; --accent: #b3471d;
+    --pill: #e9e5dc; --ok: #2f7a3d; --warn: #b3471d;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #17171a; --ink: #ecebe6; --muted: #a09c93; --line: #2d2d33; --accent: #e5714a;
+      --pill: #26262c; --ok: #6fbf7a; --warn: #e5714a; color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #17171a; --ink: #ecebe6; --muted: #a09c93; --line: #2d2d33; --accent: #e5714a;
+    --pill: #26262c; --ok: #6fbf7a; --warn: #e5714a; color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 ui-sans-serif, system-ui, sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 16px; margin: 0 16px 0 0; letter-spacing: 0.04em; }
+  form[data-role="intake"] { display: flex; gap: 8px; flex: 1 1 320px; }
+  form[data-role="intake"] input { flex: 1; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; }
+  button { padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--pill); color: inherit; cursor: pointer; }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .tick { display: flex; gap: 8px; align-items: center; color: var(--muted); font-variant-numeric: tabular-nums; }
+  main { padding: 16px; }
+  [data-role="ledger"] { display: grid; gap: 8px; }
+  .empty { color: var(--muted); padding: 32px 0; text-align: center; }
+  .notice { color: var(--warn); }
+</style>
+</head>
+<body>
+<header>
+  <h1>LASSO</h1>
+  <form data-role="intake" autocomplete="off">
+    <input name="input" placeholder="Paste a JIRA key, a GitHub issue, or type a prompt" aria-label="Intake">
+    <button class="primary" type="submit">Add</button>
+  </form>
+  <div class="tick">
+    <span data-role="tick-status">tick: never</span>
+    <button type="button" data-role="check-now">Check now</button>
+  </div>
+</header>
+<main>
+  <section data-role="ledger" aria-label="Tickets"></section>
+  <p data-role="notice" class="notice" hidden></p>
+</main>
+<script>
+(function () {
+  const $ = (sel) => document.querySelector(sel);
+  const ledger = $('[data-role="ledger"]');
+  const tickStatus = $('[data-role="tick-status"]');
+  const notice = $('[data-role="notice"]');
+
+  async function api(route, init) {
+    const res = await fetch(route, Object.assign({ headers: { 'content-type': 'application/json' } }, init || {}));
+    const text = await res.text();
+    const body = text ? JSON.parse(text) : null;
+    if (!res.ok) throw new Error((body && body.error) || (res.status + ' ' + route));
+    return body;
+  }
+
+  function relative(iso) {
+    if (!iso) return 'never';
+    const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+    if (s < 60) return s + 's ago';
+    const m = Math.round(s / 60);
+    return m < 60 ? m + 'm ago' : Math.round(m / 60) + 'h ago';
+  }
+
+  async function refreshTick() {
+    try {
+      const t = await api('/api/tick');
+      const next = t.nextTick ? Math.max(0, Math.round((new Date(t.nextTick).getTime() - Date.now()) / 1000)) + 's' : 'manual';
+      tickStatus.textContent = 'last tick ' + relative(t.lastTick) + ' / next in ' + next;
+    } catch (e) { tickStatus.textContent = 'tick: unreachable'; }
+  }
+
+  async function refreshLedger() {
+    const tickets = await api('/api/tickets');
+    ledger.replaceChildren();
+    if (!tickets.length) {
+      const p = document.createElement('p');
+      p.className = 'empty';
+      p.textContent = 'No active Tickets. Paste a reference or a prompt above to start one.';
+      ledger.appendChild(p);
+    }
+  }
+
+  function showNotice(msg) { notice.textContent = msg; notice.hidden = !msg; }
+
+  $('[data-role="check-now"]').addEventListener('click', async () => {
+    try { await api('/api/check-now', { method: 'POST' }); await refreshTick(); await refreshLedger(); }
+    catch (e) { showNotice(e.message); }
+  });
+
+  $('form[data-role="intake"]').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    showNotice('Intake is not available yet.');
+  });
+
+  refreshTick(); refreshLedger();
+  setInterval(refreshTick, 5000);
+})();
+</script>
+</body>
+</html>
