@@ -22,9 +22,12 @@ export interface FeedbackRow {
 
 export class Feedback {
   private db: DatabaseSync;
+  private changed: (ticket: string) => void;
 
-  constructor(db: DatabaseSync) {
+  /** `changed` hears the Ticket whose Feedback was written, after the write lands. */
+  constructor(db: DatabaseSync, changed: (ticket: string) => void = () => undefined) {
     this.db = db;
+    this.changed = changed;
   }
 
   /** The snapshot a Round starts with: one row per item, in the order the prompt lists them. */
@@ -33,6 +36,7 @@ export class Feedback {
       `INSERT INTO feedback_item (session, kind, source_id, name, url, summary, path, line, at, head, body, log) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     for (const item of items) stmt.run(session, item.kind, item.id, item.name, item.url, item.summary, item.path, item.line, item.at, item.head, item.body, item.log);
+    this.announce(`SELECT ticket FROM sessions WHERE id = ?`, session);
     return this.forSession(session);
   }
 
@@ -51,6 +55,12 @@ export class Feedback {
 
   setAddressed(id: number, evidence: string | null): void {
     this.db.prepare(`UPDATE feedback_item SET addressed = ? WHERE id = ?`).run(evidence, id);
+    this.announce(`SELECT s.ticket FROM feedback_item f JOIN sessions s ON s.id = f.session WHERE f.id = ?`, id);
+  }
+
+  private announce(sql: string, key: string | number): void {
+    const row = this.db.prepare(sql).get(key) as { ticket: string } | undefined;
+    if (row) this.changed(row.ticket);
   }
 }
 

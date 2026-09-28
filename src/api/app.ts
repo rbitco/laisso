@@ -1,4 +1,6 @@
 import { Hono } from "hono";
+import { streamSSE } from "hono/streaming";
+import type { Changes, Change } from "../server/changes.ts";
 import { ConfigError, patchConfigText, applyLive, RESTART_KEYS, parseConfig, type Config } from "../server/config.ts";
 import type { LassoHome } from "../server/home.ts";
 import type { Tick } from "../server/tick.ts";
@@ -35,8 +37,14 @@ export interface AppDeps {
   exits: Exits;
   budgets: Budgets;
   queue: Queue;
+  changes: Changes;
   version: string;
 }
+
+/** How long /api/events gathers changes before sending: a burst of writes to one Ticket goes out as one event. */
+const EVENT_GATHER_MS = 150;
+/** A comment line this often keeps idle proxies and the browser from dropping the stream. */
+const EVENT_KEEPALIVE_MS = 20_000;
 
 /** The one JSON API under /api. The dashboard page and the CLI are both clients of it. */
 export function createApp(deps: AppDeps): Hono {
@@ -79,6 +87,39 @@ export function createApp(deps: AppDeps): Hono {
   app.get("/api/health", (c) => c.json({ ok: true, pid: process.pid, version: deps.version }));
 
   app.get("/api/tick", (c) => c.json(deps.tick.status()));
+
+  // The dashboard's push channel (Server-Sent Events). Each event names what changed, never the data:
+  // "ticket" {ticket}, "stdout" {ticket, session}, "tick" {the tick status}. The page re-reads what it
+  // shows through the ordinary routes, and after a reconnect re-reads everything, as it may have missed some.
+  app.get("/api/events", (c) =>
+    streamSSE(c, async (stream) => {
+      const gathered = new Map<string, Change>();
+      let timer: NodeJS.Timeout | null = null;
+      const flush = async () => {
+        timer = null;
+        const batch = [...gathered.values()];
+        gathered.clear();
+        for (const change of batch) {
+          if (stream.aborted || stream.closed) return;
+          const data = change.kind === "tick" ? deps.tick.status() : change.kind === "stdout" ? { ticket: change.ticket, session: change.session } : { ticket: change.ticket };
+          await stream.writeSSE({ event: change.kind, data: JSON.stringify(data) });
+        }
+      };
+      let finish!: () => void;
+      const finished = new Promise<void>((resolve) => (finish = resolve));
+      const unsubscribe = deps.changes.subscribe((change) => {
+        gathered.set(change.kind === "tick" ? "tick" : change.kind === "stdout" ? `stdout:${change.session}` : `ticket:${change.ticket}`, change);
+        timer ??= setTimeout(() => void flush().catch(finish), EVENT_GATHER_MS);
+      }, () => finish());
+      stream.onAbort(() => finish());
+      const keepalive = setInterval(() => void stream.write(": keepalive\n\n").catch(finish), EVENT_KEEPALIVE_MS);
+      await stream.writeSSE({ event: "hello", data: JSON.stringify(deps.tick.status()) });
+      await finished;
+      unsubscribe();
+      clearInterval(keepalive);
+      if (timer) clearTimeout(timer);
+    }),
+  );
   app.post("/api/check-now", async (c) => c.json(await deps.tick.run("check-now")));
 
   app.post("/api/intake/detect", async (c) => {

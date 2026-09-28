@@ -22,6 +22,7 @@ import { Queue } from "../session/queue.ts";
 import { Teardown } from "../session/teardown.ts";
 import { PipelineVersions } from "../store/versions.ts";
 import { Tick } from "./tick.ts";
+import { Changes } from "./changes.ts";
 import { createApp } from "../api/app.ts";
 
 const VERSION = (createRequire(import.meta.url)("../../package.json") as { version: string }).version;
@@ -49,11 +50,14 @@ export async function serve(opts: ServeOptions): Promise<number> {
   }
 
   const store = new Store(home.dbFile);
-  const tickets = new Tickets(store.db);
+  // Every write that the dashboard shows announces itself here; /api/events relays it (no polling).
+  const changes = new Changes();
+  const ticketChanged = (ticket: string) => changes.emit({ kind: "ticket", ticket });
+  const tickets = new Tickets(store.db, ticketChanged);
   const versions = new PipelineVersions(store.db);
   versions.pinUnpinned(tickets, home.pipelinesDir);
-  const sessions = new Sessions(store.db);
-  const feedback = new Feedback(store.db);
+  const sessions = new Sessions(store.db, ticketChanged);
+  const feedback = new Feedback(store.db, ticketChanged);
   const notifier = createNotifier({ config: config.notifications, log, baseUrl: `http://localhost:${config.port}` });
   const mirror = new Mirror({
     config,
@@ -74,12 +78,12 @@ export async function serve(opts: ServeOptions): Promise<number> {
   const terminal = new Terminal({ home, sessions, log });
   const budgets = new Budgets({ config, sessions });
   const queue = new Queue({ home, tickets, sessions, progress, log, cap: config.concurrency });
-  const runs = new Runs({ config, home, tickets, sessions, log, progress, budgets, queue, review });
+  const runs = new Runs({ config, home, tickets, sessions, log, progress, budgets, queue, review, stdoutWritten: (ticket, session) => changes.emit({ kind: "stdout", ticket, session }) });
   const actions = new Actions({ config, tickets, sessions, log, progress });
   // One tick: owed mirror pushes, then action Stages, then the PR poll (a Round it makes due starts below), then headless starts, then the retention sweep.
-  const tick = new Tick(config.tick, log, async () => [...(await mirror.retryPending()), ...(await actions.runDue()), ...(await review.poll()), ...(await runs.startRunnable()), ...(await teardown.sweep())]);
+  const tick = new Tick(config.tick, log, async () => [...(await mirror.retryPending()), ...(await actions.runDue()), ...(await review.poll()), ...(await runs.startRunnable()), ...(await teardown.sweep())], () => changes.emit({ kind: "tick" }));
   const exits = new Exits({ tickets, sessions, log, progress, runs, terminal, budgets, tick, teardown });
-  const app = createApp({ config, home, tick, tickets, versions, sessions, feedback, runs, progress, terminal, exits, budgets, queue, version: VERSION });
+  const app = createApp({ config, home, tick, tickets, versions, sessions, feedback, runs, progress, terminal, exits, budgets, queue, changes, version: VERSION });
 
   if (defaults.wroteConfig) log.info("config.written", { file: home.configFile });
   if (defaults.wrotePipeline) log.info("pipeline.written", { name: "default" });
@@ -119,7 +123,11 @@ export async function serve(opts: ServeOptions): Promise<number> {
     shuttingDown = true;
     log.info("shutdown", { signal });
     tick.stop();
+    // Open event streams would keep server.close waiting; ending them lets it finish.
+    changes.close();
     const finished = new Promise<void>((done) => server.close(() => done()));
+    // The ended streams leave keep-alive sockets behind once their last bytes are out; drop them then.
+    setTimeout(() => (server as { closeIdleConnections?: () => void }).closeIdleConnections?.(), 50).unref();
     void startup.then(() => tick.settle()).then(() => runs.shutdown()).then(() => mirror.settle()).then(() => finished).then(() => {
       store.close();
       releaseLock();

@@ -40,9 +40,12 @@ export type SessionEnd = Pick<SessionRow, "ended_by" | "ended_reason" | "outcome
 /** One row per Runner process (or action) that worked a Stage of a Ticket; the history the Ticket row lacks (spec: Store). */
 export class Sessions {
   private db: DatabaseSync;
+  private changed: (ticket: string) => void;
 
-  constructor(db: DatabaseSync) {
+  /** `changed` hears the Ticket of every Session written, after the write lands. */
+  constructor(db: DatabaseSync, changed: (ticket: string) => void = () => undefined) {
     this.db = db;
+    this.changed = changed;
   }
 
   insert(session: NewSession, now: string = new Date().toISOString()): SessionRow {
@@ -53,6 +56,7 @@ export class Sessions {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(session.id, session.ticket, session.stage, ordinal, session.stage_snapshot, session.mode, session.started_by, now, session.stdout_path, session.limits_honoured, session.transcript_path ?? null, session.round ?? null);
+    this.changed(session.ticket);
     return this.get(session.id)!;
   }
 
@@ -78,7 +82,7 @@ export class Sessions {
 
   setOpened(id: string, now: string = new Date().toISOString()): SessionRow {
     this.db.prepare(`UPDATE sessions SET opened_at = ? WHERE id = ?`).run(now, id);
-    return this.get(id)!;
+    return this.touched(id);
   }
 
   setPid(id: string, pid: number | null): void {
@@ -87,7 +91,7 @@ export class Sessions {
 
   setRunnerSession(id: string, runnerSessionId: string): SessionRow {
     this.db.prepare(`UPDATE sessions SET runner_session_id = ? WHERE id = ?`).run(runnerSessionId, id);
-    return this.get(id)!;
+    return this.touched(id);
   }
 
   end(id: string, end: SessionEnd, now: string = new Date().toISOString()): SessionRow {
@@ -98,7 +102,7 @@ export class Sessions {
          WHERE id = ? AND ended_at IS NULL`,
       )
       .run(now, end.ended_by, end.ended_reason, end.outcome, end.final_message, end.usage, end.cost_usd, end.transcript_path, end.runner_session_id ?? null, id);
-    return this.get(id)!;
+    return this.touched(id);
   }
 
   /** The newest headless Session of the Stage that worked a Round, or null before the first. */
@@ -110,6 +114,12 @@ export class Sessions {
   lastRound(ticket: string, stage: string): number {
     const row = this.db.prepare(`SELECT MAX(round) AS n FROM sessions WHERE ticket = ? AND stage = ?`).get(ticket, stage) as { n: number | null };
     return row.n ?? 0;
+  }
+
+  private touched(id: string): SessionRow {
+    const row = this.get(id)!;
+    this.changed(row.ticket);
+    return row;
   }
 
   private count(ticket: string, stage: string): number {

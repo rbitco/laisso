@@ -31,6 +31,8 @@ export interface RunsDeps {
   budgets: Budgets;
   queue: Queue;
   review: Review;
+  /** Hears each stdout chunk once it is on disk, so a watching dashboard can read it. */
+  stdoutWritten?: (ticket: string, session: string) => void;
 }
 
 /** Lasso's verdict on an ended Session: the Stage is done, waits for more Feedback (a Round), or Flags. */
@@ -174,7 +176,10 @@ export class Runs {
     this.live.set(sessionId, live);
     if (command.stdin !== undefined) child.stdin!.end(command.stdin);
 
-    child.stdout!.on("data", (chunk: Buffer) => writeSync(fd, chunk));
+    child.stdout!.on("data", (chunk: Buffer) => {
+      writeSync(fd, chunk);
+      this.deps.stdoutWritten?.(ticket.id, sessionId);
+    });
     child.stderr!.on("data", (chunk: Buffer) => (live.stderr += chunk.toString()));
     // The pid is recorded at once, so a Lasso killed before the spawn event still leaves a reconcilable row.
     sessions.setPid(sessionId, child.pid ?? null);

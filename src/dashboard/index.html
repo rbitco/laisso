@@ -310,12 +310,18 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
 
   function showNotice(msg) { notice.textContent = msg || ''; notice.hidden = !msg; }
 
+  // The last tick status the server sent; the one-second clock redraws the countdown from it without asking again.
+  let tickNow = null;
+  function drawTick() {
+    if (!tickNow) return;
+    const t = tickNow;
+    const next = t.running ? 'running' : t.nextTick ? 'next in ' + Math.max(0, Math.round((new Date(t.nextTick).getTime() - Date.now()) / 1000)) + 's' : 'next: manual';
+    tickStatus.textContent = 'last tick ' + relative(t.lastTick) + ' / ' + next;
+  }
+  function showTick(t) { tickNow = t; drawTick(); }
   async function refreshTick() {
-    try {
-      const t = await api('/api/tick');
-      const next = t.nextTick ? Math.max(0, Math.round((new Date(t.nextTick).getTime() - Date.now()) / 1000)) + 's' : 'manual';
-      tickStatus.textContent = 'last tick ' + relative(t.lastTick) + ' / next in ' + next;
-    } catch (e) { tickStatus.textContent = 'tick: unreachable'; }
+    try { showTick(await api('/api/tick')); }
+    catch (e) { tickNow = null; tickStatus.textContent = 'tick: unreachable'; }
   }
 
   function svg(tag, attrs) {
@@ -479,6 +485,8 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
 
   // Each showDetail is a generation; a pane whose generation has passed stops polling and never re-renders.
   let detailGen = 0;
+  // The running Session whose output is on screen; "stdout" events for it read more.
+  let watchedStdout = null;
 
   const sessionLabel = (s) => s.stage + ' #' + s.ordinal + (s.round ? ' · Round ' + s.round : '');
 
@@ -503,7 +511,7 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
       el('span', { class: 'pill ' + outcome, text: outcome + (s.endedReason ? ' · ' + s.endedReason : '') }),
       el('strong', { text: sessionLabel(s) }),
       el('span', { class: 'meta', text: s.mode + ' · ' + s.startedBy }),
-      el('span', { class: 'meta', 'data-role': 'duration', text: duration(s.durationMs) }),
+      el('span', Object.assign({ class: 'meta', 'data-role': 'duration', text: duration(s.durationMs) }, s.running ? { 'data-since': s.startedAt } : {})),
       el('span', { class: 'meta', text: s.costUsd === null ? '' : '$' + s.costUsd.toFixed(2) }),
       el('span', { class: 'meta', text: 'started ' + relative(s.startedAt) }),
     ]);
@@ -546,23 +554,22 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
     ]);
     pane.replaceChildren(head, feedbackList(s.feedback), out, final, paths);
 
-    let offset = 0;
+    // Read from where the last read stopped; a "stdout" event while a read is out asks for one more after it.
+    let offset = 0, reading = false, again = false;
     async function tail() {
-      const current = () => gen === detailGen;
+      if (reading) { again = true; return; }
+      reading = true;
       try {
         const chunk = await api('/api/tickets/' + encodeURIComponent(t.id) + '/sessions/' + s.id + '/stdout?offset=' + offset);
-        if (!current()) return;
+        if (gen !== detailGen) return;
         if (chunk.text) showOutput(out, chunk.text);
         offset = chunk.offset;
-        if (chunk.ended) { if (s.running) showDetail(t.id); return; }
       } catch (e) {
-        if (!current()) return;
-        showOutput(out, '\n[stdout unavailable: ' + e.message + '; retrying]');
-      }
-      if (!s.running || !current()) return;
-      head.querySelector('[data-role="duration"]').textContent = duration(Date.now() - new Date(s.startedAt).getTime());
-      setTimeout(tail, 1000);
+        if (gen === detailGen) showOutput(out, '\n[stdout unavailable: ' + e.message + ']');
+      } finally { reading = false; }
+      if (again && gen === detailGen) { again = false; tail(); }
     }
+    watchedStdout = s.running ? { session: s.id, gen, read: tail } : null;
     tail();
     return pane;
   }
@@ -1135,9 +1142,61 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
   });
 
   window.addEventListener('hashchange', route);
-  refreshTick(); route();
-  setInterval(refreshTick, 5000);
-  setInterval(() => { if (!ledger.hidden) refreshLedger().catch(failing); else if (!side.hidden && currentTicket) refreshSide(currentTicket).catch(failing); }, 10000);
+  route();
+
+  // A Ticket's page is redrawn when it changes, unless the user is partway through something on it.
+  function busyOnDetail() {
+    if (detail.querySelector('[data-role="override"], [data-armed], button.busy')) return true;
+    const editor = detail.querySelector('[data-role="budget-editor"]');
+    if (editor && !editor.hidden) return true;
+    const focused = document.activeElement;
+    return !!(focused && detail.contains(focused) && /^(INPUT|TEXTAREA|SELECT)$/.test(focused.tagName));
+  }
+
+  // Changes arrive from /api/events and are acted on together after a short pause, so a burst redraws once.
+  const owed = { list: false, tickets: new Set() };
+  let owedTimer = null;
+  function settleOwed() {
+    owedTimer = null;
+    const { list, tickets } = owed;
+    owed.list = false; owed.tickets = new Set();
+    if (!ledger.hidden) { if (list) refreshLedger().catch(failing); return; }
+    if (detail.hidden || !currentTicket) return;
+    if (tickets.has(currentTicket) && !busyOnDetail()) showDetail(currentTicket);
+    else if (list) refreshSide(currentTicket).catch(failing);
+  }
+  function owe(ticket) {
+    owed.list = true;
+    if (ticket) owed.tickets.add(ticket);
+    owedTimer ??= setTimeout(settleOwed, 100);
+  }
+
+  // Server-Sent Events: the server names what changed and the page re-reads it. EventSource reconnects on its
+  // own after a restart; anything missed meanwhile is caught by re-reading everything once it is back.
+  let everOpen = false;
+  function listen() {
+    const events = new EventSource('/api/events');
+    events.addEventListener('hello', (ev) => {
+      showTick(JSON.parse(ev.data));
+      if (everOpen) route();
+      everOpen = true;
+    });
+    events.addEventListener('tick', (ev) => showTick(JSON.parse(ev.data)));
+    events.addEventListener('ticket', (ev) => owe(JSON.parse(ev.data).ticket));
+    events.addEventListener('stdout', (ev) => {
+      const { session } = JSON.parse(ev.data);
+      if (watchedStdout && watchedStdout.session === session && watchedStdout.gen === detailGen) watchedStdout.read();
+    });
+    events.addEventListener('error', () => { tickNow = null; tickStatus.textContent = 'lasso unreachable; reconnecting'; });
+  }
+  listen();
+
+  // The clock: countdowns and running durations move on screen without asking the server.
+  setInterval(() => {
+    drawTick();
+    for (const node of document.querySelectorAll('[data-role="duration"][data-since]')) node.textContent = duration(Date.now() - new Date(node.dataset.since).getTime());
+    for (const node of document.querySelectorAll('[data-role="last"][title]')) node.textContent = relative(node.title);
+  }, 1000);
 })();
 </script>
 </body>

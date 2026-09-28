@@ -54,9 +54,12 @@ export type NewTicket = Pick<TicketRow, "id" | "repo" | "reference" | "origin" |
 /** Current-state rows for Tickets; Sessions are the history (spec: Store). */
 export class Tickets {
   private db: DatabaseSync;
+  private changed: (ticket: string) => void;
 
-  constructor(db: DatabaseSync) {
+  /** `changed` hears of every write, after it lands. */
+  constructor(db: DatabaseSync, changed: (ticket: string) => void = () => undefined) {
     this.db = db;
+    this.changed = changed;
   }
 
   insert(ticket: NewTicket, now: string = new Date().toISOString()): TicketRow {
@@ -66,6 +69,7 @@ export class Tickets {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)`,
       )
       .run(ticket.id, ticket.repo, ticket.reference, ticket.origin, ticket.prompt, ticket.title, ticket.body, ticket.pipeline, ticket.pipeline_version, ticket.stage, ticket.branch, ticket.worktree, now, now);
+    this.changed(ticket.id);
     return this.get(ticket.id)!;
   }
 
@@ -98,22 +102,26 @@ export class Tickets {
   /** Migration bookkeeping only: not activity on the Ticket, so updated_at is left alone. */
   pinVersion(id: string, version: number): void {
     this.db.prepare(`UPDATE tickets SET pipeline_version = ? WHERE id = ?`).run(version, id);
+    this.changed(id);
   }
 
   /** Mirror bookkeeping only: it is not activity on the Ticket, so updated_at is left alone. */
   setMirrorPending(id: string, since: string | null): void {
     this.db.prepare(`UPDATE tickets SET mirror_pending = ? WHERE id = ?`).run(since, id);
+    this.changed(id);
   }
 
   /** Queue bookkeeping only: not activity on the Ticket, so updated_at is left alone. */
   setRunnableSince(id: string, since: string | null): void {
     this.db.prepare(`UPDATE tickets SET runnable_since = ? WHERE id = ?`).run(since, id);
+    this.changed(id);
   }
 
   update(id: string, patch: Partial<Omit<TicketRow, "id" | "created_at">>, now: string = new Date().toISOString()): TicketRow {
     const entries = Object.entries({ ...patch, updated_at: now });
     const sets = entries.map(([k]) => `${k} = ?`).join(", ");
     this.db.prepare(`UPDATE tickets SET ${sets} WHERE id = ?`).run(...entries.map(([, v]) => v as string | number | null), id);
+    this.changed(id);
     return this.get(id)!;
   }
 }

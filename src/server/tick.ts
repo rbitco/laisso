@@ -32,10 +32,14 @@ export class Tick {
   private log: Logger;
   private work: () => Promise<TickChange[]>;
 
-  constructor(tickSeconds: number, log: Logger, work: () => Promise<TickChange[]>) {
+  private changed: () => void;
+
+  /** `changed` hears whenever `status()` would answer differently: a tick starting or ending, or the timer starting or stopping. */
+  constructor(tickSeconds: number, log: Logger, work: () => Promise<TickChange[]>, changed: () => void = () => undefined) {
     this.tickSeconds = tickSeconds;
     this.log = log;
     this.work = work;
+    this.changed = changed;
   }
 
   start(): void {
@@ -46,12 +50,14 @@ export class Tick {
       void this.run("timer");
     }, interval);
     this.timer.unref();
+    this.changed();
   }
 
   stop(): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     this.nextDue = null;
+    this.changed();
   }
 
   /** Run one tick now; a tick already in flight is joined, not doubled. */
@@ -68,7 +74,11 @@ export class Tick {
       this.lastTick = started;
       this.log.info("tick", { trigger, changes: changes.length, ms: Date.now() - started.getTime() });
       return { at: started.toISOString(), changes };
-    })().finally(() => (this.inFlight = null));
+    })().finally(() => {
+      this.inFlight = null;
+      this.changed();
+    });
+    this.changed();
     return this.inFlight;
   }
 
