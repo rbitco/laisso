@@ -155,6 +155,43 @@ stages:
     expect(await pipelineText(lasso, "work")).toBe(WORK);
   });
 
+  it("adds a Runner Stage in position alongside other edits, keeping every comment", async () => {
+    const lasso = await lassoWith();
+    const review = { name: "review", prompt: "Review the work.", skills: ["code-review"], artifact: null, human: true };
+    const after = await lasso.api<PipelineFile>("/api/pipelines/work", { method: "PATCH", body: json({ order: ["implement", review, "notes"], stages: { implement: { name: "build" } } }) });
+    expect(after.pipeline!.stages.map((s) => s.name)).toEqual(["build", "review", "notes"]);
+    expect(after.text).toBe(`# The work Pipeline. Keep this comment.
+runner: claude # the default Runner
+
+stages:
+  - name: build # first
+    prompt: Do the work.
+    artifact: commits-on-branch
+    budget: { attempts: 1 }
+
+  - name: review
+    prompt: Review the work.
+    skills: [ code-review ]
+    human: true
+
+  - name: notes
+    prompt: Write NOTES.md.
+    artifact: file NOTES.md
+`);
+    // A new first Stage takes the place of the old one without taking its comment.
+    const first = await lasso.api<PipelineFile>("/api/pipelines/work", { method: "PATCH", body: json({ order: [{ name: "plan", prompt: "Plan it." }, "build", "review", "notes"] }) });
+    expect(first.text).toContain("stages:\n  - name: plan\n    prompt: Plan it.\n\n  - name: build # first\n");
+  });
+
+  it("refuses a new Stage that repeats a name or has nothing to run, and leaves the file alone", async () => {
+    const lasso = await lassoWith();
+    const patch = (order: unknown) => lasso.api("/api/pipelines/work", { method: "PATCH", body: json({ order }) });
+    await expect(patch(["implement", { name: "notes", prompt: "Again." }, "notes"])).rejects.toThrow(/Pipeline work has two Stages named notes/);
+    await expect(patch(["implement", { name: "review" }, "notes"])).rejects.toThrow(/Pipeline work stage 2 needs a prompt, skills, or an action/);
+    await expect(patch(["implement", { prompt: "No name." }])).rejects.toThrow(/stage 2 needs a name/);
+    expect(await pipelineText(lasso, "work")).toBe(WORK);
+  });
+
   it("leaves a live Ticket on its Version when a Stage is removed", async () => {
     const lasso = await lassoWith();
     const ticket = await intake(lasso, "A");

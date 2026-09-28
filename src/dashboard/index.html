@@ -212,6 +212,8 @@
   .card.removed { border-style: dashed; opacity: 0.6; }
   .card.removed .fields { display: none; }
   .card.removed h3 .removed-note { display: inline; }
+  .card.fresh { border-color: var(--accent); }
+  .add-stage { justify-self: start; background: none; border-style: dashed; color: var(--muted); }
   dd .drift, .bar .drift { color: var(--amber); }
   [data-role="pipeline-version"] a, [data-role="live-versions"] a { color: var(--accent); }
   .card pre { margin: 0; white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
@@ -835,8 +837,8 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
     const runner = runnerSelect('runner', pipeline.runner);
     const spend = el('input', { name: 'spend', value: pipeline.budget.spend === undefined ? '' : String(pipeline.budget.spend), placeholder: 'global default' });
     form.appendChild(el('div', { class: 'card' }, [el('h3', { text: 'Pipeline' }), el('div', { class: 'fields' }, [field('runner', runner), field('spend per Ticket (USD)', spend)])]));
-    // The Stages as they will be saved: moves and removals wait for Save, and undo brings a Stage back as it was.
-    const stages = pipeline.stages.map((s) => stageCard(s, pipeline));
+    // The Stages as they will be saved: additions, moves and removals wait for Save, and undo brings a Stage back as it was.
+    const stages = pipeline.stages.map((s) => withTools(stageCard(s, pipeline)));
     const list = el('div', { class: 'stack', 'data-role': 'stage-list' });
     const draw = () => {
       const kept = stages.filter((c) => !c.removed).length;
@@ -845,10 +847,10 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
         card.down.style.visibility = i === stages.length - 1 ? 'hidden' : '';
         card.node.classList.toggle('removed', !!card.removed);
         card.remove.textContent = card.removed ? 'undo' : '✕';
-        card.remove.title = card.removed ? 'keep this Stage' : kept === 1 ? 'a Pipeline keeps at least one Stage' : 'remove this Stage on Save';
+        card.remove.title = card.removed ? 'keep this Stage' : kept === 1 ? 'a Pipeline keeps at least one Stage' : card.fresh ? 'drop this new Stage' : 'remove this Stage on Save';
         card.remove.disabled = !card.removed && kept === 1;
       });
-      list.replaceChildren(...stages.map((c) => c.node));
+      list.replaceChildren(...stages.flatMap((c) => [c.node, addButton(c)]));
     };
     const move = (card, by) => {
       const from = stages.indexOf(card);
@@ -856,19 +858,38 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
       stages.splice(from + by, 0, card);
       draw();
     };
-    for (const card of stages) {
-      card.up = el('button', { type: 'button', class: 'sm', 'data-role': 'move-up', title: 'run this Stage earlier', 'aria-label': 'move ' + card.name + ' up', text: '↑' });
-      card.down = el('button', { type: 'button', class: 'sm', 'data-role': 'move-down', title: 'run this Stage later', 'aria-label': 'move ' + card.name + ' down', text: '↓' });
+    // A new Runner Stage goes in after the card whose button was pressed, blank until the human fills it in.
+    function addButton(after) {
+      const add = el('button', { type: 'button', class: 'sm add-stage', 'data-role': 'add-stage', title: 'add a Stage here', text: '+ Stage' });
+      add.addEventListener('click', () => {
+        const card = withTools(stageCard(BLANK_STAGE, pipeline));
+        card.fresh = true;
+        card.node.classList.add('fresh');
+        stages.splice(stages.indexOf(after) + 1, 0, card);
+        draw();
+        card.node.querySelector('input[name="name"]').focus();
+      });
+      return add;
+    }
+    function withTools(card) {
+      const label = card.name || 'the new Stage';
+      card.up = el('button', { type: 'button', class: 'sm', 'data-role': 'move-up', title: 'run this Stage earlier', 'aria-label': 'move ' + label + ' up', text: '↑' });
+      card.down = el('button', { type: 'button', class: 'sm', 'data-role': 'move-down', title: 'run this Stage later', 'aria-label': 'move ' + label + ' down', text: '↓' });
       card.remove = el('button', { type: 'button', class: 'sm', 'data-role': 'remove-stage' });
       card.up.addEventListener('click', () => move(card, -1));
       card.down.addEventListener('click', () => move(card, 1));
-      card.remove.addEventListener('click', () => { card.removed = !card.removed; draw(); });
+      card.remove.addEventListener('click', () => {
+        if (card.fresh) stages.splice(stages.indexOf(card), 1);
+        else card.removed = !card.removed;
+        draw();
+      });
       card.node.querySelector('h3').append(el('span', { class: 'removed-note', text: 'removed' }), el('span', { class: 'tools' }, [card.up, card.down, card.remove]));
+      return card;
     }
     draw();
     form.appendChild(list);
     const button = el('button', { class: 'primary', type: 'submit', text: 'Save' });
-    form.appendChild(el('div', { class: 'bar' }, [button, el('span', { class: 'why', text: 'blank clears a field back to its default; ↑ ↓ and ✕ move and remove Stages on Save; add Stages as text' })]));
+    form.appendChild(el('div', { class: 'bar' }, [button, el('span', { class: 'why', text: 'blank clears a field back to its default; + Stage, ↑ ↓ and ✕ add, move and remove Stages on Save' })]));
     form.addEventListener('submit', (ev) => {
       ev.preventDefault();
       save(button, async () => {
@@ -876,16 +897,20 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
         changed(patch, 'runner', pipeline.runner, runner.value);
         changed(patch.budget, 'spend', pipeline.budget.spend === undefined ? null : pipeline.budget.spend, numberOrNull(spend, 'spend'));
         const kept = stages.filter((c) => !c.removed);
-        for (const card of kept) { const sp = card.patch(); if (Object.keys(sp).length) patch.stages[card.name] = sp; }
+        for (const card of kept) { if (card.fresh) continue; const sp = card.patch(); if (Object.keys(sp).length) patch.stages[card.name] = sp; }
         prune(patch);
-        const order = kept.map((c) => c.name);
-        if (order.join('\n') !== pipeline.stages.map((s) => s.name).join('\n')) patch.order = order;
+        // A new Stage goes in the order as its fields: what its card sets, against a blank Stage.
+        const order = kept.map((c) => (c.fresh ? c.patch() : c.name));
+        if (kept.some((c) => c.fresh) || order.join('\n') !== pipeline.stages.map((s) => s.name).join('\n')) patch.order = order;
         if (!Object.keys(patch).length) { showNotice('nothing changed'); return false; }
         await api('/api/pipelines/' + encodeURIComponent(p.name), { method: 'PATCH', body: JSON.stringify(patch) });
       }, () => { showNotice('saved ' + p.name); showPipelines(p.name); });
     });
     return form;
   }
+
+  // What a new Runner Stage starts as: every field at its default.
+  const BLANK_STAGE = { kind: 'runner', name: '', prompt: null, skills: [], runner: null, human: false, advance: true, artifact: null, repeat: null, budget: {} };
 
   function stageCard(s, pipeline) {
     if (s.kind === 'action') {
@@ -905,7 +930,7 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
     const attempts = el('input', { name: 'attempts', value: s.budget.attempts === undefined ? '' : String(s.budget.attempts), placeholder: 'default' });
     const wallTime = el('input', { name: 'wallTime', value: s.budget.wallTime || '', placeholder: '30m' });
     const node = el('div', { class: 'card' }, [
-      el('h3', {}, [el('span', { class: 'kind', text: s.human ? 'human' : 'runner' }), s.name]),
+      el('h3', {}, [el('span', { class: 'kind', text: s.human ? 'human' : 'runner' }), s.name || 'new Stage']),
       el('div', { class: 'fields' }, [field('name', name), field('runner', runner), field('artifact', artifact), field('skills', skills), field('prompt', prompt, true), humanLabel, advanceLabel, repeatLabel, field('rounds', rounds), field('attempts', attempts), field('wall time', wallTime)]),
     ]);
     return {
