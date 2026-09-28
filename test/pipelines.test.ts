@@ -183,6 +183,23 @@ stages:
     expect(first.text).toContain("stages:\n  - name: plan\n    prompt: Plan it.\n\n  - name: build # first\n");
   });
 
+  it("adds a tracker.transition action Stage in position, and refuses one without a status", async () => {
+    const lasso = await lassoWith();
+    await expect(lasso.api("/api/pipelines/work", { method: "PATCH", body: json({ order: ["implement", { action: "tracker.transition", status: null }, "notes"] }) })).rejects.toThrow(/tracker.transition needs a status/);
+    const after = await lasso.api<PipelineFile>("/api/pipelines/work", { method: "PATCH", body: json({ order: ["implement", { action: "tracker.transition", status: "In Review" }, "notes"] }) });
+    expect(after.pipeline!.stages.map((s) => s.name)).toEqual(["implement", "transition-in-review", "notes"]);
+    expect(after.text).toContain(`    budget: { attempts: 1 }
+
+  - action: tracker.transition
+    status: In Review
+
+  - name: notes
+`);
+    // Saved, it is an ordinary action Stage: moved by the name it is known by.
+    const moved = await lasso.api<PipelineFile>("/api/pipelines/work", { method: "PATCH", body: json({ order: ["implement", "notes", "transition-in-review"] }) });
+    expect(moved.pipeline!.stages.map((s) => s.name)).toEqual(["implement", "notes", "transition-in-review"]);
+  });
+
   it("refuses a new Stage that repeats a name or has nothing to run, and leaves the file alone", async () => {
     const lasso = await lassoWith();
     const patch = (order: unknown) => lasso.api("/api/pipelines/work", { method: "PATCH", body: json({ order }) });

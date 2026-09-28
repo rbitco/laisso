@@ -213,7 +213,8 @@
   .card.removed .fields { display: none; }
   .card.removed h3 .removed-note { display: inline; }
   .card.fresh { border-color: var(--accent); }
-  .add-stage { justify-self: start; background: none; border-style: dashed; color: var(--muted); }
+  .add-stage { justify-self: start; display: flex; gap: 6px; }
+  .add-stage button { background: none; border-style: dashed; color: var(--muted); }
   dd .drift, .bar .drift { color: var(--amber); }
   [data-role="pipeline-version"] a, [data-role="live-versions"] a { color: var(--accent); }
   .card pre { margin: 0; white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
@@ -858,18 +859,27 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
       stages.splice(from + by, 0, card);
       draw();
     };
-    // A new Runner Stage goes in after the card whose button was pressed, blank until the human fills it in.
+    // A new Stage goes in after the card whose button was pressed, blank until the human fills it in; "+ Stage" asks which kind first.
     function addButton(after) {
-      const add = el('button', { type: 'button', class: 'sm add-stage', 'data-role': 'add-stage', title: 'add a Stage here', text: '+ Stage' });
-      add.addEventListener('click', () => {
-        const card = withTools(stageCard(BLANK_STAGE, pipeline));
-        card.fresh = true;
-        card.node.classList.add('fresh');
-        stages.splice(stages.indexOf(after) + 1, 0, card);
-        draw();
-        card.node.querySelector('input[name="name"]').focus();
+      const box = el('div', { class: 'add-stage' });
+      const choose = el('button', { type: 'button', class: 'sm', 'data-role': 'add-stage', title: 'add a Stage here', text: '+ Stage' });
+      const kinds = [['Runner Stage', 'add-runner', BLANK_STAGE], ['action Stage', 'add-action', BLANK_ACTION]].map(([text, role, blank]) => {
+        const b = el('button', { type: 'button', class: 'sm', 'data-role': role, text: '+ ' + text });
+        b.addEventListener('click', () => {
+          const card = withTools(stageCard(blank, pipeline, true));
+          card.fresh = true;
+          card.node.classList.add('fresh');
+          stages.splice(stages.indexOf(after) + 1, 0, card);
+          draw();
+          card.node.querySelector('input, select').focus();
+        });
+        return b;
       });
-      return add;
+      const cancel = el('button', { type: 'button', class: 'sm', 'data-role': 'add-cancel', title: 'add nothing', text: 'cancel' });
+      choose.addEventListener('click', () => box.replaceChildren(...kinds, cancel));
+      cancel.addEventListener('click', () => box.replaceChildren(choose));
+      box.append(choose);
+      return box;
     }
     function withTools(card) {
       const label = card.name || 'the new Stage';
@@ -909,14 +919,32 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
     return form;
   }
 
-  // What a new Runner Stage starts as: every field at its default.
+  // What a new Stage starts as: every field at its default.
   const BLANK_STAGE = { kind: 'runner', name: '', prompt: null, skills: [], runner: null, human: false, advance: true, artifact: null, repeat: null, budget: {} };
+  const BLANK_ACTION = { kind: 'action', name: '', action: 'tracker.transition', status: '' };
+  // Lasso's built-in action catalogue and each action's fields; the Pipeline parser (parseStage) is the authority.
+  const ACTIONS = { 'tracker.transition': [['status', 'tracker status, as In Review']] };
 
-  function stageCard(s, pipeline) {
+  function stageCard(s, pipeline, fresh) {
     if (s.kind === 'action') {
-      const status = el('input', { name: 'status', value: s.status });
-      const node = el('div', { class: 'card' }, [el('h3', {}, [el('span', { class: 'kind', text: 'action' }), s.action]), el('div', { class: 'fields' }, [field('status', status)])]);
-      return { name: s.name, node, patch() { const patch = {}; changed(patch, 'status', s.status, status.value.trim()); return patch; } };
+      // A new action Stage picks its action from the catalogue and shows that action's fields; a saved one keeps its action.
+      const action = select('action', Object.keys(ACTIONS), s.action);
+      const inputs = {};
+      const fields = el('div', { class: 'fields' });
+      const drawFields = () => {
+        for (const [key, placeholder] of ACTIONS[action.value] || []) inputs[key] = inputs[key] || el('input', { name: key, value: s[key] || '', placeholder });
+        fields.replaceChildren(...(fresh ? [field('action', action)] : []), ...(ACTIONS[action.value] || []).map(([key]) => field(key, inputs[key])));
+      };
+      action.addEventListener('change', drawFields);
+      drawFields();
+      const node = el('div', { class: 'card' }, [el('h3', {}, [el('span', { class: 'kind', text: 'action' }), fresh ? 'new Stage' : s.action]), fields]);
+      return {
+        name: s.name, node,
+        patch() {
+          if (fresh) return { action: action.value, ...Object.fromEntries((ACTIONS[action.value] || []).map(([key]) => [key, inputs[key].value.trim() || null])) };
+          const patch = {}; changed(patch, 'status', s.status, inputs.status.value.trim()); return patch;
+        },
+      };
     }
     const name = el('input', { name: 'name', value: s.name });
     const prompt = el('textarea', { name: 'prompt' }); prompt.value = s.prompt || '';
