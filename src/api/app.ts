@@ -3,6 +3,7 @@ import { ConfigError, patchConfigText, applyLive, RESTART_KEYS, parseConfig, typ
 import type { LassoHome } from "../server/home.ts";
 import type { Tick } from "../server/tick.ts";
 import type { Tickets, TicketRow } from "../store/tickets.ts";
+import type { PipelineVersions } from "../store/versions.ts";
 import type { Sessions } from "../store/sessions.ts";
 import type { Feedback } from "../store/feedback.ts";
 import type { Runs } from "../session/runs.ts";
@@ -13,7 +14,7 @@ import type { Exits, ExtendRequest } from "../session/exits.ts";
 import type { Budgets } from "../budget/budgets.ts";
 import type { Queue } from "../session/queue.ts";
 import { Intake, IntakeError, type IntakeRequest } from "../intake/intake.ts";
-import { loadPipeline, PipelineError, type Pipeline } from "../pipeline/load.ts";
+import { PipelineError, type Pipeline } from "../pipeline/load.ts";
 import { PipelineFiles } from "../pipeline/files.ts";
 import { dashboardHtml, metroScript } from "../dashboard/page.ts";
 import { ticketView, ticketDetail, sessionView, sortForLedger, pipelineListing, pipelineFileView, type ViewContext, type IntakeResult, type ConfigFile } from "./views.ts";
@@ -25,6 +26,7 @@ export interface AppDeps {
   home: LassoHome;
   tick: Tick;
   tickets: Tickets;
+  versions: PipelineVersions;
   sessions: Sessions;
   feedback: Feedback;
   runs: Runs;
@@ -39,13 +41,13 @@ export interface AppDeps {
 /** The one JSON API under /api. The dashboard page and the CLI are both clients of it. */
 export function createApp(deps: AppDeps): Hono {
   const app = new Hono();
-  const intake = new Intake({ config: deps.config, home: deps.home, tickets: deps.tickets });
+  const intake = new Intake({ config: deps.config, home: deps.home, tickets: deps.tickets, versions: deps.versions });
   const baseUrl = `http://localhost:${deps.config.port}`;
   const views: Omit<ViewContext, "queuePosition"> = {
     baseUrl,
     pipelineFor: (ticket: TicketRow): Pipeline | null => {
       try {
-        return loadPipeline(deps.home.pipelinesDir, ticket.pipeline);
+        return deps.versions.forTicket(ticket, deps.home.pipelinesDir);
       } catch {
         return null;
       }

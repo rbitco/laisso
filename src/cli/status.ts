@@ -43,7 +43,7 @@ function renderDetail(t: TicketDetail): string {
     `repo:      ${t.repo}`,
     `branch:    ${t.branch}`,
     `worktree:  ${t.worktree}`,
-    `pipeline:  ${t.pipeline}`,
+    `pipeline:  ${t.pipeline}${t.pipelineVersion === null ? "" : " v" + t.pipelineVersion}`,
     `stage:     ${t.stage.label} (${t.stage.index + 1} of ${t.stage.total})`,
     `pr:        ${t.pr ?? "none"}`,
     `budget:    ${budgetLine(t)}`,

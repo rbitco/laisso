@@ -141,4 +141,17 @@ const MIGRATIONS: Array<(db: DatabaseSync) => void> = [
   (db) => {
     db.exec(`ALTER TABLE tickets ADD COLUMN ended_at TEXT;`);
   },
+  // Pipeline Versions (LASSO-42, ADR 0009): a Ticket runs the frozen copy it was pinned to at Intake.
+  (db) => {
+    db.exec(`
+      CREATE TABLE pipeline_versions (
+        pipeline TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        definition TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (pipeline, version)
+      );
+      ALTER TABLE tickets ADD COLUMN pipeline_version INTEGER;
+    `);
+  },
 ];

@@ -20,7 +20,7 @@ import { Exits } from "../session/exits.ts";
 import { Budgets } from "../budget/budgets.ts";
 import { Queue } from "../session/queue.ts";
 import { Teardown } from "../session/teardown.ts";
-import { loadPipeline } from "../pipeline/load.ts";
+import { PipelineVersions } from "../store/versions.ts";
 import { Tick } from "./tick.ts";
 import { createApp } from "../api/app.ts";
 
@@ -50,6 +50,8 @@ export async function serve(opts: ServeOptions): Promise<number> {
 
   const store = new Store(home.dbFile);
   const tickets = new Tickets(store.db);
+  const versions = new PipelineVersions(store.db);
+  versions.pinUnpinned(tickets, home.pipelinesDir);
   const sessions = new Sessions(store.db);
   const feedback = new Feedback(store.db);
   const notifier = createNotifier({ config: config.notifications, log, baseUrl: `http://localhost:${config.port}` });
@@ -59,7 +61,7 @@ export async function serve(opts: ServeOptions): Promise<number> {
     log,
     pipelineFor: (ticket) => {
       try {
-        return loadPipeline(home.pipelinesDir, ticket.pipeline);
+        return versions.forTicket(ticket, home.pipelinesDir);
       } catch {
         return null;
       }
@@ -67,7 +69,7 @@ export async function serve(opts: ServeOptions): Promise<number> {
   });
   const prs = new PullRequests(log);
   const teardown = new Teardown({ config, home, tickets, log, prs });
-  const progress: Progress = new Progress({ home, tickets, sessions, log, notifier, mirror, prProbe: (ticket) => () => review.probe(ticket), teardown });
+  const progress: Progress = new Progress({ home, tickets, versions, sessions, log, notifier, mirror, prProbe: (ticket) => () => review.probe(ticket), teardown });
   const review: Review = new Review({ tickets, sessions, feedback, progress, prs, log });
   const terminal = new Terminal({ home, sessions, log });
   const budgets = new Budgets({ config, sessions });
@@ -77,7 +79,7 @@ export async function serve(opts: ServeOptions): Promise<number> {
   // One tick: owed mirror pushes, then action Stages, then the PR poll (a Round it makes due starts below), then headless starts, then the retention sweep.
   const tick = new Tick(config.tick, log, async () => [...(await mirror.retryPending()), ...(await actions.runDue()), ...(await review.poll()), ...(await runs.startRunnable()), ...(await teardown.sweep())]);
   const exits = new Exits({ tickets, sessions, log, progress, runs, terminal, budgets, tick, teardown });
-  const app = createApp({ config, home, tick, tickets, sessions, feedback, runs, progress, terminal, exits, budgets, queue, version: VERSION });
+  const app = createApp({ config, home, tick, tickets, versions, sessions, feedback, runs, progress, terminal, exits, budgets, queue, version: VERSION });
 
   if (defaults.wroteConfig) log.info("config.written", { file: home.configFile });
   if (defaults.wrotePipeline) log.info("pipeline.written", { name: "default" });

@@ -1,9 +1,10 @@
 import type { LassoHome } from "../server/home.ts";
 import type { Logger } from "../server/log.ts";
 import type { Tickets, TicketRow } from "../store/tickets.ts";
+import type { PipelineVersions } from "../store/versions.ts";
 import type { Sessions, EndedReason } from "../store/sessions.ts";
 import type { Notifier } from "../notify/notifier.ts";
-import { loadPipeline, type ActionStage, type Pipeline, type RunnerStage, type Stage } from "../pipeline/load.ts";
+import { type ActionStage, type Pipeline, type RunnerStage, type Stage } from "../pipeline/load.ts";
 import type { Mirror } from "../tracker/mirror.ts";
 import { checkArtifact, type PrProbe } from "../artifact/check.ts";
 import type { Teardown } from "./teardown.ts";
@@ -31,6 +32,7 @@ export interface Current {
 export interface ProgressDeps {
   home: LassoHome;
   tickets: Tickets;
+  versions: PipelineVersions;
   sessions: Sessions;
   log: Logger;
   notifier: Notifier;
@@ -56,7 +58,7 @@ export class Progress {
   current(ticket: TicketRow): Current | { problem: string } {
     let pipeline: Pipeline;
     try {
-      pipeline = loadPipeline(this.deps.home.pipelinesDir, ticket.pipeline);
+      pipeline = this.deps.versions.forTicket(ticket, this.deps.home.pipelinesDir);
     } catch (error) {
       return { problem: error instanceof Error ? error.message : String(error) };
     }

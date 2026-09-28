@@ -663,7 +663,7 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
     else left.appendChild(el('div', { class: 'panel muted', text: 'No Session yet.' }));
     left.appendChild(el('dl', {}, [
       el('dt', { text: 'worktree' }), el('dd', { text: t.worktree }),
-      el('dt', { text: 'pipeline' }), el('dd', { text: t.pipeline }),
+      el('dt', { text: 'pipeline' }), el('dd', { text: t.pipeline + (t.pipelineVersion === null ? '' : ' v' + t.pipelineVersion) }),
       el('dt', { text: 'id' }), el('dd', { text: t.id }),
     ]));
     const right = el('div', { class: 'stack' }, [

@@ -191,7 +191,7 @@ stages:
 ```
 
   The prompt text per Stage is in the resolution of "Default Pipeline contents and v1 artifact and action catalogues" (LASSO-18). Implement commits only; Document pushes and opens the PR; Code Review posts one marked PR review; Review is prompt-only and receives the Feedback snapshot each Round.
-- Renaming or deleting a Pipeline under a live Ticket leaves the snapshotted running Stage intact; the next advance Flags with a missing-Pipeline reason.
+- Intake pins each Ticket to a Version of its Pipeline (ADR 0009), so renaming, editing, or deleting the file never reaches a live Ticket. Only a Ticket from before Versions whose file could not be pinned still reads the file, and Flags with a missing-Pipeline reason when it is gone.
 
 Runner adapters (ADR 0003)
 

@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import type { Config, RepoConfig } from "../server/config.ts";
 import type { LassoHome } from "../server/home.ts";
 import { shortId, type Tickets, type TicketRow, type NewTicket } from "../store/tickets.ts";
+import type { PipelineVersions } from "../store/versions.ts";
 import { listPipelines, loadPipeline, PipelineError, type Pipeline } from "../pipeline/load.ts";
 import { Git } from "../git.ts";
 import { ulid } from "../ulid.ts";
@@ -29,6 +30,7 @@ export interface IntakeDeps {
   config: Config;
   home: LassoHome;
   tickets: Tickets;
+  versions: PipelineVersions;
 }
 
 /** Intake: turn a tracker reference or a prompt into a Ticket bound to a repo, a Pipeline, and a branch in its own worktree. */
@@ -93,7 +95,7 @@ export class Intake {
     }
 
     const id = ulid();
-    let row: Omit<NewTicket, "branch" | "worktree">;
+    let row: Omit<NewTicket, "pipeline_version" | "branch" | "worktree">;
     let branch: string;
     if (detection.kind === "prompt") {
       row = { id, repo: repoName, reference: null, origin: "prompt", prompt: input, title: promptTitle(input), body: null, pipeline: pipeline.name, stage: pipeline.stages[0]!.name };
@@ -123,7 +125,8 @@ export class Intake {
     }
 
     try {
-      const ticket = tickets.insert({ ...row, branch, worktree });
+      // Pinned last, so a refused Intake numbers no Version.
+      const ticket = tickets.insert({ ...row, pipeline_version: this.deps.versions.pin(pipeline), branch, worktree });
       return { ticket, branchExisted: existed };
     } catch (error) {
       await git.removeWorktree(worktree).catch(() => undefined);

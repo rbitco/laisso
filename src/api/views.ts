@@ -54,6 +54,8 @@ export interface TicketView {
   branch: string;
   worktree: string;
   pipeline: string;
+  /** The Version of the Pipeline the Ticket runs (ADR 0009); null for a Ticket from before Versions that could not be pinned. */
+  pipelineVersion: number | null;
   stage: StageView;
   state: TicketRow["state"];
   flag: { at: string; reason: string; detail: string | null } | null;
@@ -224,6 +226,7 @@ export function ticketView(ticket: TicketRow, ctx: ViewContext): TicketView {
     branch: ticket.branch,
     worktree: ticket.worktree,
     pipeline: ticket.pipeline,
+    pipelineVersion: ticket.pipeline_version,
     stage: {
       name: ticket.stage,
       kind: stage?.kind ?? "runner",

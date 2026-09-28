@@ -11,6 +11,8 @@ export interface TicketRow {
   title: string;
   body: string | null;
   pipeline: string;
+  /** The Version of the Pipeline this Ticket runs (ADR 0009); null only for a Ticket from before Versions whose file could not be pinned. */
+  pipeline_version: number | null;
   stage: string;
   state: TicketState;
   flagged_at: string | null;
@@ -47,7 +49,7 @@ export function shortId(id: string): string {
   return id.slice(-8);
 }
 
-export type NewTicket = Pick<TicketRow, "id" | "repo" | "reference" | "origin" | "prompt" | "title" | "body" | "pipeline" | "stage" | "branch" | "worktree">;
+export type NewTicket = Pick<TicketRow, "id" | "repo" | "reference" | "origin" | "prompt" | "title" | "body" | "pipeline" | "pipeline_version" | "stage" | "branch" | "worktree">;
 
 /** Current-state rows for Tickets; Sessions are the history (spec: Store). */
 export class Tickets {
@@ -60,10 +62,10 @@ export class Tickets {
   insert(ticket: NewTicket, now: string = new Date().toISOString()): TicketRow {
     this.db
       .prepare(
-        `INSERT INTO tickets (id, repo, reference, origin, prompt, title, body, pipeline, stage, state, branch, worktree, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)`,
+        `INSERT INTO tickets (id, repo, reference, origin, prompt, title, body, pipeline, pipeline_version, stage, state, branch, worktree, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)`,
       )
-      .run(ticket.id, ticket.repo, ticket.reference, ticket.origin, ticket.prompt, ticket.title, ticket.body, ticket.pipeline, ticket.stage, ticket.branch, ticket.worktree, now, now);
+      .run(ticket.id, ticket.repo, ticket.reference, ticket.origin, ticket.prompt, ticket.title, ticket.body, ticket.pipeline, ticket.pipeline_version, ticket.stage, ticket.branch, ticket.worktree, now, now);
     return this.get(ticket.id)!;
   }
 
@@ -86,6 +88,16 @@ export class Tickets {
   list(opts: { all?: boolean } = {}): TicketRow[] {
     const sql = opts.all ? `SELECT * FROM tickets ORDER BY created_at DESC` : `SELECT * FROM tickets WHERE state = 'active' ORDER BY created_at DESC`;
     return this.db.prepare(sql).all() as unknown as TicketRow[];
+  }
+
+  /** Tickets from before Pipeline Versions, not yet pinned to one. */
+  unpinned(): TicketRow[] {
+    return this.db.prepare(`SELECT * FROM tickets WHERE pipeline_version IS NULL`).all() as unknown as TicketRow[];
+  }
+
+  /** Migration bookkeeping only: not activity on the Ticket, so updated_at is left alone. */
+  pinVersion(id: string, version: number): void {
+    this.db.prepare(`UPDATE tickets SET pipeline_version = ? WHERE id = ?`).run(version, id);
   }
 
   /** Mirror bookkeeping only: it is not activity on the Ticket, so updated_at is left alone. */

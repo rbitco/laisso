@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { startLassoWithRepos, startLasso, waitFor, claudeFixture, type Lasso } from "./harness.ts";
+import { startLassoWithRepos, startLasso, waitFor, claudeFixture, runCli, type Lasso } from "./harness.ts";
 import type { TicketDetail, IntakeResult } from "../src/api/views.ts";
 import type { PipelineFile, PipelineListing, ConfigFile } from "../src/api/views.ts";
 import type { TickChange } from "../src/server/tick.ts";
@@ -136,30 +136,86 @@ describe("Pipeline files", () => {
     await expect(lasso.api("/api/tickets", { method: "POST", body: json({ input: "x", repo: "app", pipeline: "broken" }) })).rejects.toThrow(/needs a prompt, skills, or an action/);
   });
 
-  it("Flags pipeline.missing at the next advance when the Pipeline is deleted under a running Ticket", async () => {
+});
+
+// Seam two: a Ticket runs the Version of its Pipeline it was pinned to at Intake (LASSO-42, ADR 0009).
+describe("Pipeline Versions", () => {
+  const committing = { commands: [["git", "commit", "-q", "--allow-empty", "-m", "work"]], stdout: claudeFixture("success.json") };
+  const launchedWith = async (lasso: Lasso, text: string) => (await lasso.runner.calls()).some((c) => c.argv.some((a) => a.includes(text)));
+
+  it("numbers a Version only when Intake meets content that differs from the last", async () => {
     const lasso = await lassoWith();
-    await lasso.runner.script({ delayMs: 800, commands: [["git", "commit", "-q", "--allow-empty", "-m", "work"]], stdout: claudeFixture("success.json") });
-    const ticket = await intake(lasso, "A");
-    await checkNow(lasso);
-    expect((await detailOf(lasso, ticket.id)).display.state).toBe("running");
-    await lasso.api("/api/pipelines/work", { method: "DELETE" });
-    // The running Stage was snapshotted: the Session still ends on its own terms.
-    const flagged = await waitFor(async () => { const d = await detailOf(lasso, ticket.id); return d.flag ? d : null; }, "the Ticket to be Flagged");
-    expect(flagged.flag).toMatchObject({ reason: "pipeline.missing", detail: expect.stringMatching(/Pipeline work does not exist/) });
-    expect(flagged.session).toMatchObject({ stage: "implement", outcome: "succeeded" });
-    expect(flagged.stage.name).toBe("implement");
-    expect(flagged.display.state).toBe("flagged");
+    const a = await intake(lasso, "A");
+    const b = await intake(lasso, "B");
+    expect((await detailOf(lasso, a.id)).pipelineVersion).toBe(1);
+    expect((await detailOf(lasso, b.id)).pipelineVersion).toBe(1);
+    // An edit no Ticket is bound to gets no number of its own.
+    await lasso.api("/api/pipelines/work", { method: "PATCH", body: json({ stages: { implement: { prompt: "Do it once." } } }) });
+    await lasso.api("/api/pipelines/work", { method: "PATCH", body: json({ stages: { implement: { prompt: "Do it twice." } } }) });
+    const c = await intake(lasso, "C");
+    expect((await detailOf(lasso, c.id)).pipelineVersion).toBe(2);
+    expect((await detailOf(lasso, a.id)).pipelineVersion).toBe(1);
+    const status = await runCli(["status", c.id], lasso);
+    expect(status.stdout).toMatch(/^pipeline: +work v2$/m);
   });
 
-  it("Flags pipeline.missing at the next advance when the running Stage was renamed", async () => {
+  it("runs the pinned prompt and Budget after the file is edited", async () => {
     const lasso = await lassoWith();
-    await lasso.runner.script({ delayMs: 800, commands: [["git", "commit", "-q", "--allow-empty", "-m", "work"]], stdout: claudeFixture("success.json") });
+    await lasso.runner.script(committing);
+    const ticket = await intake(lasso, "A");
+    await lasso.api("/api/pipelines/work", { method: "PATCH", body: json({ stages: { implement: { prompt: "Edited prompt.", budget: { attempts: 5 } } } }) });
+    expect((await detailOf(lasso, ticket.id)).budget.attempts).toMatchObject({ limit: 1, source: "pipeline" });
+    await checkNow(lasso);
+    await waitFor(async () => ((await detailOf(lasso, ticket.id)).stage.name === "notes" ? true : null), "the Ticket to reach notes");
+    expect(await launchedWith(lasso, "Do the work.")).toBe(true);
+    expect(await launchedWith(lasso, "Edited prompt.")).toBe(false);
+  });
+
+  it("carries on with its Version when the Pipeline is deleted under it", async () => {
+    const lasso = await lassoWith();
+    await lasso.runner.script({ delayMs: 800, ...committing });
+    const deleted = await intake(lasso, "A");
+    await checkNow(lasso);
+    await lasso.api("/api/pipelines/work", { method: "DELETE" });
+    const moved = await waitFor(async () => { const d = await detailOf(lasso, deleted.id); return d.stage.name === "notes" ? d : null; }, "the Ticket to reach notes");
+    expect(moved.flag).toBeNull();
+    expect(moved.stages.map((s) => s.name)).toEqual(["implement", "notes"]);
+    expect(moved.pipeline).toBe("work");
+    expect(moved.pipelineVersion).toBe(1);
+  });
+
+  it("carries on with its Version when the running Stage is renamed in the file", async () => {
+    const lasso = await lassoWith();
+    await lasso.runner.script({ delayMs: 800, ...committing });
     const ticket = await intake(lasso, "A");
     await checkNow(lasso);
     await lasso.api("/api/pipelines/work", { method: "PATCH", body: json({ stages: { implement: { name: "build" } } }) });
-    const flagged = await waitFor(async () => { const d = await detailOf(lasso, ticket.id); return d.flag ? d : null; }, "the Ticket to be Flagged");
-    expect(flagged.flag).toMatchObject({ reason: "pipeline.missing", detail: "Pipeline work no longer has a Stage named implement" });
-    expect(flagged.session).toMatchObject({ stage: "implement", outcome: "succeeded" });
+    const moved = await waitFor(async () => { const d = await detailOf(lasso, ticket.id); return d.stage.name === "notes" ? d : null; }, "the Ticket to reach notes");
+    expect(moved.flag).toBeNull();
+  });
+
+  it("pins Tickets from before Versions to their file as v1 on start, leaving one whose file is gone unpinned", async () => {
+    const lasso = await lassoWith({ work: WORK, gone: WORK });
+    const kept = await intake(lasso, "A");
+    const orphan = await lasso.api<IntakeResult>("/api/tickets", { method: "POST", body: json({ input: "B", repo: "app", pipeline: "gone" }) });
+    await lasso.stop();
+    // Rewind the store to before Versions: no Version rows, no pins.
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(path.join(lasso.home, "lasso.db"));
+    db.exec("DELETE FROM pipeline_versions; UPDATE tickets SET pipeline_version = NULL;");
+    db.close();
+    const { rm } = await import("node:fs/promises");
+    await rm(path.join(lasso.home, "pipelines", "gone.yaml"));
+
+    const again = await startLasso({ home: lasso.home, pathDir: lasso.pathDir, port: lasso.port });
+    running.push(again);
+    expect((await detailOf(again, kept.id)).pipelineVersion).toBe(1);
+    expect((await detailOf(again, orphan.id)).pipelineVersion).toBeNull();
+    // An unpinned Ticket still reads its file, so a missing one Flags as before.
+    await again.runner.script(committing);
+    await checkNow(again);
+    const flagged = await waitFor(async () => { const d = await detailOf(again, orphan.id); return d.flag ? d : null; }, "the orphan to be Flagged");
+    expect(flagged.flag).toMatchObject({ reason: "pipeline.missing", detail: expect.stringMatching(/Pipeline gone does not exist/) });
   });
 });
 
