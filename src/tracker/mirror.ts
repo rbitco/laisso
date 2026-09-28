@@ -51,6 +51,16 @@ export class Mirror {
     return next;
   }
 
+  /** Push without holding up the caller: a Trigger answers before the tracker CLI does. A failure still lands as pending. */
+  pushSoon(ticketId: string): void {
+    void this.push(ticketId);
+  }
+
+  /** Wait for every push under way, so shutdown closes the store only after they have recorded their result. */
+  async settle(): Promise<void> {
+    while (this.chains.size) await Promise.allSettled([...this.chains.values()]);
+  }
+
   private async pushNow(ticketId: string): Promise<PushResult> {
     const ticket = this.deps.tickets.get(ticketId);
     if (!ticket?.reference) return "skipped";

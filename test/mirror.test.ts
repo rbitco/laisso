@@ -55,9 +55,9 @@ describe("the tracker mirror", () => {
     // A stale label from an earlier run and a human's own label: the first is overwritten, the second kept.
     await lasso.tracker.reply({ tool: "acli", match: ["workitem view APP-12", "--fields labels"], stdout: jiraLabels("lasso:review", "mine"), once: true });
 
+    // Intake answers before the tracker push finishes; the push follows in the background.
     const ticket = await admit(lasso, "APP-12");
-    expect(ticket.mirrorPending).toBe(false);
-    expect(argsOf(await lasso.tracker.calls())).toEqual([
+    expect(argsOf(await callsSince(lasso, 5))).toEqual([
       "jira workitem view APP-12 --fields summary,description --json",
       'jira workitem search --jql project = APP AND status = "In Progress" --limit 1 --json',
       'jira workitem search --jql project = APP AND status = "Done" --limit 1 --json',
@@ -71,8 +71,7 @@ describe("the tracker mirror", () => {
     const skipped = await pull(lasso, ticket.id, "skip");
     expect(skipped.stage).toMatchObject({ name: "transition-in-progress", label: "In Progress", kind: "action" });
     expect(skipped.display).toMatchObject({ state: "ready", why: "In Progress starts on the next tick" });
-    expect(skipped.mirrorPending).toBe(false);
-    expect(argsOf(await lasso.tracker.calls())).toEqual(["jira workitem view APP-12 --fields labels --json"]);
+    expect(argsOf(await callsSince(lasso, 1))).toEqual(["jira workitem view APP-12 --fields labels --json"]);
     await lasso.tracker.clearCalls();
     await lasso.tracker.reply({ tool: "acli", match: ["workitem view APP-12", "--fields labels"], stdout: jiraLabels("mine", "lasso:grill"), once: true });
     await lasso.tracker.reply({ tool: "acli", match: ["workitem view APP-12", "--fields labels"], stdout: jiraLabels("mine", "lasso:implement") });
@@ -114,7 +113,7 @@ describe("the tracker mirror", () => {
     await lasso.tracker.reply({ tool: "acli", match: ["workitem view APP-12", "--fields labels"], stdout: jiraLabels("lasso:elsewhere") });
 
     const ticket = await admit(lasso, "APP-12");
-    expect(ticket.mirrorPending).toBe(true);
+    await waitFor(async () => ((await detailOf(lasso, ticket.id)).mirrorPending ? true : null), "the failed push to go pending");
     await lasso.tracker.clearCalls();
 
     const cli = await runCli(["status", ticket.id], lasso);
@@ -160,8 +159,7 @@ stages:
     await lasso.tracker.reply({ tool: "gh", match: ["issue close 7"], stdout: "" });
 
     const ticket = await admit(lasso, "acme/web#7");
-    expect(ticket.mirrorPending).toBe(false);
-    expect(argsOf(await lasso.tracker.calls())).toEqual([
+    expect(argsOf(await callsSince(lasso, 5))).toEqual([
       "issue view 7 --repo acme/web --json title,body",
       "issue view 7 --repo acme/web --json labels",
       "issue edit 7 --repo acme/web --add-label lasso:implement",
@@ -186,6 +184,8 @@ stages:
     ]);
     const ticket = await admit(lasso, "APP-12");
     await pull(lasso, ticket.id, "skip");
+    // Intake's fetch and push (five calls), then Skip's push (two), before the slate is wiped.
+    await callsSince(lasso, 7);
     await lasso.tracker.clearCalls();
 
     const tick = await checkNow(lasso);
@@ -212,6 +212,8 @@ stages:
     const ticket = await admit(lasso, "APP-12");
     await lasso.runner.script({ hang: true });
     await pull(lasso, ticket.id, "skip");
+    // Intake's fetch and push (four calls: the label is already right), then Skip's push (one).
+    await callsSince(lasso, 5);
     await checkNow(lasso);
     const headless = (d: TicketDetail) => d.sessions.filter((s) => s.mode === "headless").map((s) => [s.ordinal, s.running, s.endedReason]);
     await waitFor(async () => ((await detailOf(lasso, ticket.id)).session?.mode === "headless" ? true : null), "implement to start");
@@ -235,6 +237,7 @@ stages:
     const { lasso } = await jiraLasso([{ tool: "acli", match: ["workitem view APP-12", "--fields labels"], stdout: jiraLabels("lasso:grill") }]);
     const ticket = await admit(lasso, "APP-12");
     await pull(lasso, ticket.id, "skip");
+    await callsSince(lasso, 5);
     // A transition that never answers: the process is stopped while the action Session is open.
     await lasso.tracker.reply({ tool: "acli", match: ["workitem transition"], sleepMs: 60_000 }, true);
     void checkNow(lasso).catch(() => undefined);

@@ -40,6 +40,9 @@
   button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
   button.sm { padding: 3px 9px; font-size: 12px; }
   button:disabled { opacity: 0.6; cursor: default; }
+  button.busy { opacity: 1; cursor: progress; }
+  button.busy::after { content: ''; display: inline-block; width: 0.75em; height: 0.75em; margin-left: 6px; vertical-align: -1px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 0.7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
   .tick { display: flex; gap: 8px; align-items: center; color: var(--muted); font-variant-numeric: tabular-nums; }
   main { padding: 16px; }
   .empty { color: var(--muted); padding: 32px 0; text-align: center; }
@@ -175,6 +178,7 @@
   .session .pill.running { background: var(--run); color: #fff; }
   .session .pill.failed, .session .pill.exhausted, .session .pill.interrupted { background: var(--crit); color: #fff; }
   .session pre { margin: 0; max-height: 360px; overflow: auto; white-space: pre-wrap; word-break: break-all; color: var(--term-dim); }
+  .session pre[data-trimmed]::before { content: '… earlier output trimmed; the whole log is at the stdout path below'; display: block; color: var(--muted); }
   .session .final { color: var(--term-bright); border-top: 1px solid var(--term-line); padding-top: 8px; white-space: pre-wrap; }
   .session .final.ok { color: var(--term-ok); }
   .session .paths { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -364,9 +368,9 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
       const button = el('button', { type: 'button', class: 'sm' + (action.action === 'check' ? '' : ' primary'), text: action.label, 'data-action': action.action });
       button.addEventListener('click', async (ev) => {
         ev.stopPropagation();
-        button.disabled = true;
+        button.disabled = true; button.classList.add('busy');
         try { await pullTrigger(t, action.action, {}); await refreshLedger(); }
-        catch (e) { showNotice(e.message); button.disabled = false; }
+        catch (e) { showNotice(e.message); button.disabled = false; button.classList.remove('busy'); }
       });
       quick.appendChild(button);
     }
@@ -401,8 +405,8 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
 
   // With a detail open the Ledger collapses to this sidebar: one compact line per Ticket, the open one marked.
   let currentTicket = null;
-  async function refreshSide(id) {
-    const tickets = await listTickets();
+  async function refreshSide(id) { drawSide(await listTickets(), id); }
+  function drawSide(tickets, id) {
     const back = el('div', { class: 'back' }, [el('a', { class: 'back-link', href: '#', text: '← all Tickets' }), el('span', { class: 'muted', text: tickets.length + ' shown' })]);
     side.replaceChildren(back, ...tickets.map((t) => {
       const item = el('div', { class: 'qitem' + (t.id === id ? ' sel' : '') + (t.state === 'active' ? '' : ' ended'), 'data-id': t.id }, [
@@ -548,12 +552,12 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
       try {
         const chunk = await api('/api/tickets/' + encodeURIComponent(t.id) + '/sessions/' + s.id + '/stdout?offset=' + offset);
         if (!current()) return;
-        if (chunk.text) { out.textContent += chunk.text; out.scrollTop = out.scrollHeight; }
+        if (chunk.text) showOutput(out, chunk.text);
         offset = chunk.offset;
         if (chunk.ended) { if (s.running) showDetail(t.id); return; }
       } catch (e) {
         if (!current()) return;
-        out.textContent += '\n[stdout unavailable: ' + e.message + '; retrying]';
+        showOutput(out, '\n[stdout unavailable: ' + e.message + '; retrying]');
       }
       if (!s.running || !current()) return;
       head.querySelector('[data-role="duration"]').textContent = duration(Date.now() - new Date(s.startedAt).getTime());
@@ -561,6 +565,23 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
     }
     tail();
     return pane;
+  }
+
+  // Runner output keeps only its newest OUTPUT_TAIL characters on the page: appending to one big text node
+  // re-laid out megabytes every second. The whole log stays at the stdout path.
+  const OUTPUT_TAIL = 200000;
+  function showOutput(out, text) {
+    const pinned = out.scrollTop + out.clientHeight >= out.scrollHeight - 24;
+    if (text.length > OUTPUT_TAIL) { text = text.slice(-OUTPUT_TAIL); out.replaceChildren(); out.dataset.shown = 0; out.dataset.trimmed = ''; }
+    out.append(text);
+    let shown = Number(out.dataset.shown || 0) + text.length;
+    while (shown > OUTPUT_TAIL) {
+      const first = out.firstChild, excess = shown - OUTPUT_TAIL;
+      if (first.length <= excess) { out.removeChild(first); shown -= first.length; } else { first.deleteData(0, excess); shown = OUTPUT_TAIL; }
+      out.dataset.trimmed = '';
+    }
+    out.dataset.shown = shown;
+    if (pinned) out.scrollTop = out.scrollHeight;
   }
 
   const OUTCOME_COLOUR = { succeeded: 'var(--good)', failed: 'var(--crit)', exhausted: 'var(--crit)', interrupted: 'var(--amber)' };
@@ -608,17 +629,20 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
     bar.replaceChildren(...buttons);
     async function pull(action, body) {
       for (const b of buttons) b.disabled = true;
+      const pressed = buttons.find((b) => b.dataset.action === action || (action === 'check' && b.dataset.role === 'check-pr'));
+      if (pressed) pressed.classList.add('busy');
+      const idle = () => { for (const b of buttons) { b.disabled = false; b.classList.remove('busy'); } };
       try {
         await pullTrigger(t, action, body, (problem) => {
-          for (const b of buttons) b.disabled = false;
+          idle();
           const anyway = el('button', { type: 'button', class: 'sm', text: 'Advance anyway' });
           anyway.addEventListener('click', () => { anyway.disabled = true; pull(action, { override: true }); });
           bar.replaceChildren(...buttons, el('div', { class: 'override', 'data-role': 'override' }, [
             el('span', { text: 'artifact ' + problem.artifact + ' is missing: ' + problem.detail }), anyway]));
         });
-        showDetail(t.id);
+        await showDetail(t.id);
       } catch (e) {
-        for (const b of buttons) b.disabled = false;
+        idle();
         showNotice(e.message);
       }
     }
@@ -653,8 +677,9 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
 
   async function showDetail(id) {
     const gen = ++detailGen;
-    let t;
-    try { t = await api('/api/tickets/' + encodeURIComponent(id)); }
+    let t, list;
+    // The Ticket and the sidebar arrive together, so the page changes once rather than in steps.
+    try { [t, list] = await Promise.all([api('/api/tickets/' + encodeURIComponent(id)), listTickets()]); }
     catch (e) { showNotice(e.message); location.hash = ''; return; }
     if (gen !== detailGen) return;
     currentTicket = t.id;
@@ -688,9 +713,9 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
     ]);
     children.push(el('div', { class: 'dgrid' }, [left, right]));
     detail.replaceChildren(...children);
-    ledger.hidden = true; ledgerTools.hidden = true; detail.hidden = false;
+    drawSide(list, t.id);
+    ledger.hidden = true; ledgerTools.hidden = true; pipelinesPanel.hidden = true; configPanel.hidden = true; detail.hidden = false;
     side.hidden = false; layout.classList.add('open');
-    refreshSide(t.id).catch((e) => showNotice(e.message));
   }
 
   // The Pipeline a Ticket runs: its Version, linked read-only, and a note when the file has moved on (ADR 0009).
@@ -733,9 +758,10 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
   }
   // Runs an edit; `act` returning false means nothing was sent, so nothing follows.
   async function save(button, act, then) {
-    button.disabled = true; showNotice('');
-    try { if ((await act()) !== false) then(); else button.disabled = false; }
-    catch (e) { showNotice(e.message); if (e.input) e.input.focus(); button.disabled = false; }
+    button.disabled = true; button.classList.add('busy'); showNotice('');
+    const idle = () => { button.disabled = false; button.classList.remove('busy'); };
+    try { if ((await act()) !== false) then(); else idle(); }
+    catch (e) { showNotice(e.message); if (e.input) e.input.focus(); idle(); }
   }
 
   // Pipelines: the list on the left, one Pipeline's Stages on the right, edited in place (comments and order kept).
@@ -1028,15 +1054,16 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
     const hash = location.hash.replace(/^#/, '');
     detailGen++;
     const view = hash === 'config' ? 'config' : hash === 'pipelines' || hash.startsWith('pipelines/') ? 'pipelines' : hash ? 'detail' : 'ledger';
+    // A Ticket's page swaps itself in once its data is here, rather than showing the last one meanwhile.
+    if (view === 'detail') { showDetail(hash); return; }
     ledger.hidden = view !== 'ledger'; ledgerTools.hidden = view !== 'ledger'; detail.hidden = view !== 'detail'; pipelinesPanel.hidden = view !== 'pipelines'; configPanel.hidden = view !== 'config';
-    if (view !== 'detail') { side.hidden = true; layout.classList.remove('open'); currentTicket = null; }
+    side.hidden = true; layout.classList.remove('open'); currentTicket = null;
     if (view === 'pipelines') {
       const rest = hash.startsWith('pipelines/') ? decodeName(hash.slice('pipelines/'.length)) : null;
       const m = rest && /^(.+)\/v(\d+)$/.exec(rest);
       showPipelines(m ? m[1] : rest, m ? Number(m[2]) : null);
     }
     else if (view === 'config') showConfig();
-    else if (view === 'detail') showDetail(hash);
     else refreshLedger().catch(failing);
   }
 

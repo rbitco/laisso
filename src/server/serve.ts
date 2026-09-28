@@ -120,7 +120,7 @@ export async function serve(opts: ServeOptions): Promise<number> {
     log.info("shutdown", { signal });
     tick.stop();
     const finished = new Promise<void>((done) => server.close(() => done()));
-    void startup.then(() => tick.settle()).then(() => runs.shutdown()).then(() => finished).then(() => {
+    void startup.then(() => tick.settle()).then(() => runs.shutdown()).then(() => mirror.settle()).then(() => finished).then(() => {
       store.close();
       releaseLock();
       resolveExit(0);
