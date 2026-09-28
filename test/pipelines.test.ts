@@ -114,6 +114,30 @@ stages:
     expect(first.text).not.toContain("name: build");
   });
 
+  it("reorders Stages, each moving with its comments, alongside a field edit", async () => {
+    const lasso = await lassoWith();
+    // A no-op patch gives the file as the YAML writer lays it out, the baseline to come back to.
+    const original = (await lasso.api<PipelineFile>("/api/pipelines/work", { method: "PATCH", body: json({}) })).text;
+    const after = await lasso.api<PipelineFile>("/api/pipelines/work", { method: "PATCH", body: json({ order: ["notes", "implement"], stages: { notes: { prompt: "Notes first." } } }) });
+    expect(after.pipeline!.stages.map((s) => s.name)).toEqual(["notes", "implement"]);
+    expect(after.text).toBe(`# The work Pipeline. Keep this comment.
+runner: claude # the default Runner
+
+stages:
+  - name: notes
+    prompt: Notes first.
+    artifact: file NOTES.md
+
+  - name: implement # first
+    prompt: Do the work.
+    artifact: commits-on-branch
+    budget: { attempts: 1 }
+`);
+    // And back again, with the prompt restored: the original file, byte for byte.
+    const back = await lasso.api<PipelineFile>("/api/pipelines/work", { method: "PATCH", body: json({ order: ["implement", "notes"], stages: { notes: { prompt: "Write NOTES.md." } } }) });
+    expect(back.text).toBe(original);
+  });
+
   it("keeps the file byte for byte when the order is unchanged", async () => {
     const lasso = await lassoWith();
     const same = await lasso.api<PipelineFile>("/api/pipelines/work", { method: "PATCH", body: json({ order: ["implement", "notes"] }) });

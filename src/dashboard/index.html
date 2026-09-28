@@ -835,28 +835,40 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
     const runner = runnerSelect('runner', pipeline.runner);
     const spend = el('input', { name: 'spend', value: pipeline.budget.spend === undefined ? '' : String(pipeline.budget.spend), placeholder: 'global default' });
     form.appendChild(el('div', { class: 'card' }, [el('h3', { text: 'Pipeline' }), el('div', { class: 'fields' }, [field('runner', runner), field('spend per Ticket (USD)', spend)])]));
-    // The Stages as they will be saved: removals wait for Save, and undo brings a Stage back as it was.
+    // The Stages as they will be saved: moves and removals wait for Save, and undo brings a Stage back as it was.
     const stages = pipeline.stages.map((s) => stageCard(s, pipeline));
     const list = el('div', { class: 'stack', 'data-role': 'stage-list' });
     const draw = () => {
       const kept = stages.filter((c) => !c.removed).length;
-      for (const card of stages) {
+      stages.forEach((card, i) => {
+        card.up.style.visibility = i === 0 ? 'hidden' : '';
+        card.down.style.visibility = i === stages.length - 1 ? 'hidden' : '';
         card.node.classList.toggle('removed', !!card.removed);
         card.remove.textContent = card.removed ? 'undo' : '✕';
         card.remove.title = card.removed ? 'keep this Stage' : kept === 1 ? 'a Pipeline keeps at least one Stage' : 'remove this Stage on Save';
         card.remove.disabled = !card.removed && kept === 1;
-      }
+      });
       list.replaceChildren(...stages.map((c) => c.node));
     };
+    const move = (card, by) => {
+      const from = stages.indexOf(card);
+      stages.splice(from, 1);
+      stages.splice(from + by, 0, card);
+      draw();
+    };
     for (const card of stages) {
+      card.up = el('button', { type: 'button', class: 'sm', 'data-role': 'move-up', title: 'run this Stage earlier', 'aria-label': 'move ' + card.name + ' up', text: '↑' });
+      card.down = el('button', { type: 'button', class: 'sm', 'data-role': 'move-down', title: 'run this Stage later', 'aria-label': 'move ' + card.name + ' down', text: '↓' });
       card.remove = el('button', { type: 'button', class: 'sm', 'data-role': 'remove-stage' });
+      card.up.addEventListener('click', () => move(card, -1));
+      card.down.addEventListener('click', () => move(card, 1));
       card.remove.addEventListener('click', () => { card.removed = !card.removed; draw(); });
-      card.node.querySelector('h3').append(el('span', { class: 'removed-note', text: 'removed' }), el('span', { class: 'tools' }, [card.remove]));
+      card.node.querySelector('h3').append(el('span', { class: 'removed-note', text: 'removed' }), el('span', { class: 'tools' }, [card.up, card.down, card.remove]));
     }
     draw();
     form.appendChild(list);
     const button = el('button', { class: 'primary', type: 'submit', text: 'Save' });
-    form.appendChild(el('div', { class: 'bar' }, [button, el('span', { class: 'why', text: 'blank clears a field back to its default; ✕ removes a Stage on Save; add or reorder Stages as text' })]));
+    form.appendChild(el('div', { class: 'bar' }, [button, el('span', { class: 'why', text: 'blank clears a field back to its default; ↑ ↓ and ✕ move and remove Stages on Save; add Stages as text' })]));
     form.addEventListener('submit', (ev) => {
       ev.preventDefault();
       save(button, async () => {
