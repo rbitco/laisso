@@ -17,7 +17,7 @@ import { Intake, IntakeError, type IntakeRequest } from "../intake/intake.ts";
 import { PipelineError, type Pipeline } from "../pipeline/load.ts";
 import { PipelineFiles } from "../pipeline/files.ts";
 import { dashboardHtml, metroScript } from "../dashboard/page.ts";
-import { ticketView, ticketDetail, sessionView, sortForLedger, pipelineListing, pipelineFileView, type ViewContext, type IntakeResult, type ConfigFile } from "./views.ts";
+import { ticketView, ticketDetail, sessionView, sortForLedger, pipelineListing, pipelineFileView, pipelineVersionView, type ViewContext, type IntakeResult, type ConfigFile } from "./views.ts";
 import { readFileSync } from "node:fs";
 import { replaceFile } from "../atomic-write.ts";
 
@@ -52,6 +52,7 @@ export function createApp(deps: AppDeps): Hono {
         return null;
       }
     },
+    driftFor: (ticket: TicketRow) => deps.versions.drift(ticket, deps.home.pipelinesDir),
     sessionsFor: (ticket: TicketRow) => deps.sessions.forTicket(ticket.id),
     feedbackFor: (session) => deps.feedback.forSession(session.id),
     budgetFor: (ticket, pipeline, stage, rows) => deps.budgets.view(ticket, pipeline, stage, rows),
@@ -160,6 +161,15 @@ export function createApp(deps: AppDeps): Hono {
   app.get("/api/pipelines/:name", (c) => {
     const source = pipelines.read(c.req.param("name"));
     return source ? c.json(pipelineFileView(source)) : c.json({ error: `no Pipeline named ${c.req.param("name")}` }, 404);
+  });
+  // Versions (ADR 0009): read-only, and readable after the file is gone.
+  app.get("/api/pipelines/:name/versions", (c) => c.json(deps.versions.live(c.req.param("name")).map((v) => ({ version: v.version, createdAt: v.created_at, live: v.live }))));
+  app.get("/api/pipelines/:name/versions/:version", (c) => {
+    const name = c.req.param("name");
+    const version = Number(c.req.param("version"));
+    const row = Number.isInteger(version) ? deps.versions.row(name, version) : null;
+    const pipeline = row ? deps.versions.get(name, version) : null;
+    return row && pipeline ? c.json(pipelineVersionView(row, pipeline, pipelines.read(name) === null)) : c.json({ error: `no Version ${c.req.param("version")} of Pipeline ${name}` }, 404);
   });
   app.put("/api/pipelines/:name", async (c) => {
     const body = ((await c.req.json().catch(() => null)) ?? {}) as { text?: unknown; create?: unknown };

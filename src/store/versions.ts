@@ -1,6 +1,17 @@
 import type { DatabaseSync } from "node:sqlite";
-import { loadPipeline, PipelineError, type Pipeline } from "../pipeline/load.ts";
+import { loadPipeline, pipelineFile, PipelineError, type Pipeline } from "../pipeline/load.ts";
 import type { Tickets, TicketRow } from "./tickets.ts";
+
+/** How the Pipeline file stands against a Ticket's Version: the same content, changed since, deleted, or not loading. */
+export type Drift = "same" | "changed" | "deleted" | "broken";
+
+export interface VersionRow {
+  pipeline: string;
+  version: number;
+  created_at: string;
+  /** Active Tickets pinned to it. */
+  live: number;
+}
 
 /**
  * Frozen copies of Pipelines (ADR 0009). Intake pins a Ticket to one, so no
@@ -24,6 +35,30 @@ export class PipelineVersions {
     const version = (last?.version ?? 0) + 1;
     this.db.prepare(`INSERT INTO pipeline_versions (pipeline, version, definition, created_at) VALUES (?, ?, ?, ?)`).run(pipeline.name, version, definition, now);
     return version;
+  }
+
+  /** A Version with how many active Tickets run it, or null when it was never numbered. */
+  row(name: string, version: number): VersionRow | null {
+    return (this.db.prepare(`${VERSION_ROWS} WHERE v.pipeline = ? AND v.version = ? GROUP BY v.version`).get(name, version) as VersionRow | undefined) ?? null;
+  }
+
+  /** The Versions of a Pipeline that active Tickets still run, oldest first. */
+  live(name: string): VersionRow[] {
+    return this.db.prepare(`${VERSION_ROWS} WHERE v.pipeline = ? GROUP BY v.version HAVING live > 0 ORDER BY v.version`).all(name) as unknown as VersionRow[];
+  }
+
+  /** Whether the Pipeline file has moved on from this Ticket's Version; null for a Ticket that runs the file itself. */
+  drift(ticket: TicketRow, pipelinesDir: string): Drift | null {
+    if (ticket.pipeline_version === null) return null;
+    if (!pipelineFile(pipelinesDir, ticket.pipeline)) return "deleted";
+    let current: Pipeline;
+    try {
+      current = loadPipeline(pipelinesDir, ticket.pipeline);
+    } catch {
+      return "broken";
+    }
+    const pinned = this.db.prepare(`SELECT definition FROM pipeline_versions WHERE pipeline = ? AND version = ?`).get(ticket.pipeline, ticket.pipeline_version) as { definition: string } | undefined;
+    return pinned?.definition === JSON.stringify(current) ? "same" : "changed";
   }
 
   get(name: string, version: number): Pipeline | null {
@@ -52,3 +87,6 @@ export class PipelineVersions {
     }
   }
 }
+
+const VERSION_ROWS = `SELECT v.pipeline, v.version, v.created_at, COUNT(t.id) AS live FROM pipeline_versions v
+  LEFT JOIN tickets t ON t.pipeline = v.pipeline AND t.pipeline_version = v.version AND t.state = 'active'`;

@@ -2,6 +2,7 @@ import { shortId, type TicketRow } from "../store/tickets.ts";
 import type { SessionRow } from "../store/sessions.ts";
 import type { Pipeline, RunnerName, Stage } from "../pipeline/load.ts";
 import type { PipelineSource } from "../pipeline/files.ts";
+import type { Drift, VersionRow } from "../store/versions.ts";
 import type { Config } from "../server/config.ts";
 import type { BudgetView } from "../budget/budget.ts";
 import { adapterFor } from "../runner/adapters.ts";
@@ -123,6 +124,8 @@ export interface TicketDetail extends TicketView {
   session: SessionView | null;
   /** The timeline, newest first. */
   sessions: SessionView[];
+  /** How the Pipeline file stands against the Ticket's Version (ADR 0009); null for a Ticket that runs the file itself. */
+  pipelineDrift: Drift | null;
 }
 
 /** What intake returns: the new Ticket's view plus whether its branch was found rather than made. */
@@ -138,6 +141,7 @@ export interface ViewContext {
   /** A Round's Feedback snapshot as recorded. */
   feedbackFor(session: SessionRow): FeedbackRow[];
   budgetFor(ticket: TicketRow, pipeline: Pipeline | null, stage: Stage | null, rows: SessionRow[]): BudgetView;
+  driftFor(ticket: TicketRow): Drift | null;
   /** The Ticket's place in the line for a headless slot, 1 first, or null when it is not in line. */
   queuePosition(ticket: TicketRow): number | null;
 }
@@ -171,6 +175,17 @@ export interface PipelineFile {
   problem: string | null;
 }
 
+/** A frozen Version of a Pipeline, read-only, with how many active Tickets run it. */
+export interface PipelineVersionView {
+  name: string;
+  version: number;
+  createdAt: string;
+  live: number;
+  /** True once the Pipeline's file is gone; the Version still reads. */
+  deleted: boolean;
+  pipeline: PipelineView;
+}
+
 export interface ConfigFile {
   file: string;
   text: string;
@@ -189,9 +204,17 @@ export function pipelineFileView(source: PipelineSource): PipelineFile {
     name: source.name,
     file: source.file,
     text: source.text,
-    pipeline: pipeline ? { runner: pipeline.runner, budget: pipeline.budget, stages: pipeline.stages.map(stageFields) } : null,
+    pipeline: pipeline ? pipelineFields(pipeline) : null,
     problem: source.problem,
   };
+}
+
+export function pipelineVersionView(row: VersionRow, pipeline: Pipeline, deleted: boolean): PipelineVersionView {
+  return { name: row.pipeline, version: row.version, createdAt: row.created_at, live: row.live, deleted, pipeline: pipelineFields(pipeline) };
+}
+
+function pipelineFields(pipeline: Pipeline): PipelineView {
+  return { runner: pipeline.runner, budget: pipeline.budget, stages: pipeline.stages.map(stageFields) };
 }
 
 /** A Stage as the editor shows it: a runner it inherits from the Pipeline is null, so the form can say so. */
@@ -253,7 +276,7 @@ export function ticketView(ticket: TicketRow, ctx: ViewContext): TicketView {
 
 export function ticketDetail(ticket: TicketRow, ctx: ViewContext): TicketDetail {
   const sessions = ctx.sessionsFor(ticket).map((row) => sessionView(row, Date.now(), ctx.feedbackFor(row)));
-  return { ...ticketView(ticket, ctx), session: sessions[0] ?? null, sessions };
+  return { ...ticketView(ticket, ctx), session: sessions[0] ?? null, sessions, pipelineDrift: ctx.driftFor(ticket) };
 }
 
 export function sessionView(row: SessionRow, now: number = Date.now(), feedback: FeedbackRow[] = []): SessionView {

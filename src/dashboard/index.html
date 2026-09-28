@@ -205,6 +205,12 @@
   .plist a .why, .card .why, .panel .why { color: var(--muted); font-size: 12px; }
   .card { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; }
   .card.problem { border-color: var(--crit); }
+  dd .drift, .bar .drift { color: var(--amber); }
+  [data-role="pipeline-version"] a, [data-role="live-versions"] a { color: var(--accent); }
+  .card pre { margin: 0; white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  .fields .ro { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+  .fields .ro span { color: var(--ink); }
+  .fields .ro.wide { grid-column: 1 / -1; }
   .card h3 { margin: 0; font-size: 13px; display: flex; gap: 8px; align-items: baseline; text-transform: none; letter-spacing: 0; color: var(--ink); }
   .card h3 .kind { font-weight: normal; }
   .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; align-items: end; }
@@ -663,7 +669,7 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
     else left.appendChild(el('div', { class: 'panel muted', text: 'No Session yet.' }));
     left.appendChild(el('dl', {}, [
       el('dt', { text: 'worktree' }), el('dd', { text: t.worktree }),
-      el('dt', { text: 'pipeline' }), el('dd', { text: t.pipeline + (t.pipelineVersion === null ? '' : ' v' + t.pipelineVersion) }),
+      el('dt', { text: 'pipeline' }), pipelineCell(t),
       el('dt', { text: 'id' }), el('dd', { text: t.id }),
     ]));
     const right = el('div', { class: 'stack' }, [
@@ -675,6 +681,15 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
     ledger.hidden = true; ledgerTools.hidden = true; detail.hidden = false;
     side.hidden = false; layout.classList.add('open');
     refreshSide(t.id).catch((e) => showNotice(e.message));
+  }
+
+  // The Pipeline a Ticket runs: its Version, linked read-only, and a note when the file has moved on (ADR 0009).
+  const DRIFT_NOTE = { changed: 'Pipeline has changed', deleted: 'Pipeline deleted', broken: 'Pipeline file does not load' };
+  function pipelineCell(t) {
+    if (t.pipelineVersion === null) return el('dd', { text: t.pipeline });
+    const link = el('a', { href: '#pipelines/' + encodeURIComponent(t.pipeline) + '/v' + t.pipelineVersion, text: t.pipeline + ' v' + t.pipelineVersion });
+    const note = DRIFT_NOTE[t.pipelineDrift];
+    return el('dd', { 'data-role': 'pipeline-version' }, note ? [link, el('span', { class: 'drift', text: ' · ' + note })] : [link]);
   }
 
   const RUNNERS = ['claude', 'codex', 'pi'];
@@ -714,14 +729,14 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
   }
 
   // Pipelines: the list on the left, one Pipeline's Stages on the right, edited in place (comments and order kept).
-  async function showPipelines(name) {
+  async function showPipelines(name, version) {
     let list;
     try { list = await api('/api/pipelines'); } catch (e) { showNotice(e.message); return; }
     const side = el('div', { class: 'plist' }, list.map((p) => el('a', { href: '#pipelines/' + encodeURIComponent(p.name), class: p.name === name ? 'current' : '' }, [
       el('strong', { text: p.name }),
       el('span', { class: 'why', text: p.problem ? 'does not load' : p.stages.map((s) => s.label).join(' → ') }),
     ])));
-    const body = name ? await pipelineEditor(name) : el('p', { class: 'empty', text: 'Pick a Pipeline to edit it, or make a new one.' });
+    const body = !name ? el('p', { class: 'empty', text: 'Pick a Pipeline to edit it, or make a new one.' }) : version ? await versionView(name, version) : await pipelineEditor(name);
     pipelinesPanel.replaceChildren(el('div', { class: 'pipelines-grid' }, [el('div', { class: 'panel' }, [side, newPipelineForm(list)]), body]));
   }
 
@@ -757,8 +772,42 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
     raw.hidden = !!p.pipeline;
     asText.addEventListener('click', () => { raw.hidden = !raw.hidden; structured.hidden = !raw.hidden; asText.textContent = raw.hidden ? 'Edit as text' : 'Edit as fields'; });
     if (!p.pipeline) { structured.hidden = false; asText.hidden = true; }
-    panel.replaceChildren(head, structured, raw);
+    panel.replaceChildren(head, await liveVersions(name), structured, raw);
     return panel;
+  }
+
+  // The Versions of this Pipeline that active Tickets still run; they keep running them whatever is saved here.
+  async function liveVersions(name) {
+    let versions = [];
+    try { versions = await api('/api/pipelines/' + encodeURIComponent(name) + '/versions'); } catch { /* the editor still works without it */ }
+    const box = el('div', { class: 'card', 'data-role': 'live-versions' });
+    if (!versions.length) { box.hidden = true; return box; }
+    const links = versions.map((v) => el('a', { href: '#pipelines/' + encodeURIComponent(name) + '/v' + v.version, text: 'v' + v.version + ' (' + v.live + ' Ticket' + (v.live === 1 ? '' : 's') + ')' }));
+    const list = el('div', { class: 'row' }, links);
+    box.replaceChildren(el('h3', { text: 'Versions in use' }), list, el('div', { class: 'why', text: 'Tickets under way keep the Version they started with; a save here applies to new Tickets.' }));
+    return box;
+  }
+
+  // One frozen Version, read-only: nothing here saves.
+  async function versionView(name, version) {
+    let v;
+    try { v = await api('/api/pipelines/' + encodeURIComponent(name) + '/versions/' + version); } catch (e) { return el('p', { class: 'notice', text: e.message }); }
+    const ro = (label, value, wide) => el('div', { class: 'ro' + (wide ? ' wide' : '') }, [label, el('span', { text: value })]);
+    const yes = (b) => (b ? 'yes' : 'no');
+    const budget = (b) => ['rounds', 'attempts', 'wallTime'].filter((k) => b[k] !== undefined).map((k) => k + ' ' + b[k]).join(', ') || 'defaults';
+    const cards = v.pipeline.stages.map((s) => s.kind === 'action'
+      ? el('div', { class: 'card' }, [el('h3', {}, [el('span', { class: 'kind', text: 'action' }), s.action]), el('div', { class: 'fields' }, [ro('status', s.status)])])
+      : el('div', { class: 'card' }, [
+        el('h3', {}, [el('span', { class: 'kind', text: s.human ? 'human' : 'runner' }), s.name]),
+        el('div', { class: 'fields' }, [
+          ro('runner', s.runner || 'Pipeline default (' + v.pipeline.runner + ')'), ro('artifact', s.artifact || 'none'), ro('skills', s.skills.join(', ') || 'none'),
+          ro('advances on its own', yes(s.advance)), ro('repeats on Feedback', yes(s.repeat === 'feedback')), ro('budget', budget(s.budget)),
+          el('div', { class: 'ro wide' }, ['prompt', el('pre', { text: s.prompt || '(none)' })]),
+        ]),
+      ]));
+    const head = el('div', { class: 'bar' }, [el('h2', { text: name + ' v' + version }), el('span', { class: 'why', text: 'read-only · frozen ' + relative(v.createdAt) + ' · ' + v.live + ' active Ticket' + (v.live === 1 ? '' : 's') }), v.deleted ? el('span', { class: 'drift', text: 'Pipeline deleted' }) : el('a', { href: '#pipelines/' + encodeURIComponent(name), text: 'current Pipeline' })]);
+    const pipelineCard = el('div', { class: 'card' }, [el('h3', { text: 'Pipeline' }), el('div', { class: 'fields' }, [ro('runner', v.pipeline.runner), ro('spend per Ticket (USD)', v.pipeline.budget.spend === undefined ? 'global default' : String(v.pipeline.budget.spend))])]);
+    return el('div', { class: 'panel', 'data-role': 'pipeline-version' }, [head, pipelineCard, ...cards]);
   }
 
   function rawForm(p) {
@@ -888,7 +937,11 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
     const view = hash === 'config' ? 'config' : hash === 'pipelines' || hash.startsWith('pipelines/') ? 'pipelines' : hash ? 'detail' : 'ledger';
     ledger.hidden = view !== 'ledger'; ledgerTools.hidden = view !== 'ledger'; detail.hidden = view !== 'detail'; pipelinesPanel.hidden = view !== 'pipelines'; configPanel.hidden = view !== 'config';
     if (view !== 'detail') { side.hidden = true; layout.classList.remove('open'); currentTicket = null; }
-    if (view === 'pipelines') showPipelines(hash.startsWith('pipelines/') ? decodeName(hash.slice('pipelines/'.length)) : null);
+    if (view === 'pipelines') {
+      const rest = hash.startsWith('pipelines/') ? decodeName(hash.slice('pipelines/'.length)) : null;
+      const m = rest && /^(.+)\/v(\d+)$/.exec(rest);
+      showPipelines(m ? m[1] : rest, m ? Number(m[2]) : null);
+    }
     else if (view === 'config') showConfig();
     else if (view === 'detail') showDetail(hash);
     else refreshLedger().catch(failing);

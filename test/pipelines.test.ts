@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { startLassoWithRepos, startLasso, waitFor, claudeFixture, runCli, type Lasso } from "./harness.ts";
 import type { TicketDetail, IntakeResult } from "../src/api/views.ts";
-import type { PipelineFile, PipelineListing, ConfigFile } from "../src/api/views.ts";
+import type { PipelineFile, PipelineListing, ConfigFile, PipelineVersionView } from "../src/api/views.ts";
 import type { TickChange } from "../src/server/tick.ts";
 
 // Seam one: Pipelines and config are edited through the API the dashboard
@@ -216,6 +216,52 @@ describe("Pipeline Versions", () => {
     await checkNow(again);
     const flagged = await waitFor(async () => { const d = await detailOf(again, orphan.id); return d.flag ? d : null; }, "the orphan to be Flagged");
     expect(flagged.flag).toMatchObject({ reason: "pipeline.missing", detail: expect.stringMatching(/Pipeline gone does not exist/) });
+  });
+});
+
+// Seam three: what a human sees of a Ticket's Version against its Pipeline (LASSO-43).
+describe("Version drift and read-only Versions", () => {
+  it("says nothing while the file matches, then marks a changed, broken, or deleted Pipeline", async () => {
+    const lasso = await lassoWith();
+    const ticket = await intake(lasso, "A");
+    expect((await detailOf(lasso, ticket.id)).pipelineDrift).toBe("same");
+    // A comment-only edit is the same content.
+    const file = path.join(lasso.home, "pipelines", "work.yaml");
+    const { writeFile } = await import("node:fs/promises");
+    await writeFile(file, "# a new comment\n" + WORK);
+    expect((await detailOf(lasso, ticket.id)).pipelineDrift).toBe("same");
+    await lasso.api("/api/pipelines/work", { method: "PATCH", body: json({ stages: { notes: { prompt: "Write better notes." } } }) });
+    expect((await detailOf(lasso, ticket.id)).pipelineDrift).toBe("changed");
+    await writeFile(file, "stages: nope\n");
+    expect((await detailOf(lasso, ticket.id)).pipelineDrift).toBe("broken");
+    await lasso.api("/api/pipelines/work", { method: "DELETE" });
+    const gone = await detailOf(lasso, ticket.id);
+    expect(gone).toMatchObject({ pipeline: "work", pipelineVersion: 1, pipelineDrift: "deleted" });
+    expect(gone.stages.map((s) => s.name)).toEqual(["implement", "notes"]);
+  });
+
+  it("reads a Version read-only, after its file is deleted too, and lists the Versions active Tickets run", async () => {
+    const lasso = await lassoWith();
+    const a = await intake(lasso, "A");
+    const b = await intake(lasso, "B");
+    await lasso.api("/api/pipelines/work", { method: "PATCH", body: json({ stages: { implement: { prompt: "Do it again." } } }) });
+    await intake(lasso, "C");
+    expect(await lasso.api("/api/pipelines/work/versions")).toEqual([
+      { version: 1, createdAt: expect.any(String), live: 2 },
+      { version: 2, createdAt: expect.any(String), live: 1 },
+    ]);
+    // A Version no active Ticket runs drops off the list.
+    for (const t of [a, b]) await lasso.api(`/api/tickets/${t.id}/abandon`, { method: "POST" });
+    expect((await lasso.api<Array<{ version: number; live: number }>>("/api/pipelines/work/versions")).map((v) => [v.version, v.live])).toEqual([[2, 1]]);
+
+    await lasso.api("/api/pipelines/work", { method: "DELETE" });
+    const v1 = await lasso.api<PipelineVersionView>("/api/pipelines/work/versions/1");
+    expect(v1).toMatchObject({ name: "work", version: 1, deleted: true, pipeline: { runner: "claude", stages: [{ name: "implement", prompt: "Do the work.", runner: null, budget: { attempts: 1 } }, { name: "notes" }] } });
+    expect((await lasso.api<PipelineVersionView>("/api/pipelines/work/versions/2")).pipeline.stages[0]).toMatchObject({ prompt: "Do it again." });
+    expect((await lasso.api<Response>("/api/pipelines/work/versions/3", { raw: true })).status).toBe(404);
+    expect((await lasso.api<Response>("/api/pipelines/work/versions/x", { raw: true })).status).toBe(404);
+    // Read-only: there is nothing to write a Version with.
+    expect((await lasso.api<Response>("/api/pipelines/work/versions/1", { method: "PUT", body: json({ text: WORK }), raw: true })).status).toBe(404);
   });
 });
 
