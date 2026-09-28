@@ -205,6 +205,13 @@
   .plist a .why, .card .why, .panel .why { color: var(--muted); font-size: 12px; }
   .card { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; }
   .card.problem { border-color: var(--crit); }
+  .card .links { display: flex; flex-wrap: wrap; gap: 12px; }
+  .card h3 .tools button:disabled { opacity: 0.3; }
+  .card h3 .tools { margin-left: auto; display: flex; gap: 4px; }
+  .card h3 .removed-note { display: none; color: var(--crit); font-weight: normal; }
+  .card.removed { border-style: dashed; opacity: 0.6; }
+  .card.removed .fields { display: none; }
+  .card.removed h3 .removed-note { display: inline; }
   dd .drift, .bar .drift { color: var(--amber); }
   [data-role="pipeline-version"] a, [data-role="live-versions"] a { color: var(--accent); }
   .card pre { margin: 0; white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
@@ -783,7 +790,7 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
     const box = el('div', { class: 'card', 'data-role': 'live-versions' });
     if (!versions.length) { box.hidden = true; return box; }
     const links = versions.map((v) => el('a', { href: '#pipelines/' + encodeURIComponent(name) + '/v' + v.version, text: 'v' + v.version + ' (' + v.live + ' Ticket' + (v.live === 1 ? '' : 's') + ')' }));
-    const list = el('div', { class: 'row' }, links);
+    const list = el('div', { class: 'links' }, links);
     box.replaceChildren(el('h3', { text: 'Versions in use' }), list, el('div', { class: 'why', text: 'Tickets under way keep the Version they started with; a save here applies to new Tickets.' }));
     return box;
   }
@@ -828,18 +835,39 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
     const runner = runnerSelect('runner', pipeline.runner);
     const spend = el('input', { name: 'spend', value: pipeline.budget.spend === undefined ? '' : String(pipeline.budget.spend), placeholder: 'global default' });
     form.appendChild(el('div', { class: 'card' }, [el('h3', { text: 'Pipeline' }), el('div', { class: 'fields' }, [field('runner', runner), field('spend per Ticket (USD)', spend)])]));
+    // The Stages as they will be saved: removals wait for Save, and undo brings a Stage back as it was.
     const stages = pipeline.stages.map((s) => stageCard(s, pipeline));
-    for (const card of stages) form.appendChild(card.node);
+    const list = el('div', { class: 'stack', 'data-role': 'stage-list' });
+    const draw = () => {
+      const kept = stages.filter((c) => !c.removed).length;
+      for (const card of stages) {
+        card.node.classList.toggle('removed', !!card.removed);
+        card.remove.textContent = card.removed ? 'undo' : '✕';
+        card.remove.title = card.removed ? 'keep this Stage' : kept === 1 ? 'a Pipeline keeps at least one Stage' : 'remove this Stage on Save';
+        card.remove.disabled = !card.removed && kept === 1;
+      }
+      list.replaceChildren(...stages.map((c) => c.node));
+    };
+    for (const card of stages) {
+      card.remove = el('button', { type: 'button', class: 'sm', 'data-role': 'remove-stage' });
+      card.remove.addEventListener('click', () => { card.removed = !card.removed; draw(); });
+      card.node.querySelector('h3').append(el('span', { class: 'removed-note', text: 'removed' }), el('span', { class: 'tools' }, [card.remove]));
+    }
+    draw();
+    form.appendChild(list);
     const button = el('button', { class: 'primary', type: 'submit', text: 'Save' });
-    form.appendChild(el('div', { class: 'bar' }, [button, el('span', { class: 'why', text: 'blank clears a field back to its default; add or reorder Stages as text' })]));
+    form.appendChild(el('div', { class: 'bar' }, [button, el('span', { class: 'why', text: 'blank clears a field back to its default; ✕ removes a Stage on Save; add or reorder Stages as text' })]));
     form.addEventListener('submit', (ev) => {
       ev.preventDefault();
       save(button, async () => {
         const patch = { budget: {}, stages: {} };
         changed(patch, 'runner', pipeline.runner, runner.value);
         changed(patch.budget, 'spend', pipeline.budget.spend === undefined ? null : pipeline.budget.spend, numberOrNull(spend, 'spend'));
-        for (const card of stages) { const sp = card.patch(); if (Object.keys(sp).length) patch.stages[card.name] = sp; }
+        const kept = stages.filter((c) => !c.removed);
+        for (const card of kept) { const sp = card.patch(); if (Object.keys(sp).length) patch.stages[card.name] = sp; }
         prune(patch);
+        const order = kept.map((c) => c.name);
+        if (order.join('\n') !== pipeline.stages.map((s) => s.name).join('\n')) patch.order = order;
         if (!Object.keys(patch).length) { showNotice('nothing changed'); return false; }
         await api('/api/pipelines/' + encodeURIComponent(p.name), { method: 'PATCH', body: JSON.stringify(patch) });
       }, () => { showNotice('saved ' + p.name); showPipelines(p.name); });

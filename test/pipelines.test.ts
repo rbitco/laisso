@@ -83,6 +83,63 @@ describe("Pipeline files", () => {
     expect((await lasso.api<PipelineFile>("/api/pipelines/work")).text).toBe(text);
   });
 
+  it("removes Stages named out of the order, keeping the others' comments, with field edits and renames in the same save", async () => {
+    const THREE = WORK + `
+  # ship it
+  - name: ship    # last
+    prompt: Ship.
+`;
+    const lasso = await lassoWith({ work: THREE });
+    const after = await lasso.api<PipelineFile>("/api/pipelines/work", {
+      method: "PATCH",
+      body: json({ order: ["implement", "ship"], stages: { implement: { name: "build" }, ship: { prompt: "Ship it." } } }),
+    });
+    expect(after.pipeline!.stages.map((s) => s.name)).toEqual(["build", "ship"]);
+    expect(after.text).toBe(`# The work Pipeline. Keep this comment.
+runner: claude # the default Runner
+
+stages:
+  - name: build # first
+    prompt: Do the work.
+    artifact: commits-on-branch
+    budget: { attempts: 1 }
+
+  # ship it
+  - name: ship # last
+    prompt: Ship it.
+`);
+    // Removing the first Stage hands its comment to nobody and the next Stage's to the top.
+    const first = await lasso.api<PipelineFile>("/api/pipelines/work", { method: "PATCH", body: json({ order: ["ship"] }) });
+    expect(first.text).toContain("stages:\n  # ship it\n  - name: ship # last\n");
+    expect(first.text).not.toContain("name: build");
+  });
+
+  it("keeps the file byte for byte when the order is unchanged", async () => {
+    const lasso = await lassoWith();
+    const same = await lasso.api<PipelineFile>("/api/pipelines/work", { method: "PATCH", body: json({ order: ["implement", "notes"] }) });
+    const untouched = await lasso.api<PipelineFile>("/api/pipelines/work", { method: "PATCH", body: json({}) });
+    expect(same.text).toBe(untouched.text);
+  });
+
+  it("refuses an order that empties the Pipeline, names a Stage twice, or names no Stage, and leaves the file alone", async () => {
+    const lasso = await lassoWith();
+    const patch = (order: unknown) => lasso.api("/api/pipelines/work", { method: "PATCH", body: json({ order }) });
+    await expect(patch([])).rejects.toThrow(/Pipeline work must keep at least one Stage/);
+    await expect(patch(["implement", "implement"])).rejects.toThrow(/order names Stage implement twice/);
+    await expect(patch(["implement", "ghost"])).rejects.toThrow(/Pipeline work has no Stage named ghost/);
+    await expect(patch("implement")).rejects.toThrow(/order must be a list of Stage names/);
+    expect(await pipelineText(lasso, "work")).toBe(WORK);
+  });
+
+  it("leaves a live Ticket on its Version when a Stage is removed", async () => {
+    const lasso = await lassoWith();
+    const ticket = await intake(lasso, "A");
+    await lasso.api("/api/pipelines/work", { method: "PATCH", body: json({ order: ["notes"] }) });
+    const d = await detailOf(lasso, ticket.id);
+    expect(d.stages.map((s) => s.name)).toEqual(["implement", "notes"]);
+    expect(d).toMatchObject({ pipelineVersion: 1, pipelineDrift: "changed", flag: null });
+  });
+
   it("refuses a patch that breaks a rule and leaves the file alone", async () => {
     const lasso = await lassoWith();
     await expect(lasso.api("/api/pipelines/work", { method: "PATCH", body: json({ stages: { implement: { artifact: "pr-approved" } } }) })).rejects.toThrow(/unknown artifact pr-approved/);

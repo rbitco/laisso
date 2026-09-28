@@ -1,7 +1,7 @@
 import { readFileSync, unlinkSync } from "node:fs";
 import { replaceFile } from "../atomic-write.ts";
 import path from "node:path";
-import { parseDocument } from "yaml";
+import { parseDocument, isSeq, type Document } from "yaml";
 import { applyPatch } from "../yaml-edit.ts";
 import { isPlainObject } from "../fields.ts";
 import { parsePipeline, pipelineFile, listPipelines, PipelineError, NAME, type Pipeline } from "./load.ts";
@@ -17,13 +17,15 @@ export interface PipelineSource {
 
 /**
  * A structured edit of a Pipeline file (spec: the dashboard edits Pipeline
- * files in place). Stages are keyed by name; null clears a field. The result
- * must still parse, or nothing is written.
+ * files in place). Stages are keyed by their name before the edit; null
+ * clears a field. `order` lists those names as the Stages should now run: a
+ * Stage left out is removed. The result must still parse, or nothing is written.
  */
 export interface PipelinePatch {
   runner?: string | null;
   budget?: Record<string, unknown> | null;
   stages?: Record<string, Record<string, unknown>>;
+  order?: string[];
 }
 
 /** The Pipeline files under the Lasso home, edited in place with their comments kept. */
@@ -66,7 +68,7 @@ export class PipelineFiles {
     if (!isPlainObject(patch)) throw new PipelineError("patch must be a mapping");
     if (!current.pipeline) throw new PipelineError(`Pipeline ${name} cannot be patched until it loads (${current.problem}); replace its text instead`);
     const doc = parseDocument(current.text);
-    const { stages, ...rest } = patch;
+    const { stages, order, ...rest } = patch;
     applyPatch(doc, rest);
     if (stages !== undefined) {
       if (!isPlainObject(stages)) throw new PipelineError("stages must be a mapping of Stage name to fields");
@@ -77,6 +79,7 @@ export class PipelineFiles {
         applyPatch(doc, fields, ["stages", index]);
       }
     }
+    if (order !== undefined) reorderStages(doc, name, current.pipeline.stages.map((s) => s.name), order);
     const text = doc.toString();
     parsePipeline(name, text);
     replaceFile(current.file, text);
@@ -89,6 +92,37 @@ export class PipelineFiles {
     unlinkSync(file);
     return true;
   }
+}
+
+/**
+ * Rearrange the stages list to `order`, dropping the Stages it leaves out.
+ * Each Stage keeps the comments above and beside it; the first Stage's
+ * comment sits on the list itself, so it is handed to the Stage and back.
+ */
+function reorderStages(doc: Document, pipeline: string, names: string[], order: unknown): void {
+  if (!Array.isArray(order) || !order.every((x) => typeof x === "string")) throw new PipelineError("order must be a list of Stage names");
+  if (order.length === 0) throw new PipelineError(`Pipeline ${pipeline} must keep at least one Stage`);
+  const seen = new Set<string>();
+  for (const stageName of order) {
+    if (!names.includes(stageName)) throw new PipelineError(`Pipeline ${pipeline} has no Stage named ${stageName}`);
+    if (seen.has(stageName)) throw new PipelineError(`order names Stage ${stageName} twice`);
+    seen.add(stageName);
+  }
+  const seq = doc.get("stages", true);
+  if (!isSeq(seq)) throw new PipelineError(`Pipeline ${pipeline}: stages is not a list`);
+  const items = seq.items as Array<{ commentBefore?: string | null; spaceBefore?: boolean }>;
+  if (seq.commentBefore) {
+    items[0]!.commentBefore = seq.commentBefore;
+    seq.commentBefore = undefined;
+  }
+  const spaced = items.slice(1).some((n) => n.spaceBefore);
+  const next = order.map((stageName) => items[names.indexOf(stageName)]!);
+  next.forEach((n, i) => (n.spaceBefore = i > 0 && spaced));
+  if (next[0]!.commentBefore) {
+    seq.commentBefore = next[0]!.commentBefore;
+    next[0]!.commentBefore = undefined;
+  }
+  seq.items = next as typeof seq.items;
 }
 
 function checkName(name: string): void {
