@@ -63,8 +63,17 @@ _Avoid_: cancelled, closed, dropped, deleted, paused
 
 **Pipeline**:
 The ordered list of Stages a Ticket follows, with each Stage's prompt. A
-prompt may be no more than a skill call. A Ticket follows exactly one Pipeline.
+prompt may be no more than a skill call. A Ticket follows exactly one
+Version of one Pipeline.
 _Avoid_: workflow, playbook, template, orchestration
+
+**Version**:
+A frozen copy of a Pipeline, numbered v1, v2, and so on, taken the first
+time Intake binds a Ticket to content that differs from the last Version.
+A Ticket keeps its Version until a human upgrades it, so editing or
+deleting a Pipeline never changes a Ticket already under way. Only the
+current Pipeline is offered at Intake.
+_Avoid_: revision, snapshot, release, disabled
 
 **Artifact**:
 What a Stage must have produced for Lasso to count it done, named from a

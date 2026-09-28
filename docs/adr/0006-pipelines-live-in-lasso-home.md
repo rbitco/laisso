@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: accepted, amended by ADR 0009
 ---
 
 # Pipelines and repo config live in Lasso's home, not in target repos
