@@ -35,7 +35,9 @@ export const claudeAdapter: RunnerAdapter = {
       argv.push(...extraArgs(request.runnerOptions), prompt);
       return { argv, cwd: request.cwd, env };
     }
-    const argv = ["claude", "-p", prompt, "--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits", "--permission-prompts", "none"];
+    // Headless baseline: auto mode lets the Runner test, lint and commit, and refuses what its classifier finds risky;
+    // with prompts off, anything it would ask about is refused rather than waiting. A person at a terminal Session answers prompts.
+    const argv = ["claude", "-p", prompt, "--output-format", "stream-json", "--verbose", "--permission-mode", "auto", "--permission-prompts", "none"];
     // Resume re-enters the earlier session, which keeps its id; a fresh run takes the id Lasso chose.
     argv.push(...(request.resume ? ["--resume", request.runnerSessionId ?? request.sessionId] : ["--session-id", request.sessionId]));
     if (request.limits.remainingSpendUsd !== undefined) argv.push("--max-budget-usd", String(request.limits.remainingSpendUsd));

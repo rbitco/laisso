@@ -39,7 +39,7 @@ describe("claude adapter command", () => {
     );
     expect(cmd.argv.slice(3)).toEqual([
       "--output-format", "stream-json", "--verbose",
-      "--permission-mode", "acceptEdits", "--permission-prompts", "none",
+      "--permission-mode", "auto", "--permission-prompts", "none",
       "--session-id", "3e728ae2-8d99-42f3-a7ba-6066de05d169",
       "--max-budget-usd", "4.5",
     ]);
