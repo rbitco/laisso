@@ -19,11 +19,17 @@ _Avoid_: import, add, create ticket, onboard
 
 **Stage**:
 One named step in a Ticket's journey, defined by its Pipeline: either a
-prompt run by a Runner, with or without a human present, or an action Lasso
-performs itself, such as moving the tracker issue to a status. The default
+prompt run by a Runner, with or without a human present, or an Action Lasso
+runs itself, such as moving the tracker issue to a status. The default
 Pipeline's Stages are Grill, Plan, Implement, Document, Review, but a
 Pipeline may name any ordered list of Stages.
 _Avoid_: step, phase, state, node
+
+**Action**:
+A named shell command, defined in Lasso's config globally or per repo, that
+an action Stage runs by name with the params the Stage supplies. It succeeds
+or fails by its exit code.
+_Avoid_: hook, script, built-in, task
 
 **Budget**:
 The limits on how much effort a Ticket may consume before it is Flagged:

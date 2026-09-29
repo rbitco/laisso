@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded in part by ADR-0010
 ---
 
 # Tracker status moves are Pipeline action Stages, not Lasso built-ins
