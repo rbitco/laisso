@@ -483,6 +483,12 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
     return chip;
   }
 
+  // Done and Abandon remove the worktree; the path stays on the Ticket as history.
+  function worktreeGone(t) { return t.state !== 'active'; }
+  function worktreeChip(t) {
+    return worktreeGone(t) ? el('span', { class: 'muted', text: 'worktree removed', title: t.worktree }) : copyChip('worktree', t.worktree);
+  }
+
   // Each showDetail is a generation; a pane whose generation has passed stops polling and never re-renders.
   let detailGen = 0;
   // The running Session whose output is on screen; "stdout" events for it read more.
@@ -536,7 +542,7 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
         head.appendChild(reopen);
       }
       pane.replaceChildren(head, el('div', { class: 'hint', text: opened + '. Lasso tracks this Session by its id only: the row ends when you mark the Stage done or skip it.' }),
-        el('div', { class: 'paths' }, [copyChip('worktree', t.worktree), copyChip('session id', s.id), s.runnerSessionId ? copyChip('runner session', s.runnerSessionId) : el('span'), s.transcriptPath ? copyChip('transcript', s.transcriptPath) : el('span')]));
+        el('div', { class: 'paths' }, [worktreeChip(t), copyChip('session id', s.id), s.runnerSessionId ? copyChip('runner session', s.runnerSessionId) : el('span'), s.transcriptPath ? copyChip('transcript', s.transcriptPath) : el('span')]));
       return pane;
     }
     const final = el('div', { class: 'final' + (s.outcome === 'succeeded' ? ' ok' : ''), text: s.finalMessage || '' });
@@ -547,7 +553,7 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
     }
     const out = el('pre', { text: '' });
     const paths = el('div', { class: 'paths' }, [
-      copyChip('worktree', t.worktree),
+      worktreeChip(t),
       s.stdoutPath ? copyChip('stdout', s.stdoutPath) : el('span'),
       s.runnerSessionId ? copyChip('runner session', s.runnerSessionId) : el('span'),
       s.transcriptPath ? copyChip('transcript', s.transcriptPath) : el('span'),
@@ -710,7 +716,7 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
     if (t.session) left.appendChild(sessionPane(t, t.session, gen));
     else left.appendChild(el('div', { class: 'panel muted', text: 'No Session yet.' }));
     left.appendChild(el('dl', {}, [
-      el('dt', { text: 'worktree' }), el('dd', { text: t.worktree }),
+      el('dt', { text: 'worktree' }), el('dd', { text: worktreeGone(t) ? t.worktree + ' (removed)' : t.worktree }),
       el('dt', { text: 'pipeline' }), pipelineCell(t),
       el('dt', { text: 'id' }), el('dd', { text: t.id }),
     ]));

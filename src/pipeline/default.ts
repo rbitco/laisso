@@ -56,7 +56,10 @@ stages:
     prompt: |
       Address each unaddressed Feedback item below on this branch: failed
       checks and review threads. Reply on each thread with the marker,
-      commit, and push.
+      commit, and push. Then resolve each thread you fixed; Lasso counts a
+      thread addressed only once it has a marked reply and is resolved.
+      Leave a thread unresolved when you could not fix it, and say why in
+      your reply.
 
   - action: tracker.transition
     status: Done
