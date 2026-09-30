@@ -57,10 +57,8 @@ describe("the tracker mirror", () => {
 
     // Intake answers before the tracker push finishes; the push follows in the background.
     const ticket = await admit(lasso, "APP-12");
-    expect(argsOf(await callsSince(lasso, 5))).toEqual([
+    expect(argsOf(await callsSince(lasso, 3))).toEqual([
       "jira workitem view APP-12 --fields summary,description --json",
-      'jira workitem search --jql project = APP AND status = "In Progress" --limit 1 --json',
-      'jira workitem search --jql project = APP AND status = "Done" --limit 1 --json',
       "jira workitem view APP-12 --fields labels --json",
       "jira workitem edit --key APP-12 --labels lasso:grill --remove-labels lasso:review --yes",
     ]);
@@ -78,31 +76,27 @@ describe("the tracker mirror", () => {
 
     await lasso.runner.script({ stdout: claudeFixture("success.json"), commands: [["git", "commit", "-q", "--allow-empty", "-m", "work"]] });
     const tick = await checkNow(lasso);
-    expect(tick.changes).toEqual([
-      { ticket: ticket.id, summary: "transition-in-progress: tracker.transition In Progress" },
-      { ticket: ticket.id, summary: "started implement" },
-    ]);
-    // implement's end kicks the tick, which performs Done without a check-now.
+    expect(tick.changes).toEqual([{ ticket: ticket.id, summary: "started transition-in-progress" }]);
+    // Each Session's end kicks the tick: the transition's starts implement, and implement's performs Done, with no check-now.
     const finished = await waitFor(async () => { const d = await detailOf(lasso, ticket.id); return d.state === "done" ? d : null; }, "the Ticket to be done");
     expect(finished.sessions.map((s) => [s.stage, s.mode, s.outcome, s.finalMessage])).toEqual([
-      ["transition-done", "action", "succeeded", "tracker.transition Done"],
+      ["transition-done", "action", "succeeded", "moved APP-12 to Done"],
       ["implement", "headless", "succeeded", expect.any(String)],
-      ["transition-in-progress", "action", "succeeded", "tracker.transition In Progress"],
+      ["transition-in-progress", "action", "succeeded", "moved APP-12 to In Progress"],
     ]);
-    // The action moved the status, then the label swapped to implement.
+    // The config Action moved the status through acli. Then the label swapped to implement, implement's finish found it
+    // already right, and Done cleared it; those pushes run in the background, so their order against the kicked ticks varies.
     const calls = argsOf(await callsSince(lasso, 7));
-    expect(calls.slice(0, 3)).toEqual([
-      "jira workitem transition --key APP-12 --status In Progress --yes",
+    expect(calls[0]).toBe("jira workitem transition --key APP-12 --status In Progress --yes");
+    expect(calls.slice(1).sort()).toEqual([
       "jira workitem view APP-12 --fields labels --json",
       "jira workitem edit --key APP-12 --labels lasso:implement --remove-labels lasso:grill --yes",
-    ]);
-    // implement's finish found the label already right, in the background while the kicked tick performed Done; Done cleared it.
-    expect(calls.slice(3).sort()).toEqual([
       "jira workitem transition --key APP-12 --status Done --yes",
       "jira workitem view APP-12 --fields labels --json",
       "jira workitem view APP-12 --fields labels --json",
       "jira workitem edit --key APP-12 --remove-labels lasso:implement --yes",
     ].sort());
+    expect(calls.indexOf("jira workitem transition --key APP-12 --status Done --yes")).toBeLessThan(calls.indexOf("jira workitem edit --key APP-12 --remove-labels lasso:implement --yes"));
   });
 
   it("parks a failed push as pending, retries it on the tick, and overwrites the tracker after a restart", async () => {
@@ -182,14 +176,14 @@ stages:
     ]);
     const ticket = await admit(lasso, "APP-12");
     await pull(lasso, ticket.id, "skip");
-    // Intake's fetch and push (five calls), then Skip's push (two), before the slate is wiped.
-    await callsSince(lasso, 7);
+    // Intake's fetch and push (three calls), then Skip's push (two), before the slate is wiped.
+    await callsSince(lasso, 5);
     await lasso.tracker.clearCalls();
 
     const tick = await checkNow(lasso);
-    expect(tick.changes).toEqual([{ ticket: ticket.id, summary: "Flagged: APP-12: Error: transition is not valid from Backlog" }]);
-    const d = await detailOf(lasso, ticket.id);
-    expect(d.flag).toMatchObject({ reason: "outcome.failed", detail: "APP-12: Error: transition is not valid from Backlog" });
+    expect(tick.changes).toEqual([{ ticket: ticket.id, summary: "started transition-in-progress" }]);
+    const d = await waitFor(async () => { const d = await detailOf(lasso, ticket.id); return d.flag ? d : null; }, "the Flag");
+    expect(d.flag).toMatchObject({ reason: "outcome.failed", detail: "tracker.transition exited 1: ✗ Error: transition is not valid from Backlog" });
     expect(d.session).toMatchObject({ stage: "transition-in-progress", mode: "action", outcome: "failed", running: false });
     // An action Stage has nothing to resume: Retry performs it again.
     expect(d.triggers.map((x) => x.action)).toEqual(["retry", "extend", "done", "skip", "abandon"]);
@@ -200,7 +194,8 @@ stages:
     ]);
     // Resume has nothing to re-enter on an action Stage; Retry performs the action again and it fails the same way.
     await expect(pull(lasso, ticket.id, "resume")).rejects.toThrow("transition-in-progress is an action Stage; Retry performs it again");
-    const retried = await pull(lasso, ticket.id, "retry");
+    await pull(lasso, ticket.id, "retry");
+    const retried = await waitFor(async () => { const d = await detailOf(lasso, ticket.id); return d.flag && d.sessions.length === 2 ? d : null; }, "the retry to Flag");
     expect(retried.flag).toMatchObject({ reason: "outcome.failed" });
     expect(retried.sessions.filter((s) => s.stage === "transition-in-progress")).toHaveLength(2);
   });
@@ -210,8 +205,8 @@ stages:
     const ticket = await admit(lasso, "APP-12");
     await lasso.runner.script({ hang: true });
     await pull(lasso, ticket.id, "skip");
-    // Intake's fetch and push (four calls: the label is already right), then Skip's push (one).
-    await callsSince(lasso, 5);
+    // Intake's fetch and push (two calls: the label is already right), then Skip's push (one).
+    await callsSince(lasso, 3);
     await checkNow(lasso);
     const headless = (d: TicketDetail) => d.sessions.filter((s) => s.mode === "headless").map((s) => [s.ordinal, s.running, s.endedReason]);
     await waitFor(async () => ((await detailOf(lasso, ticket.id)).session?.mode === "headless" ? true : null), "implement to start");
@@ -235,7 +230,7 @@ stages:
     const { lasso } = await jiraLasso([{ tool: "acli", match: ["workitem view APP-12", "--fields labels"], stdout: jiraLabels("lasso:grill") }]);
     const ticket = await admit(lasso, "APP-12");
     await pull(lasso, ticket.id, "skip");
-    await callsSince(lasso, 5);
+    await callsSince(lasso, 3);
     // A transition that never answers: the process is stopped while the action Session is open.
     await lasso.tracker.reply({ tool: "acli", match: ["workitem transition"], sleepMs: 60_000 }, true);
     void checkNow(lasso).catch(() => undefined);
@@ -252,9 +247,11 @@ stages:
     const tick = await checkNow(again);
     expect(tick.changes.slice(0, 2)).toEqual([
       { ticket: ticket.id, summary: "mirror pushed" },
-      { ticket: ticket.id, summary: "transition-in-progress: tracker.transition In Progress" },
+      { ticket: ticket.id, summary: "started transition-in-progress" },
     ]);
-    expect((await detailOf(again, ticket.id)).sessions.filter((s) => s.mode === "action").map((s) => [s.stage, s.outcome])).toEqual([
+    const actionRuns = async () => (await detailOf(again, ticket.id)).sessions.filter((s) => s.mode === "action").map((s) => [s.stage, s.outcome]);
+    await waitFor(async () => ((await actionRuns())[0]?.[1] === "succeeded" ? true : null), "the transition to succeed");
+    expect(await actionRuns()).toEqual([
       ["transition-in-progress", "succeeded"],
       ["transition-in-progress", "interrupted"],
     ]);
@@ -266,9 +263,9 @@ stages:
     const { lasso } = started;
     const ticket = await lasso.api<IntakeResult>("/api/tickets", { method: "POST", body: JSON.stringify({ input: "Add dark mode", repo: "app", pipeline: "flow" }) });
     await pull(lasso, ticket.id, "skip");
-    const tick = await checkNow(lasso);
-    expect(tick.changes).toEqual([{ ticket: ticket.id, summary: "Flagged: transition-in-progress: Ticket has no tracker issue yet" }]);
+    await checkNow(lasso);
+    const d = await waitFor(async () => { const d = await detailOf(lasso, ticket.id); return d.flag ? d : null; }, "the Flag");
+    expect(d.flag).toMatchObject({ reason: "outcome.failed", detail: "tracker.transition exited 1: transition-in-progress: the Ticket has no tracker issue yet" });
     expect(await lasso.tracker.calls()).toEqual([]);
-    expect((await detailOf(lasso, ticket.id)).flag!.reason).toBe("outcome.failed");
   });
 });

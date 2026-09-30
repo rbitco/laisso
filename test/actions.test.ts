@@ -16,6 +16,7 @@ afterEach(async () => {
 const NOTIFY = `runner: claude
 stages:
   - action: notify
+    name: notify
     with: { channel: ops }
   - name: implement
     human: true
@@ -124,7 +125,7 @@ describe("An action Stage naming a config Action", () => {
 
     const unknown = await save(NOTIFY.replace("action: notify", "action: page"));
     expect(unknown.status).toBe(400);
-    expect((await unknown.json()).error).toMatch(/Stage page: no Action named page in config\.yaml/);
+    expect((await unknown.json()).error).toMatch(/Stage notify: no Action named page in config\.yaml/);
 
     const missing = await save(NOTIFY.replace("with: { channel: ops }", "with: {}"));
     expect((await missing.json()).error).toMatch(/notify needs with\.channel/);
@@ -167,7 +168,7 @@ describe("A repo's own Action", () => {
   });
 
   it("may exist only in the repo: Intake checks it against the repo, and saving accepts it", async () => {
-    const DEPLOY = NOTIFY.replace("action: notify\n    with: { channel: ops }", "action: deploy\n    with: { env: prod }");
+    const DEPLOY = NOTIFY.replace("action: notify\n    name: notify\n    with: { channel: ops }", "action: deploy\n    name: deploy\n    with: { env: prod }");
     const lasso = await twoRepos({ notify: NOTIFY, deploy: DEPLOY });
     const save = (text: string) => lasso.api<Response>("/api/pipelines/deploy", { method: "PUT", raw: true, body: JSON.stringify({ text }) });
     expect((await save(DEPLOY)).status).toBe(200);

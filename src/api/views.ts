@@ -1,6 +1,6 @@
 import { shortId, type TicketRow } from "../store/tickets.ts";
 import type { SessionRow } from "../store/sessions.ts";
-import { isTransition, type Pipeline, type RunnerName, type Stage } from "../pipeline/load.ts";
+import { type Pipeline, type RunnerName, type Stage } from "../pipeline/load.ts";
 import type { PipelineSource } from "../pipeline/files.ts";
 import type { Drift, VersionRow } from "../store/versions.ts";
 import type { Config } from "../server/config.ts";
@@ -158,7 +158,6 @@ export interface PipelineView {
 
 export type StageFields =
   | { kind: "runner"; name: string; label: string; prompt: string | null; skills: string[]; runner: RunnerName | null; human: boolean; advance: boolean; artifact: string | null; repeat: "feedback" | null; budget: { rounds?: number; attempts?: number; wallTime?: string }; runnerOptions: Record<string, unknown> }
-  | { kind: "action"; name: string; label: string; action: "tracker.transition"; status: string }
   | { kind: "action"; name: string; label: string; action: string; with: Record<string, string> };
 
 export interface PipelineListing {
@@ -225,8 +224,10 @@ function stageFields(stage: Stage): StageFields {
   return { ...fields, label: stageLabel(stage), runner: inheritsRunner ? null : stage.runner };
 }
 
+/** What the stepper calls a Stage: an action Stage with params by their values (a transition by its status), any other by its name. */
 export function stageLabel(stage: Stage): string {
-  return stage.kind === "action" && isTransition(stage) ? stage.status : stage.name;
+  const values = stage.kind === "action" ? Object.values(stage.with).filter(Boolean) : [];
+  return values.length ? values.join(" ") : stage.name;
 }
 
 export function ticketView(ticket: TicketRow, ctx: ViewContext): TicketView {

@@ -9,11 +9,10 @@ const FAILING: Array<[string, string, RegExp]> = [
   ["an empty file", "", /is empty/],
   ["no stages", "runner: claude\n", /has no stages/],
   ["a stage that is not a mapping", STAGES("  - implement\n"), /stage 1 is not a mapping/],
-  ["a stage with both action and prompt", STAGES("  - name: x\n    prompt: p\n    action: tracker.transition\n    status: Done\n"), /has both action and prompt\/skills/],
+  ["a stage with both action and prompt", STAGES("  - name: x\n    prompt: p\n    action: tracker.transition\n    with: { status: Done }\n"), /has both action and prompt\/skills/],
   ["a stage with neither prompt, skills nor action", STAGES("  - name: x\n    artifact: pr-exists\n"), /needs a prompt, skills, or an action/],
   ["an action that could not be an Action's name", STAGES("  - action: Tell Ops\n"), /Tell Ops is not an Action name/],
-  ["an empty transition status", STAGES("  - action: tracker.transition\n    status: ' '\n"), /tracker\.transition needs a status/],
-  ["a transition with a status and with", STAGES("  - action: tracker.transition\n    status: Done\n    with: { status: Done }\n"), /stage 1: with is not a field of a tracker\.transition Stage with a status/],
+  ["a status outside with, as before ADR 0010", STAGES("  - action: tracker.transition\n    status: Done\n"), /stage 1: status is now a param; write with: \{ status: Done \}/],
   ["an action stage carrying Runner fields", STAGES("  - action: notify\n    human: true\n"), /stage 1: human is not a field of an action Stage/],
   ["an action stage's with that is not a mapping", STAGES("  - action: notify\n    with: ops\n"), /with must be a mapping of param to value/],
   ["an action stage's param that is a list", STAGES("  - action: notify\n    with: { channel: [a, b] }\n"), /with\.channel must be a single value/],
@@ -26,7 +25,7 @@ const FAILING: Array<[string, string, RegExp]> = [
   ["a file artifact that escapes the worktree", STAGES("  - name: x\n    prompt: p\n    artifact: file ../etc/passwd\n"), /unknown artifact file \.\.\/etc\/passwd/],
   ["a repeat trigger other than feedback", STAGES("  - name: x\n    prompt: p\n    repeat: always\n"), /repeat must be feedback/],
   ["a repeating stage with no artifact to end it", STAGES("  - name: x\n    prompt: p\n    repeat: feedback\n"), /a repeating Stage needs an artifact/],
-  ["two transitions to one status", STAGES("  - action: tracker.transition\n    status: Done\n  - action: tracker.transition\n    status: Done\n"), /has two Stages named transition-done/],
+  ["two transitions to one status", STAGES("  - action: tracker.transition\n    with: { status: Done }\n  - action: tracker.transition\n    with: { status: Done }\n"), /has two Stages named transition-done/],
   ["an unknown Pipeline runner", "runner: gemini\nstages:\n  - name: x\n    prompt: p\n", /Pipeline p: unknown runner gemini/],
   ["an unknown Stage runner", STAGES("  - name: x\n    prompt: p\n    runner: gemini\n"), /stage 1: unknown runner gemini/],
   ["skills that are not strings", STAGES("  - name: x\n    skills: [1, 2]\n"), /skills must be a list of skill names/],
@@ -69,7 +68,7 @@ stages:
     runnerOptions: { model: opus }
     budget: { rounds: 1, attempts: 3, wallTime: 45m }
   - action: tracker.transition
-    status: In Progress
+    with: { status: In Progress }
   - action: slack.post
     with: { channel: ops, count: 2 }
   - action: slack.post
@@ -88,8 +87,8 @@ stages:
       budget: { spend: 12.5 },
       stages: [
         { kind: "runner", name: "grill", prompt: "Talk.", skills: ["grilling", "to-spec"], runner: "claude", human: true, advance: false, artifact: "tracker-spec", repeat: null, budget: { rounds: 1, attempts: 3, wallTime: "45m" }, runnerOptions: { model: "opus" }, inheritsRunner: false },
-        { kind: "action", name: "transition-in-progress", action: "tracker.transition", status: "In Progress" },
-        { kind: "action", name: "slack-post", action: "slack.post", with: { channel: "ops", count: "2" } },
+        { kind: "action", name: "transition-in-progress", action: "tracker.transition", with: { status: "In Progress" } },
+        { kind: "action", name: "post-ops-2", action: "slack.post", with: { channel: "ops", count: "2" } },
         { kind: "action", name: "tell-team", action: "slack.post", with: {} },
         { kind: "runner", name: "review", prompt: "Address feedback.", skills: [], runner: "codex", human: false, advance: true, artifact: "pr-merged", repeat: "feedback", budget: { rounds: undefined, attempts: undefined, wallTime: undefined }, runnerOptions: {}, inheritsRunner: true },
         { kind: "runner", name: "notes", prompt: "Write.", skills: [], runner: "codex", human: false, advance: true, artifact: "file docs/NOTES.md", repeat: null, budget: { rounds: undefined, attempts: undefined, wallTime: undefined }, runnerOptions: {}, inheritsRunner: true },
@@ -102,14 +101,14 @@ describe("checkActions", () => {
   const actions = { notify: { run: "true", params: ["channel"], timeout: "5m" } };
   const check = (body: string) => () => checkActions(parsePipeline("p", STAGES(body)), actions);
 
-  it("accepts a Stage naming a config Action with exactly its params, and leaves tracker.transition alone", () => {
-    expect(check("  - action: notify\n    with: { channel: ops }\n  - action: tracker.transition\n    status: Done\n")).not.toThrow();
+  it("accepts a Stage naming a config Action with exactly its params", () => {
+    expect(check("  - action: notify\n    with: { channel: ops }\n")).not.toThrow();
   });
 
   it("refuses an unknown Action, a missing param, and an extra one", () => {
     expect(check("  - action: page\n")).toThrow(/Pipeline p Stage page: no Action named page in config\.yaml/);
     expect(check("  - action: notify\n")).toThrow(/Stage notify: notify needs with\.channel/);
     expect(check("  - action: notify\n    with: { channel: ops, loud: true }\n")).toThrow(/notify takes no param loud/);
-    expect(check("  - action: tracker.transition\n")).toThrow(/Stage tracker-transition: tracker\.transition needs a status/);
+    expect(check("  - action: tracker.transition\n    with: { status: Done }\n")).toThrow(/Stage transition-done: no Action named tracker\.transition in config\.yaml/);
   });
 });

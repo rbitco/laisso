@@ -32,26 +32,12 @@ export interface RunnerStage {
   runnerOptions: Record<string, unknown>;
 }
 
-/** The built-in `tracker.transition` (ADR 0005), until migration moves it into config (ADR 0010). */
-export interface TransitionStage {
-  kind: "action";
-  name: string;
-  action: "tracker.transition";
-  status: string;
-}
-
 /** A Stage that runs an Action defined in config by name, with the params it supplies (ADR 0010). */
-export interface CommandStage {
+export interface ActionStage {
   kind: "action";
   name: string;
   action: string;
   with: Record<string, string>;
-}
-
-export type ActionStage = TransitionStage | CommandStage;
-
-export function isTransition(stage: ActionStage): stage is TransitionStage {
-  return "status" in stage;
 }
 
 export type Stage = RunnerStage | ActionStage;
@@ -103,8 +89,7 @@ export function loadPipeline(dir: string, name: string): Pipeline {
 
 const PIPELINE_FIELDS = new Set(["runner", "budget", "stages"]);
 const RUNNER_STAGE_FIELDS = new Set(["name", "prompt", "skills", "runner", "human", "advance", "artifact", "repeat", "budget", "runnerOptions"]);
-const TRANSITION_STAGE_FIELDS = new Set(["action", "status"]);
-const COMMAND_STAGE_FIELDS = new Set(["action", "name", "with"]);
+const ACTION_STAGE_FIELDS = new Set(["action", "name", "with"]);
 
 export function parsePipeline(name: string, text: string): Pipeline {
   const raw = parse(text);
@@ -137,14 +122,7 @@ function parseStage(pipeline: string, entry: unknown, index: number, defaultRunn
   const isAction = typeof s.action === "string";
   const isRunner = s.prompt !== undefined || s.skills !== undefined;
   if (isAction && isRunner) throw new PipelineError(`${where} has both action and prompt/skills`);
-  if (isAction) {
-    if (s.action === "tracker.transition" && s.status !== undefined) {
-      for (const key of Object.keys(s)) if (!TRANSITION_STAGE_FIELDS.has(key)) throw new PipelineError(`${where}: ${key} is not a field of a tracker.transition Stage with a status`);
-      if (typeof s.status !== "string" || !s.status.trim()) throw new PipelineError(`${where}: tracker.transition needs a status`);
-      return { kind: "action", name: `transition-${hyphenate(s.status)}`, action: "tracker.transition", status: s.status.trim() };
-    }
-    return parseCommandStage(s, where);
-  }
+  if (isAction) return parseActionStage(s, where);
   if (!isRunner) throw new PipelineError(`${where} needs a prompt, skills, or an action`);
   for (const key of Object.keys(s)) if (!RUNNER_STAGE_FIELDS.has(key)) throw new PipelineError(`${where}: unknown field ${key}`);
   if (typeof s.name !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(s.name)) throw new PipelineError(`${where} needs a name of lowercase letters, digits, and hyphens`);
@@ -183,8 +161,10 @@ function parseStage(pipeline: string, entry: unknown, index: number, defaultRunn
   };
 }
 
-function parseCommandStage(s: Record<string, unknown>, where: string): CommandStage {
-  for (const key of Object.keys(s)) if (!COMMAND_STAGE_FIELDS.has(key)) throw new PipelineError(`${where}: ${key} is not a field of an action Stage`);
+function parseActionStage(s: Record<string, unknown>, where: string): ActionStage {
+  // The form before ADR 0010; startup migration rewrites it, so only a hand edit meets this.
+  if (s.status !== undefined) throw new PipelineError(`${where}: status is now a param; write with: { status: ${String(s.status)} }`);
+  for (const key of Object.keys(s)) if (!ACTION_STAGE_FIELDS.has(key)) throw new PipelineError(`${where}: ${key} is not a field of an action Stage`);
   const action = String(s.action);
   if (!ACTION_NAME.test(action)) throw new PipelineError(`${where}: ${action} is not an Action name`);
   if (s.name !== undefined && (typeof s.name !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(s.name))) throw new PipelineError(`${where} needs a name of lowercase letters, digits, and hyphens`);
@@ -194,21 +174,24 @@ function parseCommandStage(s: Record<string, unknown>, where: string): CommandSt
     if (value === null || typeof value === "object") throw new PipelineError(`${where}: with.${key} must be a single value`);
     params[key] = String(value);
   }
-  return { kind: "action", name: typeof s.name === "string" ? s.name : hyphenate(action), action, with: params };
+  return { kind: "action", name: typeof s.name === "string" ? s.name : defaultActionName(action, params), action, with: params };
+}
+
+/** An unnamed action Stage is called by its Action's last part and its param values: tracker.transition with status In Progress is transition-in-progress. */
+export function defaultActionName(action: string, params: Record<string, string>): string {
+  return hyphenate([action.split(".").at(-1)!, ...Object.values(params)].join(" "));
 }
 
 /**
- * Every command Stage names an Action config defines and supplies exactly
+ * Every action Stage names an Action config defines and supplies exactly
  * its params. Parsing cannot check this, since the Actions live in config;
  * saving a Pipeline and Intake do.
  */
 export function checkActions(pipeline: Pipeline, actions: Record<string, ActionConfig>): void {
   for (const stage of pipeline.stages) {
-    if (stage.kind !== "action" || isTransition(stage)) continue;
+    if (stage.kind !== "action") continue;
     const where = `Pipeline ${pipeline.name} Stage ${stage.name}`;
     const action = actions[stage.action];
-    // Until tracker.transition moves into config (ADR 0010), a bare one is the built-in missing its status.
-    if (!action && stage.action === "tracker.transition") throw new PipelineError(`${where}: tracker.transition needs a status`);
     if (!action) throw new PipelineError(`${where}: no Action named ${stage.action} in config.yaml`);
     const missing = action.params.filter((p) => !(p in stage.with));
     if (missing.length) throw new PipelineError(`${where}: ${stage.action} needs ${missing.map((p) => `with.${p}`).join(", ")}`);

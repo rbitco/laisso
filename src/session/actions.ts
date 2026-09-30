@@ -9,8 +9,7 @@ import type { Logger } from "../server/log.ts";
 import type { TickChange } from "../server/tick.ts";
 import type { Tickets, TicketRow } from "../store/tickets.ts";
 import type { Sessions } from "../store/sessions.ts";
-import { isTransition, type ActionStage, type CommandStage, type TransitionStage } from "../pipeline/load.ts";
-import { trackerFor } from "../tracker/tracker.ts";
+import type { ActionStage } from "../pipeline/load.ts";
 import type { Progress } from "./progress.ts";
 
 export interface ActionsDeps {
@@ -38,8 +37,7 @@ const TAIL_BYTES = 4096;
 
 /**
  * Action Stages: Lasso performs them itself, records a Session row with a
- * Lasso-minted id and mode action, and auto-advances. The built-in
- * `tracker.transition` (ADR 0005) runs inside the tick; an Action config
+ * Lasso-minted id and mode action, and auto-advances. The Action config
  * defines (ADR 0010) runs as a shell command in the background, judged by
  * its exit code. A failed action is a failed Session, so the Ticket is
  * Flagged like any other Outcome.
@@ -52,19 +50,12 @@ export class Actions {
     this.deps = deps;
   }
 
-  /** The tick's share: run the action Stage of every Ticket at one, and the next while action Stages follow on. */
+  /** The tick's share: start the action Stage of every Ticket at one. A command runs in the background and is judged when it closes; its end kicks the tick for any Stage after. */
   async runDue(): Promise<TickChange[]> {
     const changes: TickChange[] = [];
-    for (let ticket of this.deps.tickets.list()) {
-      for (let stage = this.deps.progress.dueAction(ticket); stage; stage = this.deps.progress.dueAction(ticket)) {
-        if (!isTransition(stage)) {
-          // A command runs in the background and is judged when it closes; its Ticket waits until then.
-          changes.push({ ticket: ticket.id, summary: this.start(ticket, stage) });
-          break;
-        }
-        changes.push({ ticket: ticket.id, summary: await this.run(ticket, stage) });
-        ticket = this.deps.tickets.get(ticket.id)!;
-      }
+    for (const ticket of this.deps.tickets.list()) {
+      const stage = this.deps.progress.dueAction(ticket);
+      if (stage) changes.push({ ticket: ticket.id, summary: this.start(ticket, stage) });
     }
     return changes;
   }
@@ -85,50 +76,12 @@ export class Actions {
     await Promise.all(live.map((run) => run.done));
   }
 
-  private async run(ticket: TicketRow, stage: TransitionStage): Promise<string> {
-    const { sessions, tickets, log, progress } = this.deps;
-    const row = sessions.insert({
-      id: randomUUID(),
-      ticket: ticket.id,
-      stage: stage.name,
-      stage_snapshot: JSON.stringify(stage),
-      mode: "action",
-      started_by: "auto",
-      stdout_path: null,
-      limits_honoured: "[]",
-    });
-    log.info("session.started", { session: row.id, ticket: ticket.id, stage: stage.name, mode: "action", action: stage.action, status: stage.status });
-    let failure: string | null = null;
-    try {
-      await this.perform(ticket, stage);
-    } catch (error) {
-      failure = error instanceof Error ? error.message : String(error);
-    }
-    const ended = sessions.end(row.id, {
-      ended_by: "outcome",
-      ended_reason: null,
-      outcome: failure ? "failed" : "succeeded",
-      final_message: failure ?? `${stage.action} ${stage.status}`,
-      usage: null,
-      cost_usd: null,
-      transcript_path: null,
-    });
-    log.info("session.ended", { session: ended.id, ticket: ticket.id, stage: stage.name, mode: "action", outcome: ended.outcome, message: ended.final_message });
-    const fresh = tickets.get(ticket.id)!;
-    if (failure) {
-      await progress.flag(fresh.id, "outcome.failed", failure);
-      return `Flagged: ${failure}`;
-    }
-    await progress.finished(fresh);
-    return `${stage.name}: ${stage.action} ${stage.status}`;
-  }
-
   /**
    * Start a command Action: its Session row is written and its process
    * spawned now, and it is judged when the process closes. The running
    * Session keeps the tick off the Ticket meanwhile.
    */
-  private start(ticket: TicketRow, stage: CommandStage): string {
+  private start(ticket: TicketRow, stage: ActionStage): string {
     const { sessions, home, log } = this.deps;
     const id = randomUUID();
     const dir = path.join(home.ticketsDir, ticket.id, "sessions");
@@ -190,7 +143,7 @@ export class Actions {
   }
 
   /** Why the command cannot run for this Ticket at all, or null. */
-  private unrunnable(ticket: TicketRow, stage: CommandStage, action: ActionConfig | undefined): string | null {
+  private unrunnable(ticket: TicketRow, stage: ActionStage, action: ActionConfig | undefined): string | null {
     if (!action) return `no Action named ${stage.action} in config.yaml`;
     const missing = action.params.filter((p) => !(p in stage.with));
     if (missing.length) return `${stage.action} needs ${missing.map((p) => `with.${p}`).join(", ")}`;
@@ -199,7 +152,7 @@ export class Actions {
   }
 
   /** Record how a command Action ended, then Flag or advance its Ticket; a shutdown leaves the Ticket for the next start. */
-  private async settle(ticket: TicketRow, stage: CommandStage, sessionId: string, how: { failure: string | null; tail: string; shutdown?: boolean }): Promise<void> {
+  private async settle(ticket: TicketRow, stage: ActionStage, sessionId: string, how: { failure: string | null; tail: string; shutdown?: boolean }): Promise<void> {
     const { sessions, tickets, log, progress } = this.deps;
     try {
       const ended = sessions.end(sessionId, {
@@ -223,7 +176,7 @@ export class Actions {
   }
 
   /** What the command is told (ADR 0010): the Ticket's details, as a Runner Session gets them and more, and one LASSO_<PARAM> per param. */
-  private env(ticket: TicketRow, stage: CommandStage, sessionId: string): Record<string, string> {
+  private env(ticket: TicketRow, stage: ActionStage, sessionId: string): Record<string, string> {
     const repo = this.deps.config.repos[ticket.repo];
     return {
       LASSO_TICKET: ticket.id,
@@ -240,13 +193,6 @@ export class Actions {
       LASSO_PIPELINE: ticket.pipeline,
       ...Object.fromEntries(Object.entries(stage.with).map(([key, value]) => [`LASSO_${key.toUpperCase()}`, value])),
     };
-  }
-
-  private async perform(ticket: TicketRow, stage: TransitionStage): Promise<void> {
-    if (!ticket.reference) throw new Error(`${stage.name}: Ticket has no tracker issue yet`);
-    const repo = this.deps.config.repos[ticket.repo];
-    if (!repo) throw new Error(`${stage.name}: repo ${ticket.repo} is no longer configured`);
-    await trackerFor(repo.tracker, repo.project).transition(ticket.reference, stage.status);
   }
 }
 

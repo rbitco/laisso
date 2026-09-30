@@ -26,11 +26,6 @@ export class JiraTracker implements Tracker {
     return { reference, title, body: body || null };
   }
 
-  async transition(reference: string, status: string): Promise<void> {
-    const r = await runTool("acli", ["jira", "workitem", "transition", "--key", reference, "--status", status, "--yes"]);
-    if (r.code !== 0) throw new TrackerError(`${reference}: ${failureReason("acli", r)}`);
-  }
-
   async labels(reference: string): Promise<string[]> {
     const r = await runTool("acli", ["jira", "workitem", "view", reference, "--fields", "labels", "--json"]);
     if (r.code !== 0) throw new TrackerError(`${reference}: ${failureReason("acli", r)}`);
@@ -46,11 +41,5 @@ export class JiraTracker implements Tracker {
     if (remove.length) args.push("--remove-labels", remove.join(","));
     const r = await runTool("acli", [...args, "--yes"]);
     if (r.code !== 0) throw new TrackerError(`${reference}: ${failureReason("acli", r)}`);
-  }
-
-  async checkStatus(status: string): Promise<string | null> {
-    const jql = `project = ${this.project} AND status = "${status.replace(/"/g, '\\"')}"`;
-    const r = await runTool("acli", ["jira", "workitem", "search", "--jql", jql, "--limit", "1", "--json"]);
-    return r.code === 0 ? null : failureReason("acli", r);
   }
 }

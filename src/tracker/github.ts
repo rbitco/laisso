@@ -1,7 +1,6 @@
 import { runTool, failureReason, parseJson } from "./exec.ts";
 import { TrackerError, type Issue, type LabelChange, type Tracker } from "./tracker.ts";
 
-const STATUSES = ["open", "closed"];
 const LABEL_COLOR = "5319E7";
 
 function split(reference: string): { repo: string; number: string } {
@@ -36,14 +35,6 @@ export class GithubTracker implements Tracker {
     };
   }
 
-  async transition(reference: string, status: string): Promise<void> {
-    const { repo, number } = split(reference);
-    const wanted = status.trim().toLowerCase();
-    if (!STATUSES.includes(wanted)) throw new TrackerError(`${reference}: GitHub accepts only open and closed, not ${status}`);
-    const r = await runTool("gh", ["issue", wanted === "closed" ? "close" : "reopen", number, "--repo", repo]);
-    if (r.code !== 0) throw new TrackerError(`${reference}: ${failureReason("gh", r)}`);
-  }
-
   async labels(reference: string): Promise<string[]> {
     const { repo, number } = split(reference);
     const r = await runTool("gh", ["issue", "view", number, "--repo", repo, "--json", "labels"]);
@@ -68,9 +59,5 @@ export class GithubTracker implements Tracker {
     }
     const again = await runTool("gh", args);
     if (again.code !== 0) throw new TrackerError(`${reference}: ${failureReason("gh", again)}`);
-  }
-
-  async checkStatus(status: string): Promise<string | null> {
-    return STATUSES.includes(status.trim().toLowerCase()) ? null : `GitHub accepts only open and closed`;
   }
 }

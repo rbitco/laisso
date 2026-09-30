@@ -1,7 +1,7 @@
 import { readFileSync, unlinkSync } from "node:fs";
 import { replaceFile } from "../atomic-write.ts";
 import path from "node:path";
-import { parseDocument, isSeq, type Document } from "yaml";
+import { parseDocument, isMap, isScalar, isSeq, type Document } from "yaml";
 import { applyPatch } from "../yaml-edit.ts";
 import { isPlainObject } from "../fields.ts";
 import { checkActionsAny, parsePipeline, pipelineFile, listPipelines, PipelineError, NAME, type Pipeline } from "./load.ts";
@@ -132,10 +132,10 @@ function reorderStages(doc: Document, pipeline: string, names: string[], order: 
   seq.items = next as typeof seq.items;
 }
 
-/** A new Stage's node: null fields left out, lists written inline as the default Pipeline writes them. */
+/** A new Stage's node: null fields left out, lists and an action's `with` written inline as the default Pipeline writes them. */
 function newStage(doc: Document, fields: Record<string, unknown>) {
   const node = doc.createNode(Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== null)));
-  for (const pair of node.items) if (isSeq(pair.value)) pair.value.flow = true;
+  for (const pair of node.items) if (isSeq(pair.value) || (isMap(pair.value) && isScalar(pair.key) && pair.key.value === "with")) pair.value.flow = true;
   return node;
 }
 

@@ -183,15 +183,15 @@ stages:
     expect(first.text).toContain("stages:\n  - name: plan\n    prompt: Plan it.\n\n  - name: build # first\n");
   });
 
-  it("adds a tracker.transition action Stage in position, and refuses one without a status", async () => {
+  it("adds a tracker.transition action Stage in position, and refuses one without its status", async () => {
     const lasso = await lassoWith();
-    await expect(lasso.api("/api/pipelines/work", { method: "PATCH", body: json({ order: ["implement", { action: "tracker.transition", status: null }, "notes"] }) })).rejects.toThrow(/tracker.transition needs a status/);
-    const after = await lasso.api<PipelineFile>("/api/pipelines/work", { method: "PATCH", body: json({ order: ["implement", { action: "tracker.transition", status: "In Review" }, "notes"] }) });
+    await expect(lasso.api("/api/pipelines/work", { method: "PATCH", body: json({ order: ["implement", { action: "tracker.transition", with: {} }, "notes"] }) })).rejects.toThrow(/tracker\.transition needs with\.status/);
+    const after = await lasso.api<PipelineFile>("/api/pipelines/work", { method: "PATCH", body: json({ order: ["implement", { action: "tracker.transition", with: { status: "In Review" } }, "notes"] }) });
     expect(after.pipeline!.stages.map((s) => s.name)).toEqual(["implement", "transition-in-review", "notes"]);
     expect(after.text).toContain(`    budget: { attempts: 1 }
 
   - action: tracker.transition
-    status: In Review
+    with: { status: In Review }
 
   - name: notes
 `);

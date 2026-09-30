@@ -846,7 +846,7 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
     const yes = (b) => (b ? 'yes' : 'no');
     const budget = (b) => ['rounds', 'attempts', 'wallTime'].filter((k) => b[k] !== undefined).map((k) => k + ' ' + b[k]).join(', ') || 'defaults';
     const cards = v.pipeline.stages.map((s) => s.kind === 'action'
-      ? el('div', { class: 'card' }, [el('h3', {}, [el('span', { class: 'kind', text: 'action' }), s.action]), el('div', { class: 'fields' }, [ro('status', s.status)])])
+      ? el('div', { class: 'card' }, [el('h3', {}, [el('span', { class: 'kind', text: 'action' }), s.action]), el('div', { class: 'fields' }, Object.entries(s.with).map(([key, value]) => ro(key, value)))])
       : el('div', { class: 'card' }, [
         el('h3', {}, [el('span', { class: 'kind', text: s.human ? 'human' : 'runner' }), s.name]),
         el('div', { class: 'fields' }, [
@@ -961,12 +961,12 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
 
   // What a new Stage starts as: every field at its default.
   const BLANK_STAGE = { kind: 'runner', name: '', prompt: null, skills: [], runner: null, human: false, advance: true, artifact: null, repeat: null, budget: {} };
-  const BLANK_ACTION = { kind: 'action', name: '', action: 'tracker.transition', status: '' };
-  // Lasso's built-in action catalogue and each action's fields; the Pipeline parser (parseStage) is the authority.
+  const BLANK_ACTION = { kind: 'action', name: '', action: 'tracker.transition', with: { status: '' } };
+  // The actions a new Stage may pick and each one's params; config.yaml defines what they run (ADR 0010).
   const ACTIONS = { 'tracker.transition': [['status', 'tracker status, as In Review']] };
 
   function stageCard(s, pipeline, fresh) {
-    if (s.kind === 'action' && s.with) {
+    if (s.kind === 'action' && !fresh) {
       // A saved Stage running an Action from config: its params are editable; the action is changed in the file.
       const inputs = Object.fromEntries(Object.entries(s.with).map(([key, value]) => [key, el('input', { name: key, value })]));
       const node = el('div', { class: 'card' }, [el('h3', {}, [el('span', { class: 'kind', text: 'action' }), s.action]), el('div', { class: 'fields' }, Object.keys(inputs).map((key) => field(key, inputs[key])))]);
@@ -979,23 +979,21 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
       };
     }
     if (s.kind === 'action') {
-      // A new action Stage picks its action from the catalogue and shows that action's fields; a saved one keeps its action.
+      // A new action Stage picks its action and shows that action's params.
       const action = select('action', Object.keys(ACTIONS), s.action);
       const inputs = {};
       const fields = el('div', { class: 'fields' });
       const drawFields = () => {
-        for (const [key, placeholder] of ACTIONS[action.value] || []) inputs[key] = inputs[key] || el('input', { name: key, value: s[key] || '', placeholder });
-        fields.replaceChildren(...(fresh ? [field('action', action)] : []), ...(ACTIONS[action.value] || []).map(([key]) => field(key, inputs[key])));
+        for (const [key, placeholder] of ACTIONS[action.value] || []) inputs[key] = inputs[key] || el('input', { name: key, value: s.with[key] || '', placeholder });
+        fields.replaceChildren(field('action', action), ...(ACTIONS[action.value] || []).map(([key]) => field(key, inputs[key])));
       };
       action.addEventListener('change', drawFields);
       drawFields();
-      const node = el('div', { class: 'card' }, [el('h3', {}, [el('span', { class: 'kind', text: 'action' }), fresh ? 'new Stage' : s.action]), fields]);
+      const node = el('div', { class: 'card' }, [el('h3', {}, [el('span', { class: 'kind', text: 'action' }), 'new Stage']), fields]);
       return {
         name: s.name, node,
-        patch() {
-          if (fresh) return { action: action.value, ...Object.fromEntries((ACTIONS[action.value] || []).map(([key]) => [key, inputs[key].value.trim() || null])) };
-          const patch = {}; changed(patch, 'status', s.status, inputs.status.value.trim()); return patch;
-        },
+        // A param left blank is left out, so the save names it as missing.
+        patch: () => ({ action: action.value, with: Object.fromEntries((ACTIONS[action.value] || []).map(([key]) => [key, inputs[key].value.trim()]).filter(([, value]) => value)) }),
       };
     }
     const name = el('input', { name: 'name', value: s.name });

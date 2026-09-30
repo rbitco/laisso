@@ -15,7 +15,7 @@ stages:
       tracker with to-spec. For a prompt Ticket, to-spec creates the issue.
 
   - action: tracker.transition
-    status: In Progress
+    with: { status: In Progress }
 
   - name: plan
     skills: [codebase-design]
@@ -48,7 +48,7 @@ stages:
       marker, so the Review Stage addresses them as Feedback.
 
   - action: tracker.transition
-    status: In Review
+    with: { status: In Review }
 
   - name: review
     repeat: feedback
@@ -62,5 +62,5 @@ stages:
       your reply.
 
   - action: tracker.transition
-    status: Done
+    with: { status: Done }
 `;

@@ -1,6 +1,7 @@
 import { serve as listen } from "@hono/node-server";
 import { createRequire } from "node:module";
 import { resolveHome, ensureHome } from "./home.ts";
+import { migrateHome, migrateVersions } from "./migrate.ts";
 import { loadConfig } from "./config.ts";
 import { acquireLock, AlreadyRunning } from "./lock.ts";
 import { createLogger } from "./log.ts";
@@ -35,6 +36,8 @@ export interface ServeOptions {
 export async function serve(opts: ServeOptions): Promise<number> {
   const home = resolveHome();
   const defaults = ensureHome(home);
+  // Before config or any Pipeline is read: tracker.transition moves into config (ADR 0010).
+  const migrated = migrateHome(home);
   const config = loadConfig(home, { port: opts.portFlag });
   const log = createLogger(home.logFile);
 
@@ -55,6 +58,8 @@ export async function serve(opts: ServeOptions): Promise<number> {
   const ticketChanged = (ticket: string) => changes.emit({ kind: "ticket", ticket });
   const tickets = new Tickets(store.db, ticketChanged);
   const versions = new PipelineVersions(store.db);
+  const migratedVersions = migrateVersions(store.db);
+  if (migrated.config || migrated.pipelines.length || migratedVersions) log.info("migrated.actions", { config: migrated.config, pipelines: migrated.pipelines.join(",") || null, versions: migratedVersions });
   versions.pinUnpinned(tickets, home.pipelinesDir);
   const sessions = new Sessions(store.db, ticketChanged);
   const feedback = new Feedback(store.db, ticketChanged);

@@ -5,7 +5,7 @@ import { actionsFor, currentConfig, type Config, type RepoConfig } from "../serv
 import type { LassoHome } from "../server/home.ts";
 import { shortId, type Tickets, type TicketRow, type NewTicket } from "../store/tickets.ts";
 import type { PipelineVersions } from "../store/versions.ts";
-import { checkActions, isTransition, listPipelines, loadPipeline, PipelineError, type Pipeline } from "../pipeline/load.ts";
+import { checkActions, listPipelines, loadPipeline, PipelineError, type Pipeline } from "../pipeline/load.ts";
 import { Git } from "../git.ts";
 import { ulid } from "../ulid.ts";
 import { slugify } from "./slug.ts";
@@ -107,7 +107,6 @@ export class Intake {
       assertSameTracker(detection.kind, repoName, repo);
       const tracker = trackerFor(repo.tracker, repo.project);
       const issue = await fetchIssue(tracker, reference);
-      await checkTransitions(pipeline, tracker);
       row = { id, repo: repoName, reference, origin: "tracker", prompt: null, title: issue.title, body: issue.body, pipeline: pipeline.name, stage: pipeline.stages[0]!.name };
       branch = this.referenceBranch(tracker, reference, issue.title);
     }
@@ -148,15 +147,6 @@ export class Intake {
 
   private referenceBranch(tracker: Tracker, reference: string, title: string): string {
     return branchName(this.deps.config.branch_prefix, tracker.branchKey(reference), slugify(title));
-  }
-}
-
-/** Every tracker.transition status in the Pipeline must be one the tracker knows, or intake is refused with the reason. */
-async function checkTransitions(pipeline: Pipeline, tracker: Tracker): Promise<void> {
-  const statuses = [...new Set(pipeline.stages.flatMap((s) => (s.kind === "action" && isTransition(s) ? [s.status] : [])))];
-  for (const status of statuses) {
-    const problem = await tracker.checkStatus(status);
-    if (problem) throw new IntakeError(`Pipeline ${pipeline.name}: status "${status}" is not a status in ${tracker.project}: ${problem}`);
   }
 }
 

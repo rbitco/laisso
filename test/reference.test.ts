@@ -80,7 +80,7 @@ describe("detection of a tracker reference", () => {
 });
 
 describe("admitting a reference Ticket", () => {
-  it("stores the title and body, names the branch from the key, and validates every transition status", async () => {
+  it("stores the title and body, names the branch from the key, and leaves transition statuses to the Action", async () => {
     const { lasso, repos } = await lassoWith({ app: { tracker: "jira", project: "APP" } }, { branch_prefix: "matt" });
     await lasso.tracker.reply({ tool: "acli", match: ["workitem view APP-12"], stdout: jiraView("APP-12", "Add dark mode to the settings page") });
     const t = await admit(lasso, "APP-12");
@@ -94,13 +94,13 @@ describe("admitting a reference Ticket", () => {
     const detail = JSON.parse((await runCli(["status", "APP-12", "--json"], lasso)).stdout) as { body: string };
     expect(detail.body).toBe("## What to build\n\nA toggle in `settings`.\n\n- remember the choice");
 
-    const jql = (await lasso.tracker.calls()).filter((c) => c.args.includes("search")).map((c) => c.args[c.args.indexOf("--jql") + 1]);
-    expect(jql).toEqual(['project = APP AND status = "In Progress"', 'project = APP AND status = "In Review"', 'project = APP AND status = "Done"']);
+    // Whether a status is on the board is found out when the Action runs, not at Intake (ADR 0010).
+    expect((await lasso.tracker.calls()).filter((c) => c.args.includes("search"))).toEqual([]);
   });
 
-  it("keeps a GitHub issue's body and accepts closed in any case", async () => {
+  it("keeps a GitHub issue's body", async () => {
     const { lasso } = await lassoWith({ web: { tracker: "github", project: "acme/web", pipeline: "gh" } });
-    await writeFile(path.join(lasso.home, "pipelines", "gh.yaml"), "runner: claude\nstages:\n  - name: implement\n    prompt: do it\n  - action: tracker.transition\n    status: Closed\n");
+    await writeFile(path.join(lasso.home, "pipelines", "gh.yaml"), "runner: claude\nstages:\n  - name: implement\n    prompt: do it\n  - action: tracker.transition\n    with: { status: Closed }\n");
     await lasso.tracker.reply({ tool: "gh", match: ["issue view 7"], stdout: ghView("Fix the footer links", "They 404.") });
     const t = await admit(lasso, "acme/web#7");
     expect(t).toMatchObject({ reference: "acme/web#7", branch: "acme-web-7-fix-the-footer", pipeline: "gh" });
@@ -148,19 +148,14 @@ describe("admitting a reference Ticket", () => {
     expect(detectAgain.status).toBe(400);
   });
 
-  it("refuses a Pipeline whose transition status the tracker does not know", async () => {
-    const { lasso } = await lassoWith({ app: { tracker: "jira", project: "APP", pipeline: "odd" }, web: { tracker: "github", project: "acme/web", pipeline: "default" } });
+  it("refuses a Pipeline still giving a transition its status the old way, pointing at with", async () => {
+    const { lasso } = await lassoWith({ app: { tracker: "jira", project: "APP", pipeline: "odd" } });
+    // Startup migration rewrote the files there were; this one is a hand edit made after.
     await writeFile(path.join(lasso.home, "pipelines", "odd.yaml"), "runner: claude\nstages:\n  - name: implement\n    prompt: do it\n  - action: tracker.transition\n    status: Shipped\n");
     await lasso.tracker.reply({ tool: "acli", match: ["workitem view APP-12"], stdout: jiraView("APP-12", "Add dark mode") });
-    await lasso.tracker.reply({ tool: "acli", match: ["workitem search", 'status = "Shipped"'], stderr: "✗ Error: failed to parse JQL query: the value 'shipped' does not exist for the field 'status'.\n", code: 1 });
-    const jira = await lasso.api<Response>("/api/tickets", { method: "POST", raw: true, body: JSON.stringify({ input: "APP-12" }) });
-    expect(jira.status).toBe(400);
-    expect((await jira.json()).error).toBe(`Pipeline odd: status "Shipped" is not a status in APP: Error: failed to parse JQL query: the value 'shipped' does not exist for the field 'status'.`);
-
-    await lasso.tracker.reply({ tool: "gh", match: ["issue view 7"], stdout: ghView("Fix links", "") });
-    const github = await lasso.api<Response>("/api/tickets", { method: "POST", raw: true, body: JSON.stringify({ input: "acme/web#7" }) });
-    expect(github.status).toBe(400);
-    expect((await github.json()).error).toBe('Pipeline default: status "In Progress" is not a status in acme/web: GitHub accepts only open and closed');
+    const res = await lasso.api<Response>("/api/tickets", { method: "POST", raw: true, body: JSON.stringify({ input: "APP-12" }) });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("Pipeline odd stage 2: status is now a param; write with: { status: Shipped }");
     expect(await lasso.api<unknown[]>("/api/tickets")).toEqual([]);
   });
 
