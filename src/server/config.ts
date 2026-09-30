@@ -9,6 +9,8 @@ export interface RepoConfig {
   project: string;
   path: string;
   pipeline: string;
+  /** Actions this repo defines; one with a global Action's name replaces it for this repo's Tickets (ADR 0010). */
+  actions: Record<string, ActionConfig>;
 }
 
 export interface BudgetDefaults {
@@ -65,6 +67,7 @@ repos: {}
 #    project: PROJ            # JIRA project key, or owner/repo for github
 #    path: ~/code/my-app      # local checkout; worktrees are made from its origin
 #    pipeline: default        # the repo's default Pipeline
+#    actions: {}              # this repo's own Actions; one named like a global Action replaces it here
 
 # Actions: shell commands an action Stage runs by name, in the Ticket's
 # worktree, with the Ticket's details as LASSO_* environment variables.
@@ -107,16 +110,26 @@ export function loadConfig(home: LassoHome, overrides: { port?: number } = {}): 
 }
 
 /**
- * The Actions config.yaml defines now. Actions are edited by hand only, so
- * each use reads the file rather than the config Lasso started with; a file
- * that no longer parses leaves `running`'s Actions in force.
+ * config.yaml as it stands now, for the Actions in it. Actions are edited by
+ * hand only, so each use reads the file rather than the config Lasso started
+ * with; a file that no longer parses leaves `running` in force.
  */
-export function currentActions(home: LassoHome, running: Config): Record<string, ActionConfig> {
+export function currentConfig(home: LassoHome, running: Config): Config {
   try {
-    return loadConfig(home).actions;
+    return loadConfig(home);
   } catch {
-    return running.actions;
+    return running;
   }
+}
+
+/** The Actions a repo's Tickets run: the global ones, with the repo's own replacing any of the same name. */
+export function actionsFor(config: Config, repo: string): Record<string, ActionConfig> {
+  return { ...config.actions, ...config.repos[repo]?.actions };
+}
+
+/** Every set of Actions some repo sees, the global set first: a Pipeline that fits any of them may be saved. */
+export function actionSets(config: Config): Array<Record<string, ActionConfig>> {
+  return [config.actions, ...Object.keys(config.repos).map((repo) => actionsFor(config, repo))];
 }
 
 /** Parse config.yaml text into a Config; a value that is present but wrong is a ConfigError naming the key. */
@@ -127,7 +140,7 @@ export function parseConfig(text: string, file: string, overrides: { port?: numb
   const budget = mapping(raw.budget, at("budget"), fail);
   const notifications = mapping(raw.notifications, at("notifications"), fail);
   const config: Config = {
-    repos: normaliseRepos(mapping(raw.repos, at("repos"), fail)),
+    repos: normaliseRepos(mapping(raw.repos, at("repos"), fail), at("repos")),
     actions: parseActions(mapping(raw.actions, at("actions"), fail), at("actions")),
     budget: {
       rounds: count(budget.rounds, at("budget.rounds"), fail, D.budget.rounds),
@@ -204,7 +217,7 @@ export function applyLive(live: Config, fresh: Config): void {
   live.branch_prefix = fresh.branch_prefix;
 }
 
-function normaliseRepos(value: Record<string, unknown>): Record<string, RepoConfig> {
+function normaliseRepos(value: Record<string, unknown>, where: string): Record<string, RepoConfig> {
   const repos: Record<string, RepoConfig> = {};
   for (const [name, entry] of Object.entries(value)) {
     const repo = isPlainObject(entry) ? entry : {};
@@ -213,6 +226,7 @@ function normaliseRepos(value: Record<string, unknown>): Record<string, RepoConf
       project: String(repo.project ?? ""),
       path: String(repo.path ?? ""),
       pipeline: typeof repo.pipeline === "string" ? repo.pipeline : "default",
+      actions: parseActions(mapping(repo.actions, `${where}.${name}.actions`, fail), `${where}.${name}.actions`),
     };
   }
   return repos;

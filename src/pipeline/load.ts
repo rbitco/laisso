@@ -217,6 +217,25 @@ export function checkActions(pipeline: Pipeline, actions: Record<string, ActionC
   }
 }
 
+/**
+ * checkActions against each set in turn: the Pipeline passes if any set fits
+ * it. Otherwise the complaint of a set that has the Action (a param wrong)
+ * says more than one that lacks it, so it stands ahead of the first.
+ */
+export function checkActionsAny(pipeline: Pipeline, sets: Array<Record<string, ActionConfig>>): void {
+  const errors: PipelineError[] = [];
+  for (const actions of sets) {
+    try {
+      return checkActions(pipeline, actions);
+    } catch (error) {
+      if (!(error instanceof PipelineError)) throw error;
+      errors.push(error);
+    }
+  }
+  const telling = errors.find((e) => !e.message.includes(": no Action named ")) ?? errors[0];
+  if (telling) throw telling;
+}
+
 function asRunner(value: unknown, fallback: RunnerName, where: string): RunnerName {
   if (value === undefined) return fallback;
   if ((RUNNERS as readonly string[]).includes(String(value))) return value as RunnerName;

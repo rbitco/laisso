@@ -3,7 +3,7 @@ import { parse } from "yaml";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { DEFAULT_CONFIG, DEFAULT_CONFIG_YAML, loadConfig, ConfigError } from "../src/server/config.ts";
+import { DEFAULT_CONFIG, DEFAULT_CONFIG_YAML, loadConfig, ConfigError, actionsFor, actionSets } from "../src/server/config.ts";
 import { resolveHome } from "../src/server/home.ts";
 
 describe("the default config.yaml", () => {
@@ -43,5 +43,15 @@ describe("loadConfig", () => {
     expect(() => loadConfig(homeWith(yaml("  notify:\n    run: x\n    params: [a, a]\n")))).toThrow(/params names one param twice/);
     expect(() => loadConfig(homeWith(yaml("  notify:\n    run: x\n    timeout: soon\n")))).toThrow(/actions\.notify\.timeout/);
     expect(() => loadConfig(homeWith(yaml("  notify:\n    run: x\n    command: y\n")))).toThrow(/actions\.notify: unknown field command/);
+  });
+
+  it("reads a repo's own Actions, which replace global ones of the same name for that repo", () => {
+    const config = loadConfig(homeWith("actions:\n  notify:\n    run: global\n  page:\n    run: pager\nrepos:\n  app:\n    actions:\n      notify:\n        run: local\n        params: [channel]\n      deploy:\n        run: ./deploy\n  web: {}\n"));
+    expect(config.repos.app!.actions).toEqual({ notify: { run: "local", params: ["channel"], timeout: "5m" }, deploy: { run: "./deploy", params: [], timeout: "5m" } });
+    expect(config.repos.web!.actions).toEqual({});
+    expect(actionsFor(config, "app")).toMatchObject({ notify: { run: "local" }, page: { run: "pager" }, deploy: { run: "./deploy" } });
+    expect(actionsFor(config, "web")).toEqual(config.actions);
+    expect(actionSets(config)).toEqual([config.actions, actionsFor(config, "app"), actionsFor(config, "web")]);
+    expect(() => loadConfig(homeWith("repos:\n  app:\n    actions:\n      notify: {}\n"))).toThrow(/repos\.app\.actions\.notify: run must be a command/);
   });
 });

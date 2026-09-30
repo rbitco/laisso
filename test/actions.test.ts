@@ -139,3 +139,43 @@ describe("An action Stage naming a config Action", () => {
     await expect(intake(lasso, "Tell ops")).rejects.toThrow(/no Action named page in config\.yaml/);
   });
 });
+
+describe("A repo's own Action", () => {
+  // app overrides notify and alone defines deploy; web has only the global notify.
+  async function twoRepos(pipelines: Record<string, string>) {
+    const started = await startLassoWithRepos(
+      {
+        app: { pipeline: "notify", actions: { notify: { params: ["channel"], run: 'echo "app told $LASSO_CHANNEL"' }, deploy: { params: ["env"], run: 'echo "deployed to $LASSO_ENV"' } } },
+        web: { pipeline: "notify" },
+      },
+      { actions: { notify: { params: ["channel"], run: 'echo "global told $LASSO_CHANNEL"' } } },
+      pipelines,
+    );
+    running.push(started.lasso);
+    return started.lasso;
+  }
+  const intakeInto = (lasso: Lasso, repo: string, pipeline: string) =>
+    lasso.api<IntakeResult>("/api/tickets", { method: "POST", body: JSON.stringify({ input: "Tell ops", repo, pipeline }) });
+  const finalMessage = async (lasso: Lasso, id: string) => (await actionEnded(lasso, id)).sessions.find((s) => s.mode === "action")!.finalMessage;
+
+  it("replaces the global one for that repo's Tickets, and only theirs", async () => {
+    const lasso = await twoRepos({ notify: NOTIFY });
+    const app = await intakeInto(lasso, "app", "notify");
+    const web = await intakeInto(lasso, "web", "notify");
+    expect(await finalMessage(lasso, app.id)).toBe("app told ops");
+    expect(await finalMessage(lasso, web.id)).toBe("global told ops");
+  });
+
+  it("may exist only in the repo: Intake checks it against the repo, and saving accepts it", async () => {
+    const DEPLOY = NOTIFY.replace("action: notify\n    with: { channel: ops }", "action: deploy\n    with: { env: prod }");
+    const lasso = await twoRepos({ notify: NOTIFY, deploy: DEPLOY });
+    const save = (text: string) => lasso.api<Response>("/api/pipelines/deploy", { method: "PUT", raw: true, body: JSON.stringify({ text }) });
+    expect((await save(DEPLOY)).status).toBe(200);
+    const missing = await save(DEPLOY.replace("with: { env: prod }", "with: {}"));
+    expect((await missing.json()).error).toMatch(/deploy needs with\.env/);
+
+    const app = await intakeInto(lasso, "app", "deploy");
+    expect(await finalMessage(lasso, app.id)).toBe("deployed to prod");
+    await expect(intakeInto(lasso, "web", "deploy")).rejects.toThrow(/no Action named deploy in config\.yaml/);
+  });
+});

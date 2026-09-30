@@ -26,9 +26,12 @@ import { DEFAULT_PIPELINE_YAML } from "../src/pipeline/default.ts";
 const DEFAULT_PIPELINE_STATUSES = [...new Set(parsePipeline("default", DEFAULT_PIPELINE_YAML).stages.flatMap((s) => (s.kind === "action" && "status" in s ? [s.status] : [])))];
 
 /** What a test writes to config.yaml: any subset of the real Config. */
+/** An Action as a test writes it: params and timeout may be left to their defaults. */
+export type ActionSpec = { run: string; params?: string[]; timeout?: string };
+
 export type LassoConfig = {
-  [K in Exclude<keyof Config, "actions">]?: Config[K] extends object ? Partial<Config[K]> : Config[K];
-} & { actions?: Record<string, { run: string; params?: string[]; timeout?: string }> };
+  [K in Exclude<keyof Config, "actions" | "repos">]?: Config[K] extends object ? Partial<Config[K]> : Config[K];
+} & { actions?: Record<string, ActionSpec>; repos?: Record<string, Partial<Omit<RepoConfig, "actions">> & { actions?: Record<string, ActionSpec> }> };
 
 export interface Lasso {
   home: string;
@@ -280,6 +283,7 @@ export interface RepoSpec {
   /** Defaults to the repo name upper-cased for JIRA, owner/name for GitHub. */
   project?: string;
   pipeline?: string;
+  actions?: Record<string, ActionSpec>;
 }
 
 export interface LassoWithRepos {
@@ -296,11 +300,11 @@ export interface LassoWithRepos {
 export async function startLassoWithRepos(specs: Record<string, RepoSpec>, extra: LassoConfig = {}, pipelines: Record<string, string> = {}, env?: Record<string, string>): Promise<LassoWithRepos> {
   const { home, pathDir } = await makeHome();
   const repos: LassoWithRepos["repos"] = {};
-  const config: Record<string, RepoConfig> = {};
+  const config: NonNullable<LassoConfig["repos"]> = {};
   for (const [name, spec] of Object.entries(specs)) {
     repos[name] = await makeRepo(path.join(home, "..", "repos"), name);
     const tracker = spec.tracker ?? "jira";
-    config[name] = { tracker, project: spec.project ?? (tracker === "jira" ? name.toUpperCase() : `owner/${name}`), path: repos[name].path, pipeline: spec.pipeline ?? "default" };
+    config[name] = { tracker, project: spec.project ?? (tracker === "jira" ? name.toUpperCase() : `owner/${name}`), path: repos[name].path, pipeline: spec.pipeline ?? "default", ...(spec.actions ? { actions: spec.actions } : {}) };
   }
   await writeConfig(home, { tick: 3600, repos: config, ...extra });
   for (const [name, yaml] of Object.entries(pipelines)) {

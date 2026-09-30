@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { closeSync, existsSync, mkdirSync, openSync, writeSync } from "node:fs";
 import path from "node:path";
-import { currentActions, type ActionConfig, type Config } from "../server/config.ts";
+import { actionsFor, currentConfig, type ActionConfig, type Config } from "../server/config.ts";
 import type { LassoHome } from "../server/home.ts";
 import { parseDuration } from "../duration.ts";
 import type { Logger } from "../server/log.ts";
@@ -142,7 +142,7 @@ export class Actions {
       tail = (tail + chunk.toString()).slice(-TAIL_BYTES);
       this.deps.stdoutWritten?.(ticket.id, id);
     };
-    const action = currentActions(home, this.deps.config)[stage.action];
+    const action = actionsFor(currentConfig(home, this.deps.config), ticket.repo)[stage.action];
     const unrunnable = this.unrunnable(ticket, stage, action);
     log.info("session.started", { session: row.id, ticket: ticket.id, stage: stage.name, mode: "action", action: stage.action });
     if (unrunnable || !action) {

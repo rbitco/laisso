@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { Changes, Change } from "../server/changes.ts";
-import { ConfigError, patchConfigText, applyLive, RESTART_KEYS, parseConfig, currentActions, type Config } from "../server/config.ts";
+import { ConfigError, patchConfigText, applyLive, RESTART_KEYS, parseConfig, currentConfig, actionSets, type Config } from "../server/config.ts";
 import type { LassoHome } from "../server/home.ts";
 import type { Tick } from "../server/tick.ts";
 import type { Tickets, TicketRow } from "../store/tickets.ts";
@@ -197,7 +197,7 @@ export function createApp(deps: AppDeps): Hono {
   });
 
   // Pipeline files, edited in place (spec: Lasso home and configuration). Nothing is written that does not parse.
-  const pipelines = new PipelineFiles(deps.home.pipelinesDir, () => currentActions(deps.home, deps.config));
+  const pipelines = new PipelineFiles(deps.home.pipelinesDir, () => actionSets(currentConfig(deps.home, deps.config)));
   app.get("/api/pipelines", (c) => c.json(pipelines.list().map(pipelineListing)));
   app.get("/api/pipelines/:name", (c) => {
     const source = pipelines.read(c.req.param("name"));

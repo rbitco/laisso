@@ -1,7 +1,7 @@
 import { mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { homedir } from "node:os";
-import { currentActions, type Config, type RepoConfig } from "../server/config.ts";
+import { actionsFor, currentConfig, type Config, type RepoConfig } from "../server/config.ts";
 import type { LassoHome } from "../server/home.ts";
 import { shortId, type Tickets, type TicketRow, type NewTicket } from "../store/tickets.ts";
 import type { PipelineVersions } from "../store/versions.ts";
@@ -89,7 +89,7 @@ export class Intake {
     let pipeline: Pipeline;
     try {
       pipeline = loadPipeline(home.pipelinesDir, pipelineName);
-      checkActions(pipeline, currentActions(home, config));
+      checkActions(pipeline, actionsFor(currentConfig(home, config), repoName));
     } catch (error) {
       if (error instanceof PipelineError) throw new IntakeError(error.message);
       throw error;

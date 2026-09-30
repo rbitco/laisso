@@ -4,7 +4,7 @@ import path from "node:path";
 import { parseDocument, isSeq, type Document } from "yaml";
 import { applyPatch } from "../yaml-edit.ts";
 import { isPlainObject } from "../fields.ts";
-import { checkActions, parsePipeline, pipelineFile, listPipelines, PipelineError, NAME, type Pipeline } from "./load.ts";
+import { checkActionsAny, parsePipeline, pipelineFile, listPipelines, PipelineError, NAME, type Pipeline } from "./load.ts";
 import type { ActionConfig } from "../server/config.ts";
 
 /** A Pipeline file as read: the text as written, and what it parses to or why it does not. */
@@ -33,10 +33,10 @@ export interface PipelinePatch {
 /** The Pipeline files under the Lasso home, edited in place with their comments kept. */
 export class PipelineFiles {
   private dir: string;
-  private actions: () => Record<string, ActionConfig>;
+  private actions: () => Array<Record<string, ActionConfig>>;
 
-  /** `actions` are config's, read at each save so an edit to config.yaml counts at once. */
-  constructor(dir: string, actions: () => Record<string, ActionConfig>) {
+  /** `actions` are the sets config gives repos (see actionSets), read at each save so an edit to config.yaml counts at once. */
+  constructor(dir: string, actions: () => Array<Record<string, ActionConfig>>) {
     this.dir = dir;
     this.actions = actions;
   }
@@ -59,7 +59,7 @@ export class PipelineFiles {
   write(name: string, text: unknown, opts: { create?: boolean } = {}): PipelineSource {
     checkName(name);
     if (typeof text !== "string") throw new PipelineError("text must be the whole Pipeline file");
-    checkActions(parsePipeline(name, text), this.actions());
+    checkActionsAny(parsePipeline(name, text), this.actions());
     const existing = pipelineFile(this.dir, name);
     if (existing && opts.create) throw new PipelineError(`Pipeline ${name} already exists`);
     const file = existing ?? path.join(this.dir, `${name}.yaml`);
@@ -86,7 +86,7 @@ export class PipelineFiles {
     }
     if (order !== undefined) reorderStages(doc, name, current.pipeline.stages.map((s) => s.name), order);
     const text = doc.toString();
-    checkActions(parsePipeline(name, text), this.actions());
+    checkActionsAny(parsePipeline(name, text), this.actions());
     replaceFile(current.file, text);
     return sourceOf(name, current.file, text);
   }
