@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parsePipeline, PipelineError } from "../src/pipeline/load.ts";
+import { checkActions, parsePipeline, PipelineError } from "../src/pipeline/load.ts";
 
 // Seam two, pure: every rule of the spec's Pipeline format, each with a
 // failing case (LASSO-40), and one Pipeline that uses every field.
@@ -11,9 +11,14 @@ const FAILING: Array<[string, string, RegExp]> = [
   ["a stage that is not a mapping", STAGES("  - implement\n"), /stage 1 is not a mapping/],
   ["a stage with both action and prompt", STAGES("  - name: x\n    prompt: p\n    action: tracker.transition\n    status: Done\n"), /has both action and prompt\/skills/],
   ["a stage with neither prompt, skills nor action", STAGES("  - name: x\n    artifact: pr-exists\n"), /needs a prompt, skills, or an action/],
-  ["an unknown action", STAGES("  - action: tracker.close\n"), /unknown action tracker\.close/],
-  ["a transition without a status", STAGES("  - action: tracker.transition\n"), /tracker\.transition needs a status/],
-  ["an action stage carrying Runner fields", STAGES("  - action: tracker.transition\n    status: Done\n    human: true\n"), /stage 1: human is not a field of an action Stage/],
+  ["an action that could not be an Action's name", STAGES("  - action: Tell Ops\n"), /Tell Ops is not an Action name/],
+  ["an empty transition status", STAGES("  - action: tracker.transition\n    status: ' '\n"), /tracker\.transition needs a status/],
+  ["a transition with a status and with", STAGES("  - action: tracker.transition\n    status: Done\n    with: { status: Done }\n"), /stage 1: with is not a field of a tracker\.transition Stage with a status/],
+  ["an action stage carrying Runner fields", STAGES("  - action: notify\n    human: true\n"), /stage 1: human is not a field of an action Stage/],
+  ["an action stage's with that is not a mapping", STAGES("  - action: notify\n    with: ops\n"), /with must be a mapping of param to value/],
+  ["an action stage's param that is a list", STAGES("  - action: notify\n    with: { channel: [a, b] }\n"), /with\.channel must be a single value/],
+  ["an action stage name with spaces", STAGES("  - action: notify\n    name: Tell Ops\n"), /needs a name of lowercase letters, digits, and hyphens/],
+  ["two runs of one Action unnamed", STAGES("  - action: notify\n  - action: notify\n"), /has two Stages named notify/],
   ["a stage without a name", STAGES("  - prompt: p\n"), /needs a name of lowercase letters, digits, and hyphens/],
   ["a name with spaces", STAGES("  - name: Do Work\n    prompt: p\n"), /needs a name of lowercase letters, digits, and hyphens/],
   ["two stages with one name", STAGES("  - name: x\n    prompt: p\n  - name: x\n    prompt: q\n"), /has two Stages named x/],
@@ -65,6 +70,10 @@ stages:
     budget: { rounds: 1, attempts: 3, wallTime: 45m }
   - action: tracker.transition
     status: In Progress
+  - action: slack.post
+    with: { channel: ops, count: 2 }
+  - action: slack.post
+    name: tell-team
   - name: review
     prompt: Address feedback.
     repeat: feedback
@@ -80,9 +89,27 @@ stages:
       stages: [
         { kind: "runner", name: "grill", prompt: "Talk.", skills: ["grilling", "to-spec"], runner: "claude", human: true, advance: false, artifact: "tracker-spec", repeat: null, budget: { rounds: 1, attempts: 3, wallTime: "45m" }, runnerOptions: { model: "opus" }, inheritsRunner: false },
         { kind: "action", name: "transition-in-progress", action: "tracker.transition", status: "In Progress" },
+        { kind: "action", name: "slack-post", action: "slack.post", with: { channel: "ops", count: "2" } },
+        { kind: "action", name: "tell-team", action: "slack.post", with: {} },
         { kind: "runner", name: "review", prompt: "Address feedback.", skills: [], runner: "codex", human: false, advance: true, artifact: "pr-merged", repeat: "feedback", budget: { rounds: undefined, attempts: undefined, wallTime: undefined }, runnerOptions: {}, inheritsRunner: true },
         { kind: "runner", name: "notes", prompt: "Write.", skills: [], runner: "codex", human: false, advance: true, artifact: "file docs/NOTES.md", repeat: null, budget: { rounds: undefined, attempts: undefined, wallTime: undefined }, runnerOptions: {}, inheritsRunner: true },
       ],
     });
+  });
+});
+
+describe("checkActions", () => {
+  const actions = { notify: { run: "true", params: ["channel"], timeout: "5m" } };
+  const check = (body: string) => () => checkActions(parsePipeline("p", STAGES(body)), actions);
+
+  it("accepts a Stage naming a config Action with exactly its params, and leaves tracker.transition alone", () => {
+    expect(check("  - action: notify\n    with: { channel: ops }\n  - action: tracker.transition\n    status: Done\n")).not.toThrow();
+  });
+
+  it("refuses an unknown Action, a missing param, and an extra one", () => {
+    expect(check("  - action: page\n")).toThrow(/Pipeline p Stage page: no Action named page in config\.yaml/);
+    expect(check("  - action: notify\n")).toThrow(/Stage notify: notify needs with\.channel/);
+    expect(check("  - action: notify\n    with: { channel: ops, loud: true }\n")).toThrow(/notify takes no param loud/);
+    expect(check("  - action: tracker.transition\n")).toThrow(/Stage tracker-transition: tracker\.transition needs a status/);
   });
 });

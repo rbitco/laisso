@@ -547,7 +547,8 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
     }
     const final = el('div', { class: 'final' + (s.outcome === 'succeeded' ? ' ok' : ''), text: s.finalMessage || '' });
     final.hidden = !s.finalMessage;
-    if (s.mode === 'action') {
+    // A built-in action has no output; an Action from config is a command, and its output reads like a Runner's.
+    if (s.mode === 'action' && !s.stdoutPath) {
       pane.replaceChildren(head, el('div', { class: 'hint', text: 'Lasso performed this Stage itself; there is no Runner output.' }), final);
       return pane;
     }
@@ -965,6 +966,18 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
   const ACTIONS = { 'tracker.transition': [['status', 'tracker status, as In Review']] };
 
   function stageCard(s, pipeline, fresh) {
+    if (s.kind === 'action' && s.with) {
+      // A saved Stage running an Action from config: its params are editable; the action is changed in the file.
+      const inputs = Object.fromEntries(Object.entries(s.with).map(([key, value]) => [key, el('input', { name: key, value })]));
+      const node = el('div', { class: 'card' }, [el('h3', {}, [el('span', { class: 'kind', text: 'action' }), s.action]), el('div', { class: 'fields' }, Object.keys(inputs).map((key) => field(key, inputs[key])))]);
+      return {
+        name: s.name, node,
+        patch() {
+          const next = Object.fromEntries(Object.entries(inputs).map(([key, input]) => [key, input.value.trim()]));
+          return Object.keys(next).some((key) => next[key] !== s.with[key]) ? { with: next } : {};
+        },
+      };
+    }
     if (s.kind === 'action') {
       // A new action Stage picks its action from the catalogue and shows that action's fields; a saved one keeps its action.
       const action = select('action', Object.keys(ACTIONS), s.action);

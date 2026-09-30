@@ -1,6 +1,6 @@
 import { shortId, type TicketRow } from "../store/tickets.ts";
 import type { SessionRow } from "../store/sessions.ts";
-import type { Pipeline, RunnerName, Stage } from "../pipeline/load.ts";
+import { isTransition, type Pipeline, type RunnerName, type Stage } from "../pipeline/load.ts";
 import type { PipelineSource } from "../pipeline/files.ts";
 import type { Drift, VersionRow } from "../store/versions.ts";
 import type { Config } from "../server/config.ts";
@@ -158,7 +158,8 @@ export interface PipelineView {
 
 export type StageFields =
   | { kind: "runner"; name: string; label: string; prompt: string | null; skills: string[]; runner: RunnerName | null; human: boolean; advance: boolean; artifact: string | null; repeat: "feedback" | null; budget: { rounds?: number; attempts?: number; wallTime?: string }; runnerOptions: Record<string, unknown> }
-  | { kind: "action"; name: string; label: string; action: "tracker.transition"; status: string };
+  | { kind: "action"; name: string; label: string; action: "tracker.transition"; status: string }
+  | { kind: "action"; name: string; label: string; action: string; with: Record<string, string> };
 
 export interface PipelineListing {
   name: string;
@@ -225,7 +226,7 @@ function stageFields(stage: Stage): StageFields {
 }
 
 export function stageLabel(stage: Stage): string {
-  return stage.kind === "action" ? stage.status : stage.name;
+  return stage.kind === "action" && isTransition(stage) ? stage.status : stage.name;
 }
 
 export function ticketView(ticket: TicketRow, ctx: ViewContext): TicketView {
@@ -315,6 +316,7 @@ function displayState(ticket: TicketRow, stage: Stage | null, latest: SessionRow
   if (ticket.state === "done") return { state: "done", why: "done" };
   if (ticket.state === "abandoned") return { state: "abandoned", why: "abandoned" };
   if (ticket.flagged_at) return { state: "flagged", why: ticket.flag_reason ?? "flagged" };
+  if (latest?.ended_at === null && latest.mode === "action") return { state: "running", why: `${latest.stage}, running its command` };
   if (headlessRunning(latest)) return { state: "running", why: latest.round !== null ? `${latest.stage}, Round ${latest.round} of ${rounds}` : `${latest.stage}, run ${latest.ordinal}` };
   if (ticket.holding_since) return { state: "holding", why: `Start ${name} when ready` };
   if (human) {

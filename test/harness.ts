@@ -23,12 +23,12 @@ import type { Config, RepoConfig } from "../src/server/config.ts";
 import { parsePipeline } from "../src/pipeline/load.ts";
 import { DEFAULT_PIPELINE_YAML } from "../src/pipeline/default.ts";
 
-const DEFAULT_PIPELINE_STATUSES = [...new Set(parsePipeline("default", DEFAULT_PIPELINE_YAML).stages.flatMap((s) => (s.kind === "action" ? [s.status] : [])))];
+const DEFAULT_PIPELINE_STATUSES = [...new Set(parsePipeline("default", DEFAULT_PIPELINE_YAML).stages.flatMap((s) => (s.kind === "action" && "status" in s ? [s.status] : [])))];
 
 /** What a test writes to config.yaml: any subset of the real Config. */
 export type LassoConfig = {
-  [K in keyof Config]?: Config[K] extends object ? Partial<Config[K]> : Config[K];
-};
+  [K in Exclude<keyof Config, "actions">]?: Config[K] extends object ? Partial<Config[K]> : Config[K];
+} & { actions?: Record<string, { run: string; params?: string[]; timeout?: string }> };
 
 export interface Lasso {
   home: string;

@@ -79,7 +79,16 @@ export async function serve(opts: ServeOptions): Promise<number> {
   const budgets = new Budgets({ config, sessions });
   const queue = new Queue({ home, tickets, sessions, progress, log, cap: config.concurrency });
   const runs = new Runs({ config, home, tickets, sessions, log, progress, budgets, queue, review, stdoutWritten: (ticket, session) => changes.emit({ kind: "stdout", ticket, session }), ended: () => tick.kick("session-end") });
-  const actions = new Actions({ config, tickets, sessions, log, progress });
+  const actions = new Actions({
+    config,
+    home,
+    tickets,
+    sessions,
+    log,
+    progress,
+    stdoutWritten: (ticket, session) => changes.emit({ kind: "stdout", ticket, session }),
+    ended: () => tick.kick("session-end"),
+  });
   // One tick: owed mirror pushes, then action Stages, then the PR poll (a Round it makes due starts below), then headless starts, then the retention sweep.
   const tick = new Tick(config.tick, log, async () => [...(await mirror.retryPending()), ...(await actions.runDue()), ...(await review.poll()), ...(await runs.startRunnable()), ...(await teardown.sweep())], () => changes.emit({ kind: "tick" }));
   const exits = new Exits({ tickets, sessions, log, progress, runs, terminal, budgets, tick, teardown });
@@ -128,7 +137,7 @@ export async function serve(opts: ServeOptions): Promise<number> {
     const finished = new Promise<void>((done) => server.close(() => done()));
     // The ended streams leave keep-alive sockets behind once their last bytes are out; drop them then.
     setTimeout(() => (server as { closeIdleConnections?: () => void }).closeIdleConnections?.(), 50).unref();
-    void startup.then(() => tick.settle()).then(() => runs.shutdown()).then(() => mirror.settle()).then(() => finished).then(() => {
+    void startup.then(() => tick.settle()).then(() => Promise.all([runs.shutdown(), actions.shutdown()])).then(() => mirror.settle()).then(() => finished).then(() => {
       store.close();
       releaseLock();
       resolveExit(0);

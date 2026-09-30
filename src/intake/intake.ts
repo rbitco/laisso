@@ -1,11 +1,11 @@
 import { mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { homedir } from "node:os";
-import type { Config, RepoConfig } from "../server/config.ts";
+import { currentActions, type Config, type RepoConfig } from "../server/config.ts";
 import type { LassoHome } from "../server/home.ts";
 import { shortId, type Tickets, type TicketRow, type NewTicket } from "../store/tickets.ts";
 import type { PipelineVersions } from "../store/versions.ts";
-import { listPipelines, loadPipeline, PipelineError, type Pipeline } from "../pipeline/load.ts";
+import { checkActions, isTransition, listPipelines, loadPipeline, PipelineError, type Pipeline } from "../pipeline/load.ts";
 import { Git } from "../git.ts";
 import { ulid } from "../ulid.ts";
 import { slugify } from "./slug.ts";
@@ -89,6 +89,7 @@ export class Intake {
     let pipeline: Pipeline;
     try {
       pipeline = loadPipeline(home.pipelinesDir, pipelineName);
+      checkActions(pipeline, currentActions(home, config));
     } catch (error) {
       if (error instanceof PipelineError) throw new IntakeError(error.message);
       throw error;
@@ -152,7 +153,7 @@ export class Intake {
 
 /** Every tracker.transition status in the Pipeline must be one the tracker knows, or intake is refused with the reason. */
 async function checkTransitions(pipeline: Pipeline, tracker: Tracker): Promise<void> {
-  const statuses = [...new Set(pipeline.stages.flatMap((s) => (s.kind === "action" ? [s.status] : [])))];
+  const statuses = [...new Set(pipeline.stages.flatMap((s) => (s.kind === "action" && isTransition(s) ? [s.status] : [])))];
   for (const status of statuses) {
     const problem = await tracker.checkStatus(status);
     if (problem) throw new IntakeError(`Pipeline ${pipeline.name}: status "${status}" is not a status in ${tracker.project}: ${problem}`);

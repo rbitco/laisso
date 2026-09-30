@@ -25,8 +25,17 @@ export interface NotificationConfig {
   gate: boolean;
 }
 
+/** A named shell command an action Stage runs (ADR 0010). */
+export interface ActionConfig {
+  run: string;
+  /** Names a Stage must supply under `with:`; each reaches the command as LASSO_<PARAM>. */
+  params: string[];
+  timeout: string;
+}
+
 export interface Config {
   repos: Record<string, RepoConfig>;
+  actions: Record<string, ActionConfig>;
   budget: BudgetDefaults;
   tick: number;
   concurrency: number;
@@ -38,6 +47,7 @@ export interface Config {
 
 export const DEFAULT_CONFIG: Config = {
   repos: {},
+  actions: {},
   budget: { rounds: 5, attempts: 2, wallTime: "30m", spend: 25 },
   tick: 60,
   concurrency: 3,
@@ -55,6 +65,14 @@ repos: {}
 #    project: PROJ            # JIRA project key, or owner/repo for github
 #    path: ~/code/my-app      # local checkout; worktrees are made from its origin
 #    pipeline: default        # the repo's default Pipeline
+
+# Actions: shell commands an action Stage runs by name, in the Ticket's
+# worktree, with the Ticket's details as LASSO_* environment variables.
+actions: {}
+#  notify:
+#    params: [channel]        # a Stage supplies these under with:, as LASSO_CHANNEL
+#    timeout: 5m              # killed and Flagged after this long
+#    run: echo "$LASSO_REFERENCE is at $LASSO_STAGE" >> ~/lasso-$LASSO_CHANNEL.log
 
 # Global Budget defaults; a Pipeline or a Ticket may override each one.
 budget:
@@ -88,6 +106,19 @@ export function loadConfig(home: LassoHome, overrides: { port?: number } = {}): 
   return parseConfig(text, home.configFile, overrides);
 }
 
+/**
+ * The Actions config.yaml defines now. Actions are edited by hand only, so
+ * each use reads the file rather than the config Lasso started with; a file
+ * that no longer parses leaves `running`'s Actions in force.
+ */
+export function currentActions(home: LassoHome, running: Config): Record<string, ActionConfig> {
+  try {
+    return loadConfig(home).actions;
+  } catch {
+    return running.actions;
+  }
+}
+
 /** Parse config.yaml text into a Config; a value that is present but wrong is a ConfigError naming the key. */
 export function parseConfig(text: string, file: string, overrides: { port?: number } = {}): Config {
   const raw = mapping(parse(text), file, fail);
@@ -97,6 +128,7 @@ export function parseConfig(text: string, file: string, overrides: { port?: numb
   const notifications = mapping(raw.notifications, at("notifications"), fail);
   const config: Config = {
     repos: normaliseRepos(mapping(raw.repos, at("repos"), fail)),
+    actions: parseActions(mapping(raw.actions, at("actions"), fail), at("actions")),
     budget: {
       rounds: count(budget.rounds, at("budget.rounds"), fail, D.budget.rounds),
       attempts: count(budget.attempts, at("budget.attempts"), fail, D.budget.attempts),
@@ -145,7 +177,7 @@ export function patchConfigText(text: string, file: string, patch: unknown): { t
   if (!isPlainObject(patch)) throw new ConfigError("patch must be a mapping");
   if (Object.keys(patch).length === 0) throw new ConfigError("nothing to change");
   for (const [key, value] of Object.entries(patch)) {
-    if (key === "repos") throw new ConfigError("repos are edited in config.yaml by hand");
+    if (key === "repos" || key === "actions") throw new ConfigError(`${key} are edited in config.yaml by hand`);
     if (!(key in EDITABLE)) throw new ConfigError(`unknown field ${key}`);
     const fields = EDITABLE[key];
     if (fields && value !== null) {
@@ -165,6 +197,8 @@ export function applyLive(live: Config, fresh: Config): void {
   Object.assign(live.notifications, fresh.notifications);
   for (const key of Object.keys(live.repos)) delete live.repos[key];
   Object.assign(live.repos, fresh.repos);
+  for (const key of Object.keys(live.actions)) delete live.actions[key];
+  Object.assign(live.actions, fresh.actions);
   live.concurrency = fresh.concurrency;
   live.retention = fresh.retention;
   live.branch_prefix = fresh.branch_prefix;
@@ -182,4 +216,26 @@ function normaliseRepos(value: Record<string, unknown>): Record<string, RepoConf
     };
   }
   return repos;
+}
+
+/** What an Action may be called, and what a param may be called so that LASSO_<PARAM> is a plain variable name. */
+export const ACTION_NAME = /^[a-z0-9][a-z0-9._-]*$/;
+export const PARAM_NAME = /^[a-z][a-z0-9_]*$/;
+export const DEFAULT_ACTION_TIMEOUT = "5m";
+const ACTION_FIELDS = new Set(["run", "params", "timeout"]);
+
+function parseActions(value: Record<string, unknown>, where: string): Record<string, ActionConfig> {
+  const actions: Record<string, ActionConfig> = {};
+  for (const [name, entry] of Object.entries(value)) {
+    const at = `${where}.${name}`;
+    if (!ACTION_NAME.test(name)) throw new ConfigError(`${at}: an Action name is lowercase letters, digits, dots, hyphens, and underscores`);
+    const action = mapping(entry, at, fail);
+    for (const key of Object.keys(action)) if (!ACTION_FIELDS.has(key)) throw new ConfigError(`${at}: unknown field ${key}`);
+    if (typeof action.run !== "string" || !action.run.trim()) throw new ConfigError(`${at}: run must be a command`);
+    const params = action.params ?? [];
+    if (!Array.isArray(params) || !params.every((p) => typeof p === "string" && PARAM_NAME.test(p))) throw new ConfigError(`${at}: params must be a list of names in lowercase letters, digits, and underscores`);
+    if (new Set(params).size !== params.length) throw new ConfigError(`${at}: params names one param twice`);
+    actions[name] = { run: action.run, params: params as string[], timeout: duration(action.timeout, `${at}.timeout`, fail, DEFAULT_ACTION_TIMEOUT) };
+  }
+  return actions;
 }

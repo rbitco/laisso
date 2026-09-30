@@ -167,7 +167,7 @@ describe("admitting a reference Ticket", () => {
   it("refuses an unknown artifact or action with the reason", async () => {
     const { lasso } = await lassoWith({ app: { tracker: "jira", project: "APP" } });
     await writeFile(path.join(lasso.home, "pipelines", "bad-artifact.yaml"), "runner: claude\nstages:\n  - name: implement\n    prompt: do it\n    artifact: pr-approved\n");
-    await writeFile(path.join(lasso.home, "pipelines", "bad-action.yaml"), "runner: claude\nstages:\n  - action: tracker.assign\n    status: x\n");
+    await writeFile(path.join(lasso.home, "pipelines", "bad-action.yaml"), "runner: claude\nstages:\n  - action: tracker.assign\n");
     await lasso.tracker.reply({ tool: "acli", match: ["workitem view APP-12"], stdout: jiraView("APP-12", "Add dark mode") });
     for (const [pipeline, reason] of [["bad-artifact", "pr-approved"], ["bad-action", "tracker.assign"]]) {
       const res = await lasso.api<Response>("/api/tickets", { method: "POST", raw: true, body: JSON.stringify({ input: "APP-12", pipeline }) });
