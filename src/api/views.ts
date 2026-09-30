@@ -3,7 +3,7 @@ import type { SessionRow } from "../store/sessions.ts";
 import { type Pipeline, type RunnerName, type Stage } from "../pipeline/load.ts";
 import type { PipelineSource } from "../pipeline/files.ts";
 import type { Drift, VersionRow } from "../store/versions.ts";
-import type { Config } from "../server/config.ts";
+import type { ActionConfig, Config } from "../server/config.ts";
 import type { BudgetView } from "../budget/budget.ts";
 import { adapterFor } from "../runner/adapters.ts";
 import type { FeedbackRow } from "../store/feedback.ts";
@@ -192,6 +192,24 @@ export interface ConfigFile {
   config: Config;
   /** Keys this edit changed whose new value applies only after a restart. */
   restart: string[];
+}
+
+/** One Action config.yaml defines: global when repo is null, else that repo's own (an override when a global one shares its name). */
+export interface ActionListing {
+  name: string;
+  repo: string | null;
+  params: string[];
+  timeout: string;
+  run: string;
+}
+
+/** Every Action in config, the global ones first, then each repo's, each set by name. */
+export function actionListings(config: Config): ActionListing[] {
+  const list = (actions: Record<string, ActionConfig>, repo: string | null) =>
+    Object.entries(actions)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([name, a]) => ({ name, repo, params: a.params, timeout: a.timeout, run: a.run }));
+  return [...list(config.actions, null), ...Object.entries(config.repos).flatMap(([repo, r]) => list(r.actions, repo))];
 }
 
 export function pipelineListing(source: PipelineSource): PipelineListing {

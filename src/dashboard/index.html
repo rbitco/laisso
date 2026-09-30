@@ -221,6 +221,8 @@
   .add-stage button { background: none; border-style: dashed; color: var(--muted); }
   dd .drift, .bar .drift { color: var(--amber); }
   [data-role="pipeline-version"] a, [data-role="live-versions"] a { color: var(--accent); }
+  .action-def { margin-top: 8px; }
+  .action-def h4 { margin: 0 0 4px; font-size: 13px; }
   .card pre { margin: 0; white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
   .fields .ro { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
   .fields .ro span { color: var(--ink); }
@@ -817,7 +819,8 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
       if (remove.textContent !== 'Delete for sure') { remove.textContent = 'Delete for sure'; setTimeout(() => { remove.textContent = 'Delete'; }, 4000); return; }
       save(remove, () => api('/api/pipelines/' + encodeURIComponent(name), { method: 'DELETE' }), () => { location.hash = 'pipelines'; });
     });
-    const structured = p.pipeline ? stagesForm(p) : el('div', { class: 'card problem' }, [el('div', { class: 'why', text: 'This file does not load: ' + p.problem + '. Fix it as text.' })]);
+    const actions = await api('/api/actions').catch(() => []);
+    const structured = p.pipeline ? stagesForm(p, actions) : el('div', { class: 'card problem' }, [el('div', { class: 'why', text: 'This file does not load: ' + p.problem + '. Fix it as text.' })]);
     const raw = rawForm(p);
     raw.hidden = !!p.pipeline;
     asText.addEventListener('click', () => { raw.hidden = !raw.hidden; structured.hidden = !raw.hidden; asText.textContent = raw.hidden ? 'Edit as text' : 'Edit as fields'; });
@@ -872,14 +875,17 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
     return form;
   }
 
-  function stagesForm(p) {
+  function stagesForm(p, actions) {
     const pipeline = p.pipeline;
+    // Each configured Action's params, by name; a global one stands ahead of a repo's own of the same name.
+    const params = {};
+    for (const a of actions) if (!params[a.name]) params[a.name] = a.params;
     const form = el('form', { class: 'panel', 'data-role': 'pipeline-fields' });
     const runner = runnerSelect('runner', pipeline.runner);
     const spend = el('input', { name: 'spend', value: pipeline.budget.spend === undefined ? '' : String(pipeline.budget.spend), placeholder: 'global default' });
     form.appendChild(el('div', { class: 'card' }, [el('h3', { text: 'Pipeline' }), el('div', { class: 'fields' }, [field('runner', runner), field('spend per Ticket (USD)', spend)])]));
     // The Stages as they will be saved: additions, moves and removals wait for Save, and undo brings a Stage back as it was.
-    const stages = pipeline.stages.map((s) => withTools(stageCard(s, pipeline)));
+    const stages = pipeline.stages.map((s) => withTools(stageCard(s, pipeline, false, params)));
     const list = el('div', { class: 'stack', 'data-role': 'stage-list' });
     const draw = () => {
       const kept = stages.filter((c) => !c.removed).length;
@@ -906,7 +912,7 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
       const kinds = [['Runner Stage', 'add-runner', BLANK_STAGE], ['action Stage', 'add-action', BLANK_ACTION]].map(([text, role, blank]) => {
         const b = el('button', { type: 'button', class: 'sm', 'data-role': role, text: '+ ' + text });
         b.addEventListener('click', () => {
-          const card = withTools(stageCard(blank, pipeline, true));
+          const card = withTools(stageCard(blank, pipeline, true, params));
           card.fresh = true;
           card.node.classList.add('fresh');
           stages.splice(stages.indexOf(after) + 1, 0, card);
@@ -961,39 +967,43 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
 
   // What a new Stage starts as: every field at its default.
   const BLANK_STAGE = { kind: 'runner', name: '', prompt: null, skills: [], runner: null, human: false, advance: true, artifact: null, repeat: null, budget: {} };
-  const BLANK_ACTION = { kind: 'action', name: '', action: 'tracker.transition', with: { status: '' } };
-  // The actions a new Stage may pick and each one's params; config.yaml defines what they run (ADR 0010).
-  const ACTIONS = { 'tracker.transition': [['status', 'tracker status, as In Review']] };
+  const BLANK_ACTION = { kind: 'action', name: '', action: '', with: {} };
 
-  function stageCard(s, pipeline, fresh) {
-    if (s.kind === 'action' && !fresh) {
-      // A saved Stage running an Action from config: its params are editable; the action is changed in the file.
-      const inputs = Object.fromEntries(Object.entries(s.with).map(([key, value]) => [key, el('input', { name: key, value })]));
-      const node = el('div', { class: 'card' }, [el('h3', {}, [el('span', { class: 'kind', text: 'action' }), s.action]), el('div', { class: 'fields' }, Object.keys(inputs).map((key) => field(key, inputs[key])))]);
-      return {
-        name: s.name, node,
-        patch() {
-          const next = Object.fromEntries(Object.entries(inputs).map(([key, input]) => [key, input.value.trim()]));
-          return Object.keys(next).some((key) => next[key] !== s.with[key]) ? { with: next } : {};
-        },
-      };
-    }
+  // params: each Action config.yaml defines, by name, with the params a Stage supplies under with: (ADR 0010).
+  function stageCard(s, pipeline, fresh, params = {}) {
     if (s.kind === 'action') {
-      // A new action Stage picks its action and shows that action's params.
-      const action = select('action', Object.keys(ACTIONS), s.action);
+      // The Action is picked from config and shows one field per param; a Stage naming an Action config lacks keeps its own params.
+      const names = Object.keys(params).sort();
+      if (s.action && !names.includes(s.action)) names.unshift(s.action);
+      const action = select('action', names, s.action);
+      if (s.action && !params[s.action]) action.querySelector('option').textContent = s.action + ' (not in config.yaml)';
+      const keysOf = (name) => params[name] || (name === s.action ? Object.keys(s.with) : []);
       const inputs = {};
       const fields = el('div', { class: 'fields' });
       const drawFields = () => {
-        for (const [key, placeholder] of ACTIONS[action.value] || []) inputs[key] = inputs[key] || el('input', { name: key, value: s.with[key] || '', placeholder });
-        fields.replaceChildren(field('action', action), ...(ACTIONS[action.value] || []).map(([key]) => field(key, inputs[key])));
+        const keys = keysOf(action.value);
+        for (const key of keys) inputs[key] = inputs[key] || el('input', { name: key, value: s.with[key] || '', placeholder: 'required' });
+        fields.replaceChildren(field('action', action), ...keys.map((key) => field(key, inputs[key])));
+        if (!names.length) fields.append(el('div', { class: 'why', text: 'config.yaml defines no Actions yet; add one under actions: to run it here' }));
       };
       action.addEventListener('change', drawFields);
       drawFields();
-      const node = el('div', { class: 'card' }, [el('h3', {}, [el('span', { class: 'kind', text: 'action' }), 'new Stage']), fields]);
+      const node = el('div', { class: 'card', 'data-role': 'action-stage' }, [el('h3', {}, [el('span', { class: 'kind', text: 'action' }), fresh ? 'new Stage' : s.name]), fields]);
+      const values = () => Object.fromEntries(keysOf(action.value).map((key) => [key, inputs[key].value.trim()]));
       return {
         name: s.name, node,
         // A param left blank is left out, so the save names it as missing.
-        patch: () => ({ action: action.value, with: Object.fromEntries((ACTIONS[action.value] || []).map(([key]) => [key, inputs[key].value.trim()]).filter(([, value]) => value)) }),
+        patch() {
+          const next = values();
+          if (fresh) return { action: action.value, with: Object.fromEntries(Object.entries(next).filter(([, value]) => value)) };
+          const patch = {};
+          if (action.value !== s.action) patch.action = action.value;
+          const w = {};
+          for (const [key, value] of Object.entries(next)) if (value !== s.with[key]) w[key] = value || null;
+          for (const key of Object.keys(s.with)) if (!(key in next)) w[key] = null;
+          if (Object.keys(w).length) patch.with = w;
+          return patch;
+        },
       };
     }
     const name = el('input', { name: 'name', value: s.name });
@@ -1035,7 +1045,8 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
   // Config: every key the dashboard may set, edited in place; repos stay a hand edit.
   async function showConfig() {
     let c;
-    try { c = await api('/api/config'); } catch (e) { showNotice(e.message); return; }
+    let actions;
+    try { [c, actions] = await Promise.all([api('/api/config'), api('/api/actions')]); } catch (e) { showNotice(e.message); return; }
     const cfg = c.config;
     const num = (key, value) => el('input', { name: key, value: String(value) });
     const inputs = {
@@ -1050,6 +1061,7 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
       el('div', { class: 'card' }, [el('h3', { text: 'Budget defaults' }), el('div', { class: 'fields' }, [field('rounds per repeating Stage', inputs.rounds), field('attempts per Stage', inputs.attempts), field('wall time per Session', inputs.wallTime), field('spend per Ticket (USD)', inputs.spend)])]),
       el('div', { class: 'card' }, [el('h3', { text: 'Server' }), el('div', { class: 'fields' }, [field('tick (seconds)', inputs.tick), field('concurrency', inputs.concurrency), field('retention (days)', inputs.retention), field('branch prefix', inputs.branch_prefix), field('port', inputs.port)])]),
       el('div', { class: 'card' }, [el('h3', { text: 'Notifications' }), el('div', { class: 'fields' }, flags.map((f) => f[2]))]),
+      actionsCard(actions),
       el('div', { class: 'card' }, [el('h3', { text: 'Repos' }), el('div', { class: 'why', text: Object.keys(cfg.repos).length ? Object.entries(cfg.repos).map(([n, r]) => n + ': ' + r.tracker + ' ' + r.project + ' at ' + r.path + ', Pipeline ' + r.pipeline).join(' · ') : 'none yet' }), el('div', { class: 'why', text: 'repos are edited in config.yaml by hand' })]),
       el('div', { class: 'bar' }, [button, el('span', { class: 'why', text: 'port and tick apply after a restart; everything else at once' })]),
     ]);
@@ -1071,6 +1083,19 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
       }, () => { showNotice(restart.length ? 'saved; ' + restart.join(' and ') + ' apply after a restart' : 'saved'); showConfig(); });
     });
     configPanel.replaceChildren(form);
+  }
+
+  // The Actions config.yaml defines, read-only: they run shell commands, so they are edited in the file.
+  function actionsCard(actions) {
+    const rows = actions.map((a) => el('div', { class: 'action-def', 'data-action': a.name }, [
+      el('h4', {}, [a.name, el('span', { class: 'why', text: ' ' + (a.repo ? 'repo ' + a.repo : 'global') + ' · params ' + (a.params.join(', ') || 'none') + ' · timeout ' + a.timeout })]),
+      el('pre', { text: a.run }),
+    ]));
+    return el('div', { class: 'card', 'data-role': 'config-actions' }, [
+      el('h3', { text: 'Actions' }),
+      ...(rows.length ? rows : [el('div', { class: 'why', text: 'none yet' })]),
+      el('div', { class: 'why', text: 'Actions are edited in config.yaml by hand; a repo\'s own replaces a global one of the same name' }),
+    ]);
   }
 
   function decodeName(part) { try { return decodeURIComponent(part); } catch { return part; } }

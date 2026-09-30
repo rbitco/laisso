@@ -19,7 +19,7 @@ import { Intake, IntakeError, type IntakeRequest } from "../intake/intake.ts";
 import { PipelineError, type Pipeline } from "../pipeline/load.ts";
 import { PipelineFiles } from "../pipeline/files.ts";
 import { dashboardHtml, metroScript } from "../dashboard/page.ts";
-import { ticketView, ticketDetail, sessionView, sortForLedger, pipelineListing, pipelineFileView, pipelineVersionView, type ViewContext, type IntakeResult, type ConfigFile } from "./views.ts";
+import { ticketView, ticketDetail, sessionView, sortForLedger, pipelineListing, pipelineFileView, pipelineVersionView, actionListings, type ViewContext, type IntakeResult, type ConfigFile } from "./views.ts";
 import { readFileSync } from "node:fs";
 import { replaceFile } from "../atomic-write.ts";
 
@@ -235,6 +235,8 @@ export function createApp(deps: AppDeps): Hono {
   };
   const configFile = (text: string, restart: string[] = []): ConfigFile => ({ file: deps.home.configFile, text, config: parseConfig(text, deps.home.configFile), restart });
   app.get("/api/config", (c) => c.json(configFile(configText())));
+  // The Actions a Pipeline's action Stages may run (ADR 0010), as config.yaml has them now; edited in the file.
+  app.get("/api/actions", (c) => c.json(actionListings(currentConfig(deps.home, deps.config))));
   app.patch("/api/config", async (c) => {
     const patch = await c.req.json().catch(() => null);
     // Read, patch and write without yielding in between, so two edits cannot both start from the same text.

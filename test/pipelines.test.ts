@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { startLassoWithRepos, startLasso, waitFor, claudeFixture, runCli, type Lasso } from "./harness.ts";
 import type { TicketDetail, IntakeResult } from "../src/api/views.ts";
-import type { PipelineFile, PipelineListing, ConfigFile, PipelineVersionView } from "../src/api/views.ts";
+import type { PipelineFile, PipelineListing, ConfigFile, PipelineVersionView, ActionListing } from "../src/api/views.ts";
 import type { TickChange } from "../src/server/tick.ts";
 
 // Seam one: Pipelines and config are edited through the API the dashboard
@@ -447,6 +447,55 @@ describe("config.yaml", () => {
   });
 });
 
+describe("config Actions in the Pipeline editor", () => {
+  const NOTIFY = `runner: claude
+stages:
+  - name: implement
+    prompt: Do the work.
+  - name: tell
+    action: notify
+    with: { channel: ops }
+`;
+  async function lassoWithActions() {
+    const started = await startLassoWithRepos(
+      { app: { pipeline: "work" }, web: { pipeline: "work", actions: { notify: { params: ["channel"], run: "echo web", timeout: "1m" }, deploy: { params: ["env", "region"], run: "./deploy" } } } },
+      { actions: { notify: { params: ["channel"], run: 'echo "told $LASSO_CHANNEL"' } } },
+      { work: NOTIFY },
+    );
+    running.push(started.lasso);
+    return started.lasso;
+  }
+
+  it("lists every Action config defines, global then per repo, as config.yaml has it now", async () => {
+    const lasso = await lassoWithActions();
+    const listed = await lasso.api<ActionListing[]>("/api/actions");
+    expect(listed.filter((a) => a.name !== "tracker.transition" && a.repo !== "app")).toEqual([
+      { name: "notify", repo: null, params: ["channel"], timeout: "5m", run: 'echo "told $LASSO_CHANNEL"' },
+      { name: "deploy", repo: "web", params: ["env", "region"], timeout: "5m", run: "./deploy" },
+      { name: "notify", repo: "web", params: ["channel"], timeout: "1m", run: "echo web" },
+    ]);
+    expect(listed.find((a) => a.name === "tracker.transition")).toMatchObject({ repo: null, params: ["status"] });
+    // Actions are edited by hand; the listing follows the file without a restart.
+    const file = path.join(lasso.home, "config.yaml");
+    const { writeFile } = await import("node:fs/promises");
+    await writeFile(file, (await readFile(file, "utf8")) + "\n# added by hand\n");
+    await writeFile(file, (await readFile(file, "utf8")).replace('echo "told $LASSO_CHANNEL"', "echo edited"));
+    expect((await lasso.api<ActionListing[]>("/api/actions")).find((a) => a.name === "notify" && a.repo === null)!.run).toBe("echo edited");
+  });
+
+  it("edits a saved action Stage's params and Action as the editor sends them, and refuses a param left empty", async () => {
+    const lasso = await lassoWithActions();
+    // The editor sends a blank param as null: the Stage then lacks it, and the save says so.
+    await expect(lasso.api("/api/pipelines/work", { method: "PATCH", body: json({ stages: { tell: { with: { channel: null } } } }) })).rejects.toThrow(/Stage tell: notify needs with\.channel/);
+    const changed = await lasso.api<PipelineFile>("/api/pipelines/work", { method: "PATCH", body: json({ stages: { tell: { with: { channel: "dev" } } } }) });
+    expect(changed.pipeline!.stages[1]).toMatchObject({ name: "tell", action: "notify", with: { channel: "dev" } });
+    // Picking another Action swaps its params: the old one's go, the new one's come in.
+    const swapped = await lasso.api<PipelineFile>("/api/pipelines/work", { method: "PATCH", body: json({ stages: { tell: { action: "deploy", with: { channel: null, env: "prod", region: "eu" } } } }) });
+    expect(swapped.pipeline!.stages[1]).toMatchObject({ name: "tell", action: "deploy", with: { env: "prod", region: "eu" } });
+    expect(swapped.text).toContain("    action: deploy\n    with: { env: prod, region: eu }\n");
+  });
+});
+
 describe("the dashboard", () => {
   it("carries the Pipeline and config editors", async () => {
     const lasso = await lassoWith();
@@ -455,5 +504,9 @@ describe("the dashboard", () => {
     expect(html).toContain('data-role="config"');
     expect(html).toContain('href="#pipelines"');
     expect(html).toContain('href="#config"');
+    // Action Stages pick from config's Actions; the config panel lists them read-only.
+    expect(html).toContain("api('/api/actions')");
+    expect(html).toContain("'data-role': 'action-stage'");
+    expect(html).toContain("'data-role': 'config-actions'");
   });
 });
