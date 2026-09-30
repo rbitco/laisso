@@ -52,6 +52,9 @@ tick: 30 # fast
     expect(text).toContain("# My config.");
     expect(text).toContain("tracker: github # the site");
     expect(text).toContain("tick: 30 # fast");
+    // The file pads its inline maps, so the migration keeps them padded and pads what it adds to match.
+    expect(text).toContain("app: { tracker: jira, project: APP, path: /a }");
+    expect(text).toContain("params: [ status ]");
     const config = parseConfig(text, "config.yaml");
     expect(config.actions["tracker.transition"]).toEqual({ ...JIRA_TRANSITION, timeout: "5m" });
     expect(config.repos.web!.actions["tracker.transition"]).toEqual({ ...GITHUB_TRANSITION, timeout: "5m" });
@@ -75,6 +78,13 @@ describe("migratePipelineText", () => {
     expect(text).toContain("  - action: tracker.transition # move it\n    with: {status: In Progress}\n");
     expect(parsePipeline("p", text).stages.map((s) => s.name)).toEqual(["grill", "transition-in-progress", "implement", "transition-done"]);
     expect(migratePipelineText(text)).toBeNull();
+  });
+
+  it("pads what it writes as the file pads its inline collections", () => {
+    const padded = OLD_PIPELINE.replace("    prompt: Talk.\n", "    prompt: Talk.\n    budget: { attempts: 1 }\n");
+    const text = migratePipelineText(padded)!;
+    expect(text).toContain("    budget: { attempts: 1 }\n");
+    expect(text).toContain("    with: { status: In Progress }\n");
   });
 });
 

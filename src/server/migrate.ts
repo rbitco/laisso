@@ -36,8 +36,14 @@ export const GITHUB_TRANSITION = {
   ].join("\n"),
 };
 
-/** Keep what the migration does not touch as it was: no line folding, no padding added inside [flow] collections. */
-const WRITE: ToStringOptions = { lineWidth: 0, flowCollectionPadding: false };
+/**
+ * Keep what the migration does not touch as it was: no line folding, and
+ * [flow] collections padded as the file already pads them, since the
+ * writer applies one choice to every one of them.
+ */
+function writeLike(text: string): ToStringOptions {
+  return { lineWidth: 0, flowCollectionPadding: /[{[] +[^\s}\]]/.test(text) };
+}
 
 export interface Migrated {
   config: boolean;
@@ -91,7 +97,7 @@ export function migrateConfigText(text: string): string | null {
     if (repo?.tracker !== "github" || repo.actions?.["tracker.transition"] !== undefined) continue;
     setBlock(doc, ["repos", name, "actions", "tracker.transition"], actionNode(doc, GITHUB_TRANSITION));
   }
-  return doc.toString(WRITE);
+  return doc.toString(writeLike(text));
 }
 
 /** An Action as a human would write it: params inline, the command as a literal block. */
@@ -129,7 +135,7 @@ export function migratePipelineText(text: string): string | null {
     stage.set("with", params);
     changed = true;
   }
-  return changed ? doc.toString(WRITE) : null;
+  return changed ? doc.toString(writeLike(text)) : null;
 }
 
 /** An action Stage in a Version's definition, as the parser wrote it before ADR 0010 and after. */
