@@ -148,8 +148,9 @@ describe("end of life", () => {
     const { lasso, ticket } = await lassoWithTicket({ retention: 0 });
     const done = await finish(lasso, ticket.id);
     const dir = path.dirname(ticket.worktree);
-    expect((await checkNow(lasso)).changes).toEqual([{ ticket: ticket.id, summary: "directory swept, 0 days after done" }]);
-    expect(existsSync(dir)).toBe(false);
+    // The last Session's end kicks the tick, and its sweep finds retention already reached.
+    await waitFor(async () => (existsSync(dir) ? null : true), "the directory to be swept");
+    expect(lasso.stdout()).toMatch(/ticket\.swept ticket=\S+ state=done days=0/);
     const after = await detailOf(lasso, ticket.id);
     expect(after).toMatchObject({ state: "done", display: { state: "done" } });
     expect(after.sessions.map((s) => s.id)).toEqual(done.sessions.map((s) => s.id));
@@ -158,7 +159,8 @@ describe("end of life", () => {
   });
 
   it("keeps a worktree whose WIP commit failed, still closes the PR, and sweeps it through git at retention", async () => {
-    const { lasso, repos, ticket } = await lassoWithTicket({ retention: 0 });
+    // Retention drops to 0 only once the checks below are done: the killed Session's end kicks a tick that would sweep.
+    const { lasso, repos, ticket } = await lassoWithTicket({ retention: 1 });
     await lasso.tracker.reply({ tool: "gh", match: ["pr view"], stdout: JSON.stringify({ number: 7, url: PR_URL, state: "OPEN" }) + "\n" });
     await lasso.tracker.reply({ tool: "gh", match: ["pr close"], stdout: "" });
     await lasso.runner.script({ files: { "notes.txt": "draft\n" }, hang: true });
@@ -177,6 +179,7 @@ describe("end of life", () => {
     expect(log).toContain("ticket.teardown_failed ticket=" + ticket.id + " step=wip");
 
     // At retention the sweep removes the worktree through git, so nothing dangles, then the directory.
+    await lasso.api("/api/config", { method: "PATCH", body: JSON.stringify({ retention: 0 }) });
     expect((await checkNow(lasso)).changes).toEqual([{ ticket: ticket.id, summary: "directory swept, 0 days after abandoned" }]);
     expect(existsSync(path.dirname(ticket.worktree))).toBe(false);
     expect(repos.app.git(["worktree", "list"])).not.toContain(ticket.worktree);

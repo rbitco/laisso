@@ -33,6 +33,8 @@ export interface RunsDeps {
   review: Review;
   /** Hears each stdout chunk once it is on disk, so a watching dashboard can read it. */
   stdoutWritten?: (ticket: string, session: string) => void;
+  /** Hears a Session end outside shutdown, once its Ticket has advanced or Flagged, so the next Stage need not wait for the timer. */
+  ended?: () => void;
 }
 
 /** Lasso's verdict on an ended Session: the Stage is done, waits for more Feedback (a Round), or Flags. */
@@ -321,6 +323,7 @@ export class Runs {
     this.deps.log.info("session.ended", { session: sessionId, ticket: row.ticket, stage: row.stage, outcome: row.outcome, reason: row.ended_reason, cost: row.cost_usd });
     if (verdict) await this.apply(row, verdict);
     live.resolve(row);
+    if (verdict) this.deps.ended?.();
   }
 
   /** Lasso's verdict from the Outcome and the artifact (ADR 0002): advance, or Flag with the reason; a Round asks the PR what it addressed. */

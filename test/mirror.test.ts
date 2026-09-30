@@ -82,29 +82,27 @@ describe("the tracker mirror", () => {
       { ticket: ticket.id, summary: "transition-in-progress: tracker.transition In Progress" },
       { ticket: ticket.id, summary: "started implement" },
     ]);
-    const closed = await waitFor(async () => { const d = await detailOf(lasso, ticket.id); return d.stage.name === "transition-done" ? d : null; }, "implement to finish");
-    expect(closed.display).toMatchObject({ state: "ready", why: "Done starts on the next tick" });
-    // The action moved the status, then the label swapped to implement; implement's finish found the label already right.
-    expect(argsOf(await callsSince(lasso, 4))).toEqual([
-      "jira workitem transition --key APP-12 --status In Progress --yes",
-      "jira workitem view APP-12 --fields labels --json",
-      "jira workitem edit --key APP-12 --labels lasso:implement --remove-labels lasso:grill --yes",
-      "jira workitem view APP-12 --fields labels --json",
-    ]);
-    await lasso.tracker.clearCalls();
-    const done = await checkNow(lasso);
-    expect(done.changes).toEqual([{ ticket: ticket.id, summary: "transition-done: tracker.transition Done" }]);
+    // implement's end kicks the tick, which performs Done without a check-now.
     const finished = await waitFor(async () => { const d = await detailOf(lasso, ticket.id); return d.state === "done" ? d : null; }, "the Ticket to be done");
     expect(finished.sessions.map((s) => [s.stage, s.mode, s.outcome, s.finalMessage])).toEqual([
       ["transition-done", "action", "succeeded", "tracker.transition Done"],
       ["implement", "headless", "succeeded", expect.any(String)],
       ["transition-in-progress", "action", "succeeded", "tracker.transition In Progress"],
     ]);
-    expect(argsOf(await callsSince(lasso, 3))).toEqual([
+    // The action moved the status, then the label swapped to implement.
+    const calls = argsOf(await callsSince(lasso, 7));
+    expect(calls.slice(0, 3)).toEqual([
+      "jira workitem transition --key APP-12 --status In Progress --yes",
+      "jira workitem view APP-12 --fields labels --json",
+      "jira workitem edit --key APP-12 --labels lasso:implement --remove-labels lasso:grill --yes",
+    ]);
+    // implement's finish found the label already right, in the background while the kicked tick performed Done; Done cleared it.
+    expect(calls.slice(3).sort()).toEqual([
       "jira workitem transition --key APP-12 --status Done --yes",
       "jira workitem view APP-12 --fields labels --json",
+      "jira workitem view APP-12 --fields labels --json",
       "jira workitem edit --key APP-12 --remove-labels lasso:implement --yes",
-    ]);
+    ].sort());
   });
 
   it("parks a failed push as pending, retries it on the tick, and overwrites the tracker after a restart", async () => {

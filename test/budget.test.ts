@@ -69,16 +69,17 @@ describe("attempts", () => {
     await expect(pull(lasso, ticket.id, "extend", { wallTime: "45min" })).rejects.toThrow(/wallTime .*45min.* is not a duration/);
     await expect(pull(lasso, ticket.id, "extend", {})).rejects.toThrow("nothing to extend");
     await expect(pull(lasso, ticket.id, "extend", 7 as unknown as object)).rejects.toThrow("nothing to extend");
-    await lasso.runner.script({ stdout: claudeFixture("success.json"), commands: commit });
+    await lasso.runner.script({ stdout: claudeFixture("success.json"), commands: commit, files: { "NOTES.md": "notes\n" } });
     const extended = await pull(lasso, ticket.id, "extend", { attempts: 3, wallTime: "2m" });
     expect(extended.flag).toBeNull();
     expect(extended.budget.attempts).toEqual({ used: 3, limit: 3, source: "ticket" });
     expect(extended.budget.wallTime).toMatchObject({ limit: 120_000, source: "ticket", limitText: "2m" });
     expect(extended.budget.ticket).toEqual({ rounds: null, attempts: 3, wallTime: "2m", spend: null });
     expect(extended.session).toMatchObject({ stage: "implement", ordinal: 3, startedBy: "auto" });
-    const advanced = await waitFor(async () => { const d = await detailOf(lasso, ticket.id); return d.stage.name === "notes" ? d : null; }, "implement to finish");
-    expect(advanced.budget.attempts).toEqual({ used: 0, limit: 3, source: "ticket" });
-    expect(advanced.budget.spend).toMatchObject({ used: 0.2936585 });
+    // implement's end kicks the tick, so notes runs straight after; its attempts count from zero.
+    const done = await waitFor(async () => { const d = await detailOf(lasso, ticket.id); return d.state === "done" ? d : null; }, "the Ticket to be done");
+    expect(done.sessions.map((s) => [s.stage, s.ordinal])).toEqual([["notes", 1], ["implement", 3], ["implement", 2], ["implement", 1]]);
+    expect(done.budget.spend.used).toBeCloseTo(0.587317, 5);
     const calls = await launched(lasso, 3);
     expect(calls[2]!.argv).toContain("--session-id");
     expect(calls[2]!.argv).toContain("--max-budget-usd");
@@ -147,11 +148,10 @@ describe("spend and Rounds", () => {
     const { lasso, ticket } = await lassoWithTicket({ budget: { spend: 0.25 } });
     await lasso.runner.script({ stdout: claudeFixture("success.json"), commands: commit });
     await checkNow(lasso);
-    const advanced = await waitFor(async () => { const d = await detailOf(lasso, ticket.id); return d.stage.name === "notes" ? d : null; }, "implement to finish");
-    expect(advanced.budget.spend).toEqual({ used: 0.2936585, limit: 0.25, source: "global" });
-    const tick = await checkNow(lasso);
-    expect(tick.changes).toEqual([{ ticket: ticket.id, summary: "Flagged: spend $0.29 of $0.25 used" }]);
-    const d = await detailOf(lasso, ticket.id);
+    // implement's end kicks the tick, which finds the spend over the ceiling before notes starts.
+    const d = await waitFor(async () => { const d = await detailOf(lasso, ticket.id); return d.flag ? d : null; }, "the Flag");
+    expect(d.stage.name).toBe("notes");
+    expect(d.budget.spend).toEqual({ used: 0.2936585, limit: 0.25, source: "global" });
     expect(d.flag).toMatchObject({ reason: "budget.cost", detail: "spend $0.29 of $0.25 used" });
     expect(d.sessions).toHaveLength(1);
 

@@ -74,10 +74,9 @@ describe("the concurrency cap", () => {
       ["D", "queued", 2],
     ]);
 
-    // Stopping A frees a slot: the next tick starts C, the oldest in line, and D moves up.
+    // Stopping A frees a slot: the tick its end kicks starts C, the oldest in line, and D moves up.
     await stop(lasso, a.id);
-    expect(summaries((await checkNow(lasso)).changes)).toEqual(["started implement"]);
-    expect((await detailOf(lasso, c.id)).display.state).toBe("running");
+    await waitFor(async () => ((await detailOf(lasso, c.id)).display.state === "running" ? true : null), "C to start");
     expect((await detailOf(lasso, d.id)).display).toMatchObject({ state: "queued", why: "1 in line; implement starts when a slot frees" });
     expect((await detailOf(lasso, a.id)).display.state).toBe("flagged");
     // A may have been stopped before its fake claude booted; B and C record their launch either way.
@@ -149,11 +148,12 @@ describe("the concurrency cap", () => {
     const a = await intake(lasso, "work", "A");
     const b = await intake(lasso, "work", "B");
     await checkNow(lasso);
-    await waitFor(async () => { const d = await detailOf(lasso, a.id); return d.stage.name === "notes" ? d : null; }, "A to advance");
-    // A's next Stage became runnable after B did: B goes first.
-    expect(summaries((await checkNow(lasso)).changes)).toEqual(["started implement"]);
-    expect((await detailOf(lasso, b.id)).display.state).toBe("running");
-    expect((await detailOf(lasso, a.id)).display).toMatchObject({ state: "queued", why: "1 in line; notes starts when a slot frees" });
+    const done = async (id: string) => (await detailOf(lasso, id)).state === "done";
+    await waitFor(async () => ((await done(a.id)) && (await done(b.id)) ? true : null), "A and B to finish");
+    // Each end kicks the tick. A's next Stage became runnable after B did: B goes first, then A's notes ahead of B's.
+    const calls = await lasso.runner.calls();
+    const name = (id: string) => (id === a.id ? "A" : "B");
+    expect(calls.map((call) => [name(call.env.LASSO_TICKET!), call.env.LASSO_STAGE])).toEqual([["A", "implement"], ["B", "implement"], ["A", "notes"], ["B", "notes"]]);
   });
 
   it("records every running Session as shutdown on Ctrl-C; the startup tick fills the slots, the one in line first", async () => {

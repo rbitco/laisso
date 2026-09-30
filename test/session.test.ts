@@ -90,17 +90,8 @@ describe("a headless Stage", () => {
 
   it("advances on succeeded with the artifact present, and finishes the Ticket after the last Stage", async () => {
     const { lasso, ticket } = await lassoWithTicket();
-    await lasso.runner.script({ commands: [["git", "commit", "-q", "--allow-empty", "-m", "work"]], stdout: claudeFixture("success.json") });
-    await checkNow(lasso);
-
-    const first = await settled(lasso, ticket.id);
-    expect(first.session).toMatchObject({ stage: "implement", outcome: "succeeded", endedBy: "outcome", endedReason: null, finalMessage: "OK", costUsd: 0.2936585 });
-    expect(first.session!.usage).toMatchObject({ output_tokens: 4 });
-    expect(first.session!.transcriptPath).toMatch(/3e728ae2-8d99-42f3-a7ba-6066de05d169\.jsonl$/);
-    expect(first.stage.name).toBe("notes");
-    expect(first.display).toMatchObject({ state: "ready", why: "notes starts on the next tick" });
-
-    await lasso.runner.script({ files: { "NOTES.md": "notes\n" }, stdout: claudeFixture("success.json") });
+    // One check-now: implement's end kicks the tick, which starts notes without waiting for the timer.
+    await lasso.runner.script({ commands: [["git", "commit", "-q", "--allow-empty", "-m", "work"]], files: { "NOTES.md": "notes\n" }, stdout: claudeFixture("success.json") });
     await checkNow(lasso);
     const done = await waitFor(async () => {
       const d = await detailOf(lasso, ticket.id);
@@ -112,6 +103,11 @@ describe("a headless Stage", () => {
 
     // The timeline is newest first, one Session per Stage run.
     expect(done.sessions.map((s) => [s.stage, s.ordinal, s.outcome])).toEqual([["notes", 1, "succeeded"], ["implement", 1, "succeeded"]]);
+    const first = done.sessions[1]!;
+    expect(first).toMatchObject({ stage: "implement", outcome: "succeeded", endedBy: "outcome", endedReason: null, finalMessage: "OK", costUsd: 0.2936585 });
+    expect(first.usage).toMatchObject({ output_tokens: 4 });
+    expect(first.transcriptPath).toMatch(/3e728ae2-8d99-42f3-a7ba-6066de05d169\.jsonl$/);
+    expect(lasso.stdout()).toMatch(/ tick trigger=session-end /);
     expect(await lasso.api<unknown[]>("/api/tickets")).toEqual([]);
 
     const cli = await runCli(["status", ticket.id], lasso);

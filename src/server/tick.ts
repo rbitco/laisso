@@ -17,6 +17,9 @@ export interface TickStatus {
   running: boolean;
 }
 
+/** What started a tick; the log records it. A Session ending kicks one so the next Stage starts at once. */
+export type Trigger = "timer" | "check-now" | "startup" | "start" | "session-end";
+
 /**
  * The global tick: the one clock Lasso runs on. Every poll of a PR, every
  * pending mirror retry, every queued Session start happens inside a tick.
@@ -27,6 +30,8 @@ export class Tick {
   private nextDue: Date | null = null;
   private timer: NodeJS.Timeout | null = null;
   private inFlight: Promise<TickResult> | null = null;
+  /** Set by stop(): a kick after shutdown begins starts nothing. */
+  private halted = false;
 
   private tickSeconds: number;
   private log: Logger;
@@ -43,6 +48,7 @@ export class Tick {
   }
 
   start(): void {
+    this.halted = false;
     const interval = this.tickSeconds * 1000;
     this.nextDue = new Date(Date.now() + interval);
     this.timer = setInterval(() => {
@@ -54,6 +60,7 @@ export class Tick {
   }
 
   stop(): void {
+    this.halted = true;
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     this.nextDue = null;
@@ -61,7 +68,7 @@ export class Tick {
   }
 
   /** Run one tick now; a tick already in flight is joined, not doubled. */
-  run(trigger: "timer" | "check-now" | "startup" | "start" = "check-now"): Promise<TickResult> {
+  run(trigger: Trigger = "check-now"): Promise<TickResult> {
     if (this.inFlight) return this.inFlight;
     this.inFlight = (async () => {
       const started = new Date();
@@ -80,6 +87,16 @@ export class Tick {
     });
     this.changed();
     return this.inFlight;
+  }
+
+  /**
+   * Run a tick once any tick in flight is through. A Session that ends asks
+   * for this, so its Ticket's next Stage starts now rather than on the timer;
+   * a tick already running may have looked at the Ticket before it moved.
+   */
+  kick(trigger: Trigger): void {
+    if (this.halted) return;
+    void this.settle().then(() => (this.halted ? undefined : this.run(trigger)));
   }
 
   /** Resolves once any tick in flight is through; at once when none is. Shutdown waits on this so nothing starts after the Sessions are killed. */

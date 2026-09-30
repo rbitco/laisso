@@ -78,7 +78,7 @@ export async function serve(opts: ServeOptions): Promise<number> {
   const terminal = new Terminal({ home, sessions, log });
   const budgets = new Budgets({ config, sessions });
   const queue = new Queue({ home, tickets, sessions, progress, log, cap: config.concurrency });
-  const runs = new Runs({ config, home, tickets, sessions, log, progress, budgets, queue, review, stdoutWritten: (ticket, session) => changes.emit({ kind: "stdout", ticket, session }) });
+  const runs = new Runs({ config, home, tickets, sessions, log, progress, budgets, queue, review, stdoutWritten: (ticket, session) => changes.emit({ kind: "stdout", ticket, session }), ended: () => tick.kick("session-end") });
   const actions = new Actions({ config, tickets, sessions, log, progress });
   // One tick: owed mirror pushes, then action Stages, then the PR poll (a Round it makes due starts below), then headless starts, then the retention sweep.
   const tick = new Tick(config.tick, log, async () => [...(await mirror.retryPending()), ...(await actions.runDue()), ...(await review.poll()), ...(await runs.startRunnable()), ...(await teardown.sweep())], () => changes.emit({ kind: "tick" }));

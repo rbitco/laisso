@@ -73,23 +73,20 @@ stages:
     });
     const ticket = await intake(lasso, "mixed");
 
-    await lasso.runner.script({ stdout: runnerFixture("pi", "success.jsonl"), commands: commit });
+    // One script serves both Stages: implement's end kicks the tick, so notes follows without a check-now.
+    await lasso.runner.script({ stdoutByRunner: { pi: runnerFixture("pi", "success.jsonl"), claude: claudeFixture("success.json") }, commands: commit, files: { "NOTES.md": "notes\n" } });
     expect((await checkNow(lasso)).changes).toEqual([{ ticket: ticket.id, summary: "started implement" }]);
-    let d = await settled(lasso, ticket.id);
-    expect(d.session).toMatchObject({ stage: "implement", outcome: "succeeded", finalMessage: "OK", limitsHonoured: [] });
-    expect(d.session!.transcriptPath).toMatch(/\/\.pi\/agent\/sessions\/--.*--\/2026-09-27T06-09-58-627Z_7d3f2c10-5b1e-4a8c-9e2f-1234567890ab\.jsonl$/);
-    expect(d.stage.name).toBe("notes");
-    const [pi] = await lasso.runner.calls();
-    expect(pi!.argv.slice(0, 7)).toEqual(["pi", "-p", "--mode", "json", "--session-id", d.session!.id, "-a"]);
-    expect(pi!.argv.at(-1)!.startsWith("/skill:implement\n\nYou are working Lasso Ticket")).toBe(true);
-    expect(pi!.env.LASSO_SESSION).toBe(d.session!.id);
-
-    await lasso.runner.script({ stdout: claudeFixture("success.json"), files: { "NOTES.md": "notes\n" } });
-    await checkNow(lasso);
-    d = await finished(lasso, ticket.id);
+    const d = await finished(lasso, ticket.id);
+    const implement = d.sessions.find((s) => s.stage === "implement")!;
+    expect(implement).toMatchObject({ outcome: "succeeded", finalMessage: "OK", limitsHonoured: [] });
+    expect(implement.transcriptPath).toMatch(/\/\.pi\/agent\/sessions\/--.*--\/2026-09-27T06-09-58-627Z_7d3f2c10-5b1e-4a8c-9e2f-1234567890ab\.jsonl$/);
     const calls = await lasso.runner.calls();
     expect(calls.map((c) => c.argv[0])).toEqual(["pi", "claude"]);
-    expect(calls[1]!.argv.slice(0, 2)).toEqual(["claude", "-p"]);
+    const [pi, claude] = calls;
+    expect(pi!.argv.slice(0, 7)).toEqual(["pi", "-p", "--mode", "json", "--session-id", implement.id, "-a"]);
+    expect(pi!.argv.at(-1)!.startsWith("/skill:implement\n\nYou are working Lasso Ticket")).toBe(true);
+    expect(pi!.env.LASSO_SESSION).toBe(implement.id);
+    expect(claude!.argv.slice(0, 2)).toEqual(["claude", "-p"]);
   });
 
   it("runs a Codex Stage through codex exec --json and keeps the thread id Codex assigned", async () => {
