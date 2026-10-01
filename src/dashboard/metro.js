@@ -8,6 +8,7 @@
 /** @typedef {import('../api/views.ts').TicketDetail} TicketDetail */
 /** @typedef {import('../api/views.ts').SessionView} SessionView */
 /** @typedef {import('../api/views.ts').Trigger} Trigger */
+/** @typedef {import('../server/tick.ts').TickStatus} TickStatus */
 /** @typedef {TicketView & { sessions?: SessionView[] }} MetroTicket */
 
 /** The colour key each display state paints the current station and the track behind it. */
@@ -22,6 +23,36 @@ export function duration(ms) {
   if (s < 60) return s + 's';
   const m = Math.floor(s / 60);
   return m < 60 ? m + 'm' + (s % 60) + 's' : Math.floor(m / 60) + 'h' + (m % 60) + 'm';
+}
+
+/** Whole seconds in a span of milliseconds, never below zero. */
+const wholeSeconds = (ms) => Math.max(0, Math.round(ms / 1000));
+
+/**
+ * How long ago a timestamp was, at second, minute or hour scale.
+ * @param {string | null} iso
+ * @param {number} [now]
+ */
+export function relative(iso, now = Date.now()) {
+  if (!iso) return 'never';
+  const s = wholeSeconds(now - new Date(iso).getTime());
+  if (s < 60) return s + 's ago';
+  const m = Math.round(s / 60);
+  return m < 60 ? m + 'm ago' : Math.round(m / 60) + 'h ago';
+}
+
+/**
+ * The header's Tick dot: idle, running, or down while Lasso is unreachable ('down' in place of a status), with its tooltip.
+ * @param {TickStatus | 'down'} status
+ * @param {number} now
+ * @returns {{ state: 'idle' | 'running' | 'down', title: string }}
+ */
+export function tickIndicator(status, now) {
+  if (status === 'down') return { state: 'down', title: 'lasso unreachable; reconnecting' };
+  if (status.running) return { state: 'running', title: 'tick running' };
+  if (!status.lastTick) return { state: 'idle', title: 'no tick yet' };
+  const next = status.nextTick ? 'next in ' + wholeSeconds(new Date(status.nextTick).getTime() - now) + 's' : 'next: manual';
+  return { state: 'idle', title: 'last tick ' + relative(status.lastTick, now) + ' · ' + next };
 }
 
 /**

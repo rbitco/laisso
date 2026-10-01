@@ -1,8 +1,8 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { startLassoWithRepos, waitFor, claudeFixture, type Lasso, type LassoConfig, type TrackerReply } from "./harness.ts";
 import { sortForLedger, type TicketView, type TicketDetail, type IntakeResult, type DisplayState } from "../src/api/views.ts";
-import { metroDiagram, metroTrack, sessionsForStage, quickAction } from "../src/dashboard/metro.js";
-import type { TickChange } from "../src/server/tick.ts";
+import { metroDiagram, metroTrack, sessionsForStage, quickAction, relative, tickIndicator } from "../src/dashboard/metro.js";
+import type { TickChange, TickStatus } from "../src/server/tick.ts";
 import { setScene, sceneFile, swapTo, type Scene } from "./scenes.ts";
 
 // Seam one for the live parts: the localhost JSON API the dashboard reads. The Ledger order and the
@@ -230,6 +230,57 @@ describe("the Metro drawings from API data", () => {
     expect(metroTrack(ended).match(/class="done"/g)).toHaveLength(2);
     expect(quickAction(ended)).toBeNull();
   });
+
+  it("reads times at second, minute and hour scale", () => {
+    const now = Date.parse(T2);
+    expect(relative(new Date(now - 12_000).toISOString(), now)).toBe("12s ago");
+    expect(relative(new Date(now - 3 * 60_000).toISOString(), now)).toBe("3m ago");
+    expect(relative(new Date(now - 2 * 3_600_000).toISOString(), now)).toBe("2h ago");
+    expect(relative(null, now)).toBe("never");
+  });
+});
+
+describe("the Tick dot", () => {
+  it("is idle with the time since the last Tick and the countdown to the next, from a real status", async () => {
+    const { lasso } = await lassoWithTicket();
+    await checkNow(lasso);
+    const real = await lasso.api<TickStatus>("/api/tick");
+    expect(real.running).toBe(false);
+    expect(real.nextTick).not.toBeNull();
+    // The real status with the next Tick pinned 23s after the last, so the countdown is a known number.
+    const last = Date.parse(real.lastTick!);
+    const status = { ...real, nextTick: new Date(last + 23_000).toISOString() };
+    expect(tickIndicator(status, last + 12_000)).toEqual({ state: "idle", title: "last tick 12s ago · next in 11s" });
+    // Timing reads at minute scale too.
+    expect(tickIndicator({ ...real, nextTick: new Date(last + 3 * 60_000 + 5_000).toISOString() }, last + 3 * 60_000).title).toBe("last tick 3m ago · next in 5s");
+  });
+
+  it("says next: manual when the timer is off", async () => {
+    const { lasso } = await lassoWithTicket();
+    await checkNow(lasso);
+    // A running Lasso always has a timer, so the real status stands in with nextTick cleared.
+    const status = { ...(await lasso.api<TickStatus>("/api/tick")), nextTick: null };
+    expect(tickIndicator(status, Date.parse(status.lastTick!) + 3 * 60_000)).toEqual({ state: "idle", title: "last tick 3m ago · next: manual" });
+  });
+
+  it("says no tick yet before the first Tick", async () => {
+    const { lasso } = await lassoWithTicket();
+    // The startup Tick may already have run, so the fresh status stands in with lastTick cleared.
+    const status = { ...(await lasso.api<TickStatus>("/api/tick")), lastTick: null };
+    expect(tickIndicator(status, Date.now())).toEqual({ state: "idle", title: "no tick yet" });
+    expect(tickIndicator({ ...status, nextTick: null }, Date.now())).toEqual({ state: "idle", title: "no tick yet" });
+  });
+
+  it("is running while a Tick is in flight", async () => {
+    const { lasso } = await lassoWithTicket();
+    // Catching a real in-flight Tick is racy, so the real status stands in with running set.
+    const status = { ...(await lasso.api<TickStatus>("/api/tick")), running: true };
+    expect(tickIndicator(status, Date.now())).toEqual({ state: "running", title: "tick running" });
+  });
+
+  it("is down while Lasso is unreachable", () => {
+    expect(tickIndicator("down", Date.now())).toEqual({ state: "down", title: "lasso unreachable; reconnecting" });
+  });
 });
 
 describe("the dashboard page", () => {
@@ -240,6 +291,14 @@ describe("the dashboard page", () => {
     expect(await script.text()).toContain("export function metroDiagram");
     const html = await (await lasso.page("/")).text();
     expect(html).toContain("from '/metro.js'");
+    expect(html).toMatch(/import \{[^}]*\btickIndicator\b[^}]*\} from '\/metro\.js'/);
+    // The header's Tick dot replaces the old tick-status text.
+    expect(html).toContain('data-role="tick-dot"');
+    const dot = html.match(/<span [^>]*data-role="tick-dot"[^>]*>/)![0];
+    expect(dot).toContain('role="img"');
+    // No tooltip until the first status or error arrives.
+    expect(dot).not.toContain("title=");
+    expect(html).not.toContain("tick-status");
     // Ledger rows: pill, reference over repo, title over why, mini track with the Stage name, rings, last activity, quick action.
     for (const role of ["pill", "ref", "why", "track", "rings", "last", "quick"]) expect(html).toContain(`'data-role': '${role}'`);
     // Detail: title bar with PR link, pill and triggers, the Metro flow, the Flag box, the Session pane, gauges, the timeline, and the collapsed Ledger sidebar.

@@ -59,7 +59,9 @@ addressed (a resolved thread, a marked reply, a new push) and Flags
 the same check fails two Rounds running, and `review.pr_closed` when
 the PR closes unmerged. A merged PR finishes the Stage; green checks
 with nothing outstanding show as quiet. `lasso check` and the header's
-Check now run a tick and report what changed.
+Check now run a tick and report what changed. The dot left of Check now
+pulses while a Tick runs and turns red while the dashboard can't reach
+Lasso; hover it for when the last Tick ran and the next is due.
 
 Ctrl-C stops every running headless Session by process group and
 records each as interrupted with reason shutdown before Lasso exits;

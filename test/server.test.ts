@@ -90,7 +90,7 @@ describe("the lasso process", () => {
     running.push(lasso);
     const html = await (await lasso.page("/")).text();
     expect(html).toContain('data-role="intake"');
-    expect(html).toContain('data-role="tick-status"');
+    expect(html).toContain('data-role="tick-dot"');
     expect(html).toContain('data-role="check-now"');
     expect(html).toContain('data-role="ledger"');
 

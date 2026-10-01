@@ -128,3 +128,10 @@ The displayed state of a Ticket on a repeating Stage with nothing to
 address: no PR yet, checks running, or checks green with nothing
 outstanding. Lasso keeps polling the PR; a human merges it.
 _Avoid_: idle, waiting, blocked
+
+**Tick**:
+One pass of Lasso's single clock, in which it polls PRs, retries pending
+tracker updates, and starts Queued Sessions. A Tick runs on an interval, on
+Check now, and when a Session ends; one already under way is joined, never
+doubled.
+_Avoid_: poll, refresh, sync, heartbeat

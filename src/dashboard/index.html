@@ -11,6 +11,7 @@
     --good: #2f7a3d; --crit: #b3471d; --amber: #b8700c; --run: #2b62b8;
     --crit-bg: #fbe9e7; --amber-bg: #fdf1dc; --good-bg: #e5f3ea; --run-bg: #e6eefb;
     --term-bg: #1c1d22; --term-ink: #d7d5cd; --term-dim: #8f8c84; --term-bright: #f2f0ea; --term-line: #33353d; --term-pill: #2e3038; --term-ok: #8fd19a;
+    --pulse: 1.4s; /* one pulse cycle; the Tick dot reads it to hold a fast Tick's pulse */
     color-scheme: light;
   }
   @media (prefers-color-scheme: dark) {
@@ -51,6 +52,8 @@
   .eyebrow { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
   .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; }
   @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.35; } 100% { opacity: 1; } }
+  /* The header's Tick dot: still when idle, pulsing while a Tick runs, red and still while Lasso is unreachable. */
+  .tick-dot.down { background: var(--crit); animation: none; }
   @media (prefers-reduced-motion: reduce) { .pulse, .dot.running { animation: none !important; } }
 
   /* status */
@@ -64,7 +67,7 @@
   .dot.flagged { background: var(--crit); }
   .dot.needs_you, .dot.holding, .dot.ready { background: var(--amber); }
   .dot.running, .dot.queued { background: var(--run); }
-  .dot.running { animation: pulse 1.4s infinite; }
+  .dot.running { animation: pulse var(--pulse) infinite; }
   .dot.quiet, .dot.done { background: var(--good); }
 
   /* layout: the Ledger, collapsing to a sidebar when a detail is open */
@@ -133,7 +136,7 @@
   .flow text.bang { fill: var(--surface); font-weight: 700; font-size: 13px; }
   .flow text.badge-text { fill: var(--surface); font-size: 11px; font-weight: 600; }
   .flow text.count { font-size: 10px; font-weight: 700; }
-  .flow .pulse { animation: pulse 1.4s infinite; }
+  .flow .pulse { animation: pulse var(--pulse) infinite; }
   .flow .legend { font-size: 11px; color: var(--muted); padding: 6px 0 0; border-top: 1px solid var(--line); margin-top: 6px; }
   .flagbox { display: grid; gap: 8px; padding: 12px 16px; border: 1px solid var(--crit); background: var(--crit-bg); border-radius: 8px; }
   .flagbox .reason { font-weight: 600; color: var(--crit); }
@@ -249,7 +252,7 @@
     <button class="primary" type="submit">Add</button>
   </form>
   <div class="tick">
-    <span data-role="tick-status">tick: never</span>
+    <span class="dot tick-dot" data-role="tick-dot" role="img"></span>
     <button type="button" data-role="check-now">Check now</button>
   </div>
   <nav class="views"><a href="#">Tickets</a><a href="#pipelines">Pipelines</a><a href="#config">Config</a></nav>
@@ -269,7 +272,7 @@
   </div>
 </main>
 <script type="module">
-import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } from '/metro.js';
+import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, relative, tickIndicator } from '/metro.js';
 (function () {
   const $ = (sel) => document.querySelector(sel);
   const layout = $('[data-role="layout"]');
@@ -279,7 +282,7 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
   const confirmPanel = $('[data-role="confirm"]');
   const pipelinesPanel = $('[data-role="pipelines"]');
   const configPanel = $('[data-role="config"]');
-  const tickStatus = $('[data-role="tick-status"]');
+  const tickDot = $('[data-role="tick-dot"]');
   const notice = $('[data-role="notice"]');
   const intakeForm = $('form[data-role="intake"]');
   const showEnded = $('[data-role="show-ended"]');
@@ -302,28 +305,39 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
     return node;
   }
 
-  function relative(iso) {
-    if (!iso) return 'never';
-    const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
-    if (s < 60) return s + 's ago';
-    const m = Math.round(s / 60);
-    return m < 60 ? m + 'm ago' : Math.round(m / 60) + 'h ago';
-  }
-
   function showNotice(msg) { notice.textContent = msg || ''; notice.hidden = !msg; }
 
-  // The last tick status the server sent; the one-second clock redraws the countdown from it without asking again.
-  let tickNow = null;
+  // 'connecting' until the first status or error (the dot keeps its bare markup), 'down' while Lasso is
+  // unreachable, else the last Tick status the server sent; the one-second clock redraws the tooltip from it.
+  let tickNow = 'connecting';
+  // A running Tick pulses the dot for at least one full cycle of the pulse animation, so a fast one still shows.
+  // The tooltip follows the status at once and does not wait for the hold.
+  const PULSE_MS = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--pulse')) * 1000;
+  let pulseUntil = 0;
+  let pulseTimer = null;
   function drawTick() {
-    if (!tickNow) return;
-    const t = tickNow;
-    const next = t.running ? 'running' : t.nextTick ? 'next in ' + Math.max(0, Math.round((new Date(t.nextTick).getTime() - Date.now()) / 1000)) + 's' : 'next: manual';
-    tickStatus.textContent = 'last tick ' + relative(t.lastTick) + ' / ' + next;
+    if (tickNow === 'connecting') return;
+    const now = Date.now();
+    const { state, title } = tickIndicator(tickNow, now);
+    const shown = state === 'idle' && now < pulseUntil ? 'running' : state;
+    tickDot.className = 'dot tick-dot ' + shown;
+    tickDot.title = title;
+    tickDot.setAttribute('aria-label', title);
+    clearTimeout(pulseTimer);
+    if (shown !== state) pulseTimer = setTimeout(drawTick, pulseUntil - now);
   }
-  function showTick(t) { tickNow = t; drawTick(); }
+  function pulseTick() { pulseUntil = Math.max(pulseUntil, Date.now() + PULSE_MS); drawTick(); }
+  function showTick(t) {
+    // /api/events gathers changes briefly, so a fast Tick can arrive already ended; a newer lastTick than a
+    // still status means one ran unseen. A Tick seen running has had its pulse.
+    const prev = typeof tickNow === 'object' ? tickNow : null;
+    tickNow = t;
+    if (t.running || (prev && !prev.running && t.lastTick !== prev.lastTick)) pulseTick(); else drawTick();
+  }
+  function lostLasso() { tickNow = 'down'; drawTick(); }
   async function refreshTick() {
     try { showTick(await api('/api/tick')); }
-    catch (e) { tickNow = null; tickStatus.textContent = 'tick: unreachable'; }
+    catch (e) { lostLasso(); }
   }
 
   function svg(tag, attrs) {
@@ -1175,6 +1189,8 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
   });
 
   $('[data-role="check-now"]').addEventListener('click', async () => {
+    // The click shows at once rather than waiting on the server's tick event.
+    if (typeof tickNow === 'object') pulseTick();
     try {
       const tick = await api('/api/check-now', { method: 'POST' });
       showNotice(tick.changes.length ? tick.changes.map((c) => c.summary).join('; ') : 'nothing new');
@@ -1229,7 +1245,7 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration } fro
       const { session } = JSON.parse(ev.data);
       if (watchedStdout && watchedStdout.session === session && watchedStdout.gen === detailGen) watchedStdout.read();
     });
-    events.addEventListener('error', () => { tickNow = null; tickStatus.textContent = 'lasso unreachable; reconnecting'; });
+    events.addEventListener('error', lostLasso);
   }
   listen();
 
