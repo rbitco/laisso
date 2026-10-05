@@ -6,19 +6,41 @@ import path from "node:path";
 import { DEFAULT_CONFIG, DEFAULT_CONFIG_YAML, loadConfig, ConfigError, actionsFor, actionSets, profilesFor, resolveProfile } from "../src/server/config.ts";
 import { resolveHome } from "../src/server/home.ts";
 
+const homeWith = (yaml: string) => {
+  const home = resolveHome({ LASSO_HOME: mkdtempSync(path.join(tmpdir(), "lasso-config-")) });
+  writeFileSync(home.configFile, yaml);
+  return home;
+};
+
 describe("the default config.yaml", () => {
   it("parses to exactly the built-in defaults, so the two cannot drift", () => {
     expect(parse(DEFAULT_CONFIG_YAML)).toEqual(DEFAULT_CONFIG);
   });
+
+  it("ships the three Claude profiles in auto with effort unset, claude-opus the default", () => {
+    const config = loadConfig(homeWith(DEFAULT_CONFIG_YAML));
+    expect(config.profiles).toEqual({
+      "claude-fable": { runner: "claude", model: "fable", permission: "auto" },
+      "claude-opus": { runner: "claude", model: "opus", permission: "auto" },
+      "claude-sonnet": { runner: "claude", model: "sonnet", permission: "auto" },
+    });
+    expect(config.default_profile).toBe("claude-opus");
+    // The migration's runner-only names are left to it.
+    for (const reserved of ["claude", "codex", "pi"]) expect(config.profiles[reserved]).toBeUndefined();
+  });
+
+  it("gives valid Codex and Pi profiles when their examples are uncommented", () => {
+    const start = DEFAULT_CONFIG_YAML.indexOf("\nprofiles:\n");
+    const end = DEFAULT_CONFIG_YAML.indexOf("\ndefault_profile:", start);
+    const uncommented = DEFAULT_CONFIG_YAML.slice(0, start) + DEFAULT_CONFIG_YAML.slice(start, end).replace(/^#/gm, "") + DEFAULT_CONFIG_YAML.slice(end);
+    const profiles = loadConfig(homeWith(uncommented)).profiles;
+    expect(Object.keys(profiles)).toEqual(["claude-fable", "claude-opus", "claude-sonnet", "codex-high", "pi-gpt"]);
+    expect(profiles["codex-high"]).toEqual({ runner: "codex", model: "gpt-5-codex", effort: "high", permission: "auto", human: { permission: "edits", args: ["--search"] } });
+    expect(profiles["pi-gpt"]).toEqual({ runner: "pi", model: "openai/gpt-5", effort: "medium", human: { effort: "high" } });
+  });
 });
 
 describe("loadConfig", () => {
-  const homeWith = (yaml: string) => {
-    const home = resolveHome({ LASSO_HOME: mkdtempSync(path.join(tmpdir(), "lasso-config-")) });
-    writeFileSync(home.configFile, yaml);
-    return home;
-  };
-
   it("refuses a concurrency that is zero, negative, or fractional", () => {
     for (const bad of ["0", "-1", "1.5"]) {
       expect(() => loadConfig(homeWith(`concurrency: ${bad}\n`))).toThrow(ConfigError);
@@ -55,8 +77,8 @@ describe("loadConfig", () => {
     expect(() => loadConfig(homeWith("repos:\n  app:\n    actions:\n      notify: {}\n"))).toThrow(/repos\.app\.actions\.notify: run must be a command/);
   });
 
-  it("reads Agent Profiles and default_profile, defaulting to a runner-only claude, and refuses a malformed one", () => {
-    expect(loadConfig(homeWith(""))).toMatchObject({ profiles: { claude: { runner: "claude" } }, default_profile: "claude" });
+  it("reads Agent Profiles and default_profile, defaulting to the shipped ones, and refuses a malformed one", () => {
+    expect(loadConfig(homeWith(""))).toMatchObject({ profiles: DEFAULT_CONFIG.profiles, default_profile: "claude-opus" });
     expect(loadConfig(homeWith("profiles:\n  codex-fast: { runner: codex, model: gpt-5-codex, args: [-c, 1], skills_dir: /opt/skills }\ndefault_profile: codex-fast\n"))).toMatchObject({
       profiles: { "codex-fast": { runner: "codex", model: "gpt-5-codex", args: ["-c", "1"], skills_dir: "/opt/skills" } },
       default_profile: "codex-fast",

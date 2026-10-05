@@ -4,6 +4,8 @@ import { existsSync } from "node:fs";
 import { createServer } from "node:http";
 import path from "node:path";
 import { startLasso, runCli, makeHome, freePort, type Lasso } from "./harness.ts";
+import { DEFAULT_CONFIG, parseConfig } from "../src/server/config.ts";
+import { DEFAULT_PIPELINE_YAML } from "../src/pipeline/default.ts";
 
 const running: Lasso[] = [];
 afterEach(async () => {
@@ -41,6 +43,41 @@ describe("the lasso process", () => {
     expect(config).toContain("tick: 60");
     expect(config).toContain("concurrency: 3");
     expect(config).toContain("port: 7433");
+    // The startup migration finds a default_profile, so the shipped profiles stand alone: no runner-only claude beside them.
+    const parsed = parseConfig(config, "config.yaml");
+    expect(parsed.profiles).toEqual(DEFAULT_CONFIG.profiles);
+    expect(parsed.default_profile).toBe("claude-opus");
+    expect(await readFile(path.join(home, "pipelines", "default.yaml"), "utf8")).toBe(DEFAULT_PIPELINE_YAML);
+
+    // A restart changes neither file.
+    await lasso.stop();
+    const again = await startLasso({ home, pathDir, port: lasso.port });
+    running.push(again);
+    expect(await readFile(path.join(home, "config.yaml"), "utf8")).toBe(config);
+    expect(await readFile(path.join(home, "pipelines", "default.yaml"), "utf8")).toBe(DEFAULT_PIPELINE_YAML);
+  });
+
+  it("leaves an existing home's config.yaml and default Pipeline as they are", async () => {
+    const { home, pathDir } = await makeHome();
+    const migrated = await startLasso({ home, pathDir });
+    running.push(migrated);
+    await migrated.stop();
+    // A config.yaml without default_profile is from before Agent Profiles: the migration gave it the runner-only claude as default.
+    expect(parseConfig(await readFile(path.join(home, "config.yaml"), "utf8"), "config.yaml")).toMatchObject({ profiles: { claude: { runner: "claude" } }, default_profile: "claude" });
+    // An install from before the shipped profiles: its own profile and default, and a default Pipeline that names none.
+    const configFile = path.join(home, "config.yaml");
+    const config = (await readFile(configFile, "utf8")).replace(/^profiles:\n(?: .*\n)*/m, "profiles:\n  mine:\n    runner: claude # my own\n").replace("default_profile: claude", "default_profile: mine");
+    const pipelineFile = path.join(home, "pipelines", "default.yaml");
+    const pipeline = DEFAULT_PIPELINE_YAML.replace(/^ {4}profile: .*\n/gm, "") + "# hand edit\n";
+    await writeFile(configFile, config);
+    await writeFile(pipelineFile, pipeline);
+    expect(parseConfig(config, "config.yaml")).toMatchObject({ profiles: { mine: { runner: "claude" } }, default_profile: "mine" });
+    expect(Object.keys(parseConfig(config, "config.yaml").profiles)).toEqual(["mine"]);
+
+    const lasso = await startLasso({ home, pathDir, port: migrated.port });
+    running.push(lasso);
+    expect(await readFile(configFile, "utf8")).toBe(config);
+    expect(await readFile(pipelineFile, "utf8")).toBe(pipeline);
   });
 
   it("refuses a second lasso with the running URL and pid", async () => {

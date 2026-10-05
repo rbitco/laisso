@@ -98,8 +98,12 @@ export interface Config {
 export const DEFAULT_CONFIG: Config = {
   repos: {},
   actions: {},
-  profiles: { claude: { runner: "claude" } },
-  default_profile: "claude",
+  profiles: {
+    "claude-fable": { runner: "claude", model: "fable", permission: "auto" },
+    "claude-opus": { runner: "claude", model: "opus", permission: "auto" },
+    "claude-sonnet": { runner: "claude", model: "sonnet", permission: "auto" },
+  },
+  default_profile: "claude-opus",
   budget: { rounds: 5, attempts: 2, wallTime: "30m", spend: 25 },
   tick: 60,
   concurrency: 3,
@@ -119,7 +123,7 @@ repos: {}
 #    pipeline: default        # the repo's default Pipeline
 #    actions: {}              # this repo's own Actions; one named like a global Action replaces it here
 #    profiles: {}             # this repo's own Agent Profiles; one named like a global profile replaces it whole here
-#    default_profile: claude  # this repo's default, in place of the global default_profile below
+#    default_profile: claude-sonnet  # this repo's default, in place of the global default_profile below
 
 # Actions: shell commands an action Stage runs by name, in the Ticket's
 # worktree, with the Ticket's details as LASSO_* environment variables.
@@ -132,19 +136,35 @@ actions: {}
 # Agent Profiles: the Runner a Stage runs under, and how. A Stage names one
 # with profile:, or inherits its Pipeline's, or default_profile below.
 profiles:
-  claude:
+  claude-fable:
+    runner: claude           # claude | codex | pi
+    model: fable             # passed to the Runner's model flag; unset keeps its default
+    permission: auto         # auto | edits | full; unset keeps Lasso's default per mode; Pi has none
+  claude-opus:
     runner: claude
-#  codex-fast:
-#    runner: codex            # claude | codex | pi
-#    model: gpt-5-codex       # passed to the Runner's model flag; unset keeps its default
+    model: opus
+    permission: auto
+  claude-sonnet:
+    runner: claude
+    model: sonnet
+    permission: auto
+#  codex-high:
+#    runner: codex
+#    model: gpt-5-codex
 #    effort: high             # low | medium | high | xhigh | max; unset keeps the Runner's default
-#    permission: auto         # auto | edits | full; unset keeps Lasso's default per mode; Pi has none
-#    args: [-c, foo=bar]      # extra flags, after the ones Lasso writes
-#    skills_dir: /opt/skills  # Codex only: where skills live; default ~/.agents/skills
+#    permission: auto
+#    # args: [-c, foo=bar]    # extra flags, after the ones Lasso writes
+#    # skills_dir: ~/skills   # Codex only: where skills live; default ~/.agents/skills
 #    human:                   # only for human Stages; headless: is the same for the rest
 #      permission: edits      # model, effort and permission here replace the ones above
 #      args: [--search]       # args here follow the ones above
-default_profile: claude
+#  pi-gpt:
+#    runner: pi
+#    model: openai/gpt-5
+#    effort: medium
+#    human:
+#      effort: high
+default_profile: claude-opus
 
 # Global Budget defaults; a Pipeline or a Ticket may override each one.
 budget:

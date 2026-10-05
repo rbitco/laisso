@@ -3,6 +3,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { isMap, isScalar, isSeq, parseDocument, Scalar, type Document, type Pair, type ToStringOptions, type YAMLMap } from "yaml";
 import { listPipelines, parsePipeline, pipelineFile, RUNNERS } from "../pipeline/load.ts";
 import { replaceFile } from "../atomic-write.ts";
+import { DEFAULT_CONFIG } from "./config.ts";
 import type { LassoHome } from "./home.ts";
 
 /**
@@ -52,9 +53,11 @@ export interface Migrated {
   versions: number;
 }
 
-/** A profile the migration writes into config.yaml: a Runner a Pipeline named, or a Stage's runnerOptions with its Runner. */
+/** A profile the migration writes into config.yaml: a Runner a Pipeline named, a Stage's runnerOptions with its Runner, or a built-in one. */
 export interface MigratedProfile {
   runner: string;
+  model?: string;
+  permission?: string;
   args?: string[];
   skills_dir?: string;
 }
@@ -170,16 +173,18 @@ export function migratePipelineText(text: string): string | null {
  * config.yaml gets each profile the migrated Pipelines name that it does not
  * define already, and `default_profile: claude` when it has none, with a
  * runner-only claude profile for it: a Pipeline without runner: ran on
- * Claude. Comments are kept; null when there is nothing to do.
+ * Claude. A fresh install's config.yaml has its default_profile, so it is
+ * left alone. Comments are kept; null when there is nothing to do.
  */
 export function migrateConfigProfilesText(text: string, profiles: Record<string, MigratedProfile>): string | null {
   const doc = parseDocument(text);
   if (doc.errors.length) throw doc.errors[0];
   const raw = (doc.toJS() ?? {}) as { profiles?: Record<string, unknown> | null; default_profile?: unknown };
-  const needed = { ...profiles };
+  const needed: Record<string, MigratedProfile> = { ...profiles };
   const setDefault = raw.default_profile === undefined;
-  // Without a profiles: key config reads as the built-in claude profile; writing any other would lose it.
-  if (setDefault || (raw.profiles === undefined && Object.keys(needed).length)) needed.claude ??= { runner: "claude" };
+  if (setDefault) needed.claude ??= { runner: "claude" };
+  // Without a profiles: key, a config that has its default_profile reads as the built-in profiles; writing any other would lose them.
+  else if (raw.profiles === undefined && Object.keys(needed).length) for (const [name, profile] of Object.entries(DEFAULT_CONFIG.profiles)) needed[name] ??= profile;
   const missing = Object.entries(needed).filter(([name]) => raw.profiles?.[name] === undefined);
   if (!missing.length && !setDefault) return null;
   if (!isMap(doc.contents)) doc.contents = doc.createNode({}) as unknown as typeof doc.contents;
@@ -191,6 +196,8 @@ export function migrateConfigProfilesText(text: string, profiles: Record<string,
 /** A profile as a human would write it: args inline. */
 function profileNode(doc: Document, profile: MigratedProfile) {
   const fields: Record<string, unknown> = { runner: profile.runner };
+  if (profile.model) fields.model = profile.model;
+  if (profile.permission) fields.permission = profile.permission;
   if (profile.args) {
     const args = doc.createNode(profile.args);
     args.flow = true;

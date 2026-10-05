@@ -6,7 +6,7 @@ import { parse } from "yaml";
 import { startLasso, startLassoWithRepos, waitFor, runnerFixture, type Lasso } from "./harness.ts";
 import type { TicketDetail, IntakeResult } from "../src/api/views.ts";
 import { migrateConfigText, migratePipelineText, migrateConfigProfilesText, migratePipelineProfilesText, JIRA_TRANSITION, GITHUB_TRANSITION } from "../src/server/migrate.ts";
-import { parseConfig } from "../src/server/config.ts";
+import { DEFAULT_CONFIG, DEFAULT_CONFIG_YAML, parseConfig } from "../src/server/config.ts";
 import { parsePipeline } from "../src/pipeline/load.ts";
 
 // tracker.transition moves from Lasso's code into config (ADR 0010, LASSO-53).
@@ -231,6 +231,18 @@ tick: 30 # fast
   it("keeps a default_profile someone set, even to none", () => {
     expect(migrateConfigProfilesText("profiles:\n  mine: { runner: pi }\ndefault_profile: mine\n", {})).toBeNull();
     expect(migrateConfigProfilesText("profiles: {}\ndefault_profile: null\n", {})).toBeNull();
+  });
+
+  it("leaves the shipped config.yaml alone: no claude profile, and claude-opus stays the default", () => {
+    expect(migrateConfigProfilesText(DEFAULT_CONFIG_YAML, {})).toBeNull();
+  });
+
+  it("keeps the shipped profiles a config without profiles: reads as, when it must write another", () => {
+    // With default_profile set and no profiles: key, config reads as the built-in profiles; nothing to write keeps it so.
+    expect(migrateConfigProfilesText("default_profile: claude-opus\n", {})).toBeNull();
+    const config = parseConfig(migrateConfigProfilesText("default_profile: claude-opus\n", { codex: { runner: "codex" } })!, "config.yaml");
+    expect(config.profiles).toEqual({ ...DEFAULT_CONFIG.profiles, codex: { runner: "codex" } });
+    expect(config.default_profile).toBe("claude-opus");
   });
 });
 

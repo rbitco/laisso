@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
-import { startLassoWithRepos, waitFor, claudeFixture, runnerFixture, type Lasso, type LassoConfig } from "./harness.ts";
+import { startLassoWithRepos, startLasso, makeHome, makeRepo, waitFor, claudeFixture, runnerFixture, type Lasso, type LassoConfig } from "./harness.ts";
 import type { ProfileConfig } from "../src/server/config.ts";
 import type { TicketDetail, IntakeResult } from "../src/api/views.ts";
 import type { TickChange } from "../src/server/tick.ts";
@@ -446,5 +446,56 @@ describe("A repo's own Agent Profiles", () => {
     await checkNow(lasso);
     const d = await waitFor(async () => { const t = await detailOf(lasso, ticket.id); return t.flag ? t : null; }, "the Ticket to be Flagged");
     expect(d.flag).toMatchObject({ reason: "profile.missing", detail: "no profile named solo in config.yaml, which repo app's default_profile names" });
+  });
+});
+
+describe("the shipped profiles", () => {
+  const pull = (lasso: Lasso, id: string, trigger: string) => lasso.api<TicketDetail>(`/api/tickets/${id}/${trigger}`, { method: "POST", body: "{}" });
+
+  /** A home as a fresh install leaves it, with one repo added to the written config.yaml by hand. */
+  async function freshHome() {
+    const { home, pathDir } = await makeHome();
+    await rm(path.join(home, "config.yaml"));
+    const first = await startLasso({ home, pathDir });
+    running.push(first);
+    await first.stop();
+    const repo = await makeRepo(path.join(home, "..", "repos"), "app");
+    const file = path.join(home, "config.yaml");
+    const text = await readFile(file, "utf8");
+    await writeFile(file, text.replace("repos: {}\n", `repos:\n  app:\n    tracker: jira\n    project: APP\n    path: ${repo.path}\n`).replace("tick: 60 ", "tick: 3600 "));
+    const lasso = await startLasso({ home, pathDir, port: first.port });
+    running.push(lasso);
+    return lasso;
+  }
+
+  it("launches a fresh home's default Pipeline with Fable for Grill, Plan and Code Review, Opus for Implement, and Sonnet for Document, all in auto", async () => {
+    const lasso = await freshHome();
+    const ticket = await lasso.api<IntakeResult>("/api/tickets", { method: "POST", body: JSON.stringify({ input: "Add dark mode", repo: "app", pipeline: "default" }) });
+
+    // Grill is a human Session: Claude in auto, not the acceptEdits baseline.
+    const opened = await openTerminal(lasso, ticket.id);
+    expect(opened.session!.profile).toEqual({ name: "claude-fable", runner: "claude", model: "fable", effort: null, permission: "auto", args: [] });
+    const [terminal] = await lasso.terminals();
+    expect(readFileSync(terminal!.launcher!, "utf8")).toContain(`exec 'claude' '--session-id' '${opened.session!.id}' '--permission-mode' 'auto' '--name' 'Lasso: ${ticket.id.slice(-8)} grill' '--model' 'fable' '/grilling`);
+
+    // Each later Stage is reached by skipping the one before once it Flags: a prompt Ticket has no issue to transition,
+    // and the fake claude exits with nothing, so each headless Stage runs out of attempts.
+    const flaggedAt = (stage: string) => waitFor(async () => { const d = await detailOf(lasso, ticket.id); return d.stage.name === stage && d.flag && !d.session?.running ? d : null; }, `${stage} to be Flagged`);
+    const skipTo = async (stage: string) => {
+      const skipped = await pull(lasso, ticket.id, "skip");
+      // Grill does not advance on its own: the next Stage waits on Start.
+      if (skipped.triggers.some((t) => t.action === "start")) await pull(lasso, ticket.id, "start");
+      await checkNow(lasso);
+      return flaggedAt(stage);
+    };
+    await skipTo("transition-in-progress");
+    for (const stage of ["plan", "implement", "document", "code-review"]) await skipTo(stage);
+
+    const calls = await lasso.runner.calls();
+    expect(calls.map((c) => c.argv[c.argv.indexOf("--model") + 1])).toEqual(["fable", "fable", "opus", "opus", "sonnet", "sonnet", "fable", "fable"]);
+    for (const call of calls) expect(call.argv.slice(6, 10)).toEqual(["--permission-mode", "auto", "--permission-prompts", "none"]);
+    const sessions = (await detailOf(lasso, ticket.id)).sessions;
+    expect(sessions.find((s) => s.stage === "implement")!.profile).toEqual({ name: "claude-opus", runner: "claude", model: "opus", effort: null, permission: "auto", args: [] });
+    expect(sessions.find((s) => s.stage === "document")!.profile).toMatchObject({ name: "claude-sonnet", model: "sonnet" });
   });
 });

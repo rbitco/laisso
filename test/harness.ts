@@ -19,7 +19,7 @@ import { stringify } from "yaml";
 const REPO_ROOT = path.resolve(import.meta.dirname, "..");
 const BIN = path.join(REPO_ROOT, "bin", "lasso.js");
 
-import type { Config, RepoConfig } from "../src/server/config.ts";
+import { DEFAULT_CONFIG, type Config, type RepoConfig } from "../src/server/config.ts";
 import { parsePipeline } from "../src/pipeline/load.ts";
 import { DEFAULT_PIPELINE_YAML } from "../src/pipeline/default.ts";
 
@@ -320,9 +320,14 @@ export async function startLassoWithRepos(specs: Record<string, RepoSpec>, extra
   return { lasso, repos };
 }
 
+/**
+ * config.yaml as a test gives it. Without profiles of its own it gets the
+ * shipped ones the default Pipeline names, and with no default_profile the
+ * startup migration adds the runner-only claude one, as for an old home.
+ */
 export async function writeConfig(home: string, config: LassoConfig): Promise<void> {
   await mkdir(home, { recursive: true });
-  await writeFile(path.join(home, "config.yaml"), stringify(config));
+  await writeFile(path.join(home, "config.yaml"), stringify({ profiles: DEFAULT_CONFIG.profiles, ...config }));
 }
 
 async function installFakeNotifier(pathDir: string): Promise<void> {

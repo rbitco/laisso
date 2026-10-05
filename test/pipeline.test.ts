@@ -129,9 +129,16 @@ describe("checkProfiles", () => {
 });
 
 describe("the default Pipeline", () => {
-  it("names no profile, so every Stage runs under config's default_profile", () => {
+  it("names Fable for the thinking Stages and Sonnet for Document, and leaves Implement and Review to default_profile", () => {
     const pipeline = parsePipeline("default", DEFAULT_PIPELINE_YAML);
     expect(pipeline.profile).toBeNull();
-    expect(pipeline.stages.flatMap((s) => (s.kind === "runner" ? [s.profile] : []))).toEqual([null, null, null, null, null, null]);
+    expect(pipeline.stages.flatMap((s) => (s.kind === "runner" ? [[s.name, s.profile]] : []))).toEqual([
+      ["grill", "claude-fable"],
+      ["plan", "claude-fable"],
+      ["implement", null],
+      ["document", "claude-sonnet"],
+      ["code-review", "claude-fable"],
+      ["review", null],
+    ]);
   });
 });

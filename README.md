@@ -45,6 +45,14 @@ is outside its catalog without a word, so set `skills_dir` when the
 skills live elsewhere. A Pipeline still using `runner:` or
 `runnerOptions` is rewritten to profiles when Lasso starts.
 
+A new install ships `claude-fable`, `claude-opus` and `claude-sonnet`
+(Claude with that model alias, `permission: auto`, effort unset), with
+`default_profile: claude-opus`, plus commented Codex and Pi examples. The
+default Pipeline runs Grill, Plan and Code Review on `claude-fable`,
+Document on `claude-sonnet`, and Implement and Review on the default. An
+existing install keeps its files; its migration writes runner-only
+`claude`, `codex` and `pi` profiles and `default_profile: claude`.
+
 Every Ticket runs under a Budget: `rounds` (per repeating Stage),
 `attempts` (per Stage), `wallTime` (per headless Session) and `spend`
 (USD per Ticket). `config.yaml` sets the defaults, a Pipeline may

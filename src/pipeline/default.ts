@@ -1,11 +1,12 @@
 /** The embedded default Pipeline, written to pipelines/default.yaml on first run and never touched again. */
 export const DEFAULT_PIPELINE_YAML = `# Lasso's default Pipeline. Edit freely: Lasso never overwrites this file.
 # Runner-run Stages take a prompt and/or skills; action Stages take an action.
-# Each Runner Stage runs under config.yaml's default_profile unless it, or the
-# Pipeline, names a profile:.
+# A Runner Stage runs under the profile: it names, else the Pipeline's, else
+# config.yaml's default_profile. Thinking Stages use Fable, docs use Sonnet.
 
 stages:
   - name: grill
+    profile: claude-fable
     human: true
     advance: false
     skills: [grilling, domain-modeling, to-spec]
@@ -19,6 +20,7 @@ stages:
     with: { status: In Progress }
 
   - name: plan
+    profile: claude-fable
     skills: [codebase-design]
     artifact: tracker-comment
     prompt: |
@@ -34,6 +36,7 @@ stages:
       Commit to the current branch; do not push.
 
   - name: document
+    profile: claude-sonnet
     skills: [domain-modeling]
     artifact: pr-exists
     prompt: |
@@ -41,6 +44,7 @@ stages:
       Write the PR body from the spec and the diff. Push and open the PR.
 
   - name: code-review
+    profile: claude-fable
     skills: [code-review]
     artifact: pr-review
     prompt: |

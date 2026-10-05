@@ -5,6 +5,7 @@ import { startLassoWithRepos, startLasso, waitFor, claudeFixture, runCli, type L
 import type { TicketDetail, IntakeResult } from "../src/api/views.ts";
 import type { PipelineFile, PipelineListing, ConfigFile, PipelineVersionView, ActionListing } from "../src/api/views.ts";
 import type { TickChange } from "../src/server/tick.ts";
+import { DEFAULT_CONFIG } from "../src/server/config.ts";
 
 // Seam one: Pipelines and config are edited through the API the dashboard
 // uses, in place, with comments and ordering kept (LASSO-40).
@@ -13,7 +14,8 @@ afterEach(async () => {
   while (running.length) await running.pop()!.destroy();
 });
 
-const PROFILES = { claude: { runner: "claude" as const }, codex: { runner: "codex" as const }, pi: { runner: "pi" as const } };
+/** The migration's runner-only profiles, beside the shipped ones the default Pipeline names. */
+const PROFILES = { ...DEFAULT_CONFIG.profiles, claude: { runner: "claude" as const }, codex: { runner: "codex" as const }, pi: { runner: "pi" as const } };
 
 const WORK = `# The work Pipeline. Keep this comment.
 profile: claude   # the default profile
