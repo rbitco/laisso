@@ -1,6 +1,6 @@
 import { shortId, type TicketRow } from "../store/tickets.ts";
 import { runnerOf, type SessionProfile, type SessionRow } from "../store/sessions.ts";
-import { type Pipeline, type Stage } from "../pipeline/load.ts";
+import { type Pipeline, type RunnerName, type Stage } from "../pipeline/load.ts";
 import type { PipelineSource } from "../pipeline/files.ts";
 import type { Drift, VersionRow } from "../store/versions.ts";
 import type { ActionConfig, Config } from "../server/config.ts";
@@ -113,6 +113,8 @@ export interface SessionView {
   runnerSessionId: string | null;
   /** The Agent Profile it ran under and what that resolved to as it started; null for action Sessions and those from before profiles. */
   profile: SessionProfile | null;
+  /** The Runner it ran on: its profile's, else the Stage snapshot's for a Session from before profiles; null for action Sessions. */
+  runner: RunnerName | null;
   stdoutPath: string | null;
   transcriptPath: string | null;
   running: boolean;
@@ -323,6 +325,7 @@ export function sessionView(row: SessionRow, now: number = Date.now(), feedback:
     openedAt: row.opened_at,
     runnerSessionId: row.runner_session_id,
     profile: row.profile ? (JSON.parse(row.profile) as SessionProfile) : null,
+    runner: runnerOf(row),
     stdoutPath: row.stdout_path,
     transcriptPath: row.transcript_path,
     running: row.ended_at === null,

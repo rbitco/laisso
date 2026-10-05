@@ -1,7 +1,10 @@
 import { describe, it, expect, afterEach } from "vitest";
+import { readFile, writeFile } from "node:fs/promises";
+import { DatabaseSync } from "node:sqlite";
+import path from "node:path";
 import { startLassoWithRepos, waitFor, claudeFixture, type Lasso, type LassoConfig, type TrackerReply } from "./harness.ts";
 import { sortForLedger, type TicketView, type TicketDetail, type IntakeResult, type DisplayState } from "../src/api/views.ts";
-import { metroDiagram, metroTrack, sessionsForStage, quickAction, relative, tickIndicator } from "../src/dashboard/metro.js";
+import { metroDiagram, metroTrack, sessionsForStage, quickAction, relative, tickIndicator, sessionProfile } from "../src/dashboard/metro.js";
 import type { TickChange, TickStatus } from "../src/server/tick.ts";
 import { setScene, sceneFile, swapTo, type Scene } from "./scenes.ts";
 
@@ -278,6 +281,48 @@ describe("the Tick dot", () => {
 
   it("is down while Lasso is unreachable", () => {
     expect(tickIndicator("down", Date.now())).toEqual({ state: "down", title: "lasso unreachable; reconnecting" });
+  });
+});
+
+describe("the Session header", () => {
+  const FABLE = { "claude-fable": { runner: "claude" as const, model: "fable", effort: "high" as const, permission: "auto" as const, args: ["--verbose"] } };
+
+  it("shows profile (model), with the recorded runner, effort, permission and args on hover, unchanged by a later profile edit", async () => {
+    const { lasso, ticket } = await lassoWithTicket({ profiles: FABLE, default_profile: "claude-fable" });
+    await lasso.runner.script({ stdout: claudeFixture("success.json") });
+    await checkNow(lasso);
+    const ended = (await settled(lasso, ticket.id, 1)).sessions[0]!;
+    const shown = { text: "claude-fable (fable)", title: "runner claude · effort high · permission auto · args --verbose" };
+    expect(sessionProfile(ended)).toEqual(shown);
+
+    // Editing the profile afterwards leaves the ended Session as it ran.
+    const file = path.join(lasso.home, "config.yaml");
+    await writeFile(file, (await readFile(file, "utf8")).replace("model: fable", "model: opus").replace("effort: high", "effort: low"));
+    expect((await lasso.api<{ config: { profiles: typeof FABLE } }>("/api/config")).config.profiles["claude-fable"]).toMatchObject({ model: "opus", effort: "low" });
+    const after = (await detailOf(lasso, ticket.id)).sessions.find((s) => s.id === ended.id)!;
+    expect(sessionProfile(after)).toEqual(shown);
+    // Unset fields read as the defaults they fell back to; no model shows the name alone.
+    expect(sessionProfile({ ...ended, profile: { name: "blank", runner: "pi", model: null, effort: null, permission: null, args: [] } })).toEqual({ text: "blank", title: "runner pi · effort default · permission default · args none" });
+
+    const html = await (await lasso.page("/")).text();
+    expect(html).toMatch(/import \{[^}]*\bsessionProfile\b[^}]*\} from '\/metro\.js'/);
+    expect(html).toContain("'data-role': 'profile'");
+  });
+
+  it("shows only the Runner for a Session from before profiles, and nothing for one with neither", async () => {
+    const { lasso, ticket } = await lassoWithTicket();
+    await lasso.runner.script({ stdout: claudeFixture("success.json") });
+    await checkNow(lasso);
+    const ran = (await settled(lasso, ticket.id, 1)).sessions[0]!;
+    // Put the row back as a Lasso from before ADR 0011 wrote it: no profile record, the Runner on the Stage snapshot.
+    const db = new DatabaseSync(path.join(lasso.home, "lasso.db"));
+    const { stage_snapshot } = db.prepare("SELECT stage_snapshot FROM sessions WHERE id = ?").get(ran.id) as { stage_snapshot: string };
+    db.prepare("UPDATE sessions SET profile = NULL, stage_snapshot = ? WHERE id = ?").run(JSON.stringify({ ...JSON.parse(stage_snapshot), runner: "codex" }), ran.id);
+    db.close();
+    const old = (await detailOf(lasso, ticket.id)).sessions[0]!;
+    expect(old).toMatchObject({ profile: null, runner: "codex" });
+    expect(sessionProfile(old)).toEqual({ text: "codex", title: "runner codex · from before Agent Profiles" });
+    expect(sessionProfile({ ...old, runner: null })).toBeNull();
   });
 });
 

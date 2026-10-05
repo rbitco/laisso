@@ -272,7 +272,7 @@
   </div>
 </main>
 <script type="module">
-import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, relative, tickIndicator } from '/metro.js';
+import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, relative, tickIndicator, sessionProfile } from '/metro.js';
 (function () {
   const $ = (sel) => document.querySelector(sel);
   const layout = $('[data-role="layout"]');
@@ -529,12 +529,14 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
   function sessionPane(t, s, gen) {
     const pane = el('section', { class: 'session', 'data-role': 'session' });
     const outcome = s.running ? 'running' : (s.outcome || 'unknown');
+    const profile = sessionProfile(s);
     const head = el('div', { class: 'head' }, [
       el('span', { class: 'pill ' + outcome, text: outcome + (s.endedReason ? ' · ' + s.endedReason : '') }),
       el('strong', { text: sessionLabel(s) }),
       el('span', { class: 'meta', text: s.mode + ' · ' + s.startedBy }),
       el('span', Object.assign({ class: 'meta', 'data-role': 'duration', text: duration(s.durationMs) }, s.running ? { 'data-since': s.startedAt } : {})),
       el('span', { class: 'meta', text: s.costUsd === null ? '' : '$' + s.costUsd.toFixed(2) }),
+      profile ? el('span', { class: 'meta', 'data-role': 'profile', text: profile.text, title: profile.title }) : el('span'),
       el('span', { class: 'meta', text: 'started ' + relative(s.startedAt) }),
     ]);
     if (s.running && s.mode === 'headless') {

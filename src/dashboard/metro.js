@@ -56,6 +56,21 @@ export function tickIndicator(status, now) {
 }
 
 /**
+ * The Session header's "profile (model)" and the hover listing what it ran with, all from the Session's own record;
+ * a Session from before Agent Profiles shows its Runner only, and an action Session nothing (null).
+ * @param {SessionView} s
+ * @returns {{ text: string, title: string } | null}
+ */
+export function sessionProfile(s) {
+  const p = s.profile;
+  if (!p) return s.runner ? { text: s.runner, title: 'runner ' + s.runner + ' · from before Agent Profiles' } : null;
+  return {
+    text: p.model ? p.name + ' (' + p.model + ')' : p.name,
+    title: ['runner ' + p.runner, 'effort ' + (p.effort || 'default'), 'permission ' + (p.permission || 'default'), 'args ' + (p.args.length ? p.args.join(' ') : 'none')].join(' · '),
+  };
+}
+
+/**
  * What one Stage of a Ticket is: done, current, or ahead, with its Sessions (newest first, as the API lists them).
  * @param {MetroTicket} t
  * @param {number} index
