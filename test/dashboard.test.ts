@@ -4,8 +4,8 @@ import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { startLassoWithRepos, waitFor, claudeFixture, type Lasso, type LassoConfig, type TrackerReply } from "./harness.ts";
 import { sortForLedger, type TicketView, type TicketDetail, type IntakeResult, type DisplayState } from "../src/api/views.ts";
-import { metroDiagram, metroTrack, sessionsForStage, quickAction, relative, tickIndicator, sessionProfile, profileApplies, profileLine, profileSummary, profileUsers, usedByLine, profileWarnings, MODEL_SUGGESTIONS } from "../src/dashboard/metro.js";
-import type { ConfigFile, PipelineListing } from "../src/api/views.ts";
+import { metroDiagram, metroTrack, sessionsForStage, quickAction, relative, tickIndicator, sessionProfile, profileApplies, profileLine, profileSummary, profileUsers, usedByLine, profileWarnings, MODEL_SUGGESTIONS, stageProfileView } from "../src/dashboard/metro.js";
+import type { ConfigFile, PipelineListing, PipelineFile } from "../src/api/views.ts";
 import type { ProfileConfig } from "../src/server/config.ts";
 import type { TickChange, TickStatus } from "../src/server/tick.ts";
 import { setScene, sceneFile, swapTo, type Scene } from "./scenes.ts";
@@ -403,6 +403,60 @@ stages:
     // Saves go through the profile routes and the config patch.
     expect(html).toContain("'/api/profiles/' + encodeURIComponent(name)");
     expect(html).toContain("JSON.stringify({ default_profile: name })");
+  });
+});
+
+describe("the profile picker in the Pipeline editor", () => {
+  const PROFILES: Record<string, ProfileConfig> = {
+    "claude-opus": { runner: "claude", model: "opus", permission: "auto" },
+    "claude-fable": { runner: "claude", model: "fable", effort: "high", human: { permission: "edits", args: ["--verbose"] } },
+    "claude-sonnet": { runner: "claude", model: "sonnet" },
+    "pi-gpt": { runner: "pi", model: "openai/gpt-5" },
+  };
+  const PICKED = `profile: pi-gpt
+stages:
+  - name: plan
+    prompt: Plan it.
+    profile: claude-fable
+  - name: implement
+    prompt: Do the work.
+    artifact: commits-on-branch
+`;
+
+  it("labels each Runner Stage's button with the profile it runs, inherited from the Pipeline or default_profile, and each mode's line", async () => {
+    const { lasso } = await lassoWithTicket({ profiles: PROFILES, default_profile: "claude-opus" });
+    await lasso.api("/api/pipelines/picked", { method: "PUT", body: JSON.stringify({ text: PICKED, create: true }) });
+    const { config } = await lasso.api<ConfigFile>("/api/config");
+    const file = await lasso.api<PipelineFile>("/api/pipelines/picked");
+    const [plan, implement] = file.pipeline!.stages as Array<{ profile: string | null }>;
+
+    // A Stage naming a profile shows it as is, with its headless and human lines.
+    expect(stageProfileView(plan!.profile, file.pipeline!.profile, config)).toEqual({
+      name: "claude-fable", inherited: false, label: "claude-fable",
+      headless: "claude · fable · effort high · auto (default)",
+      human: "claude · fable · effort high · edits · --verbose",
+    });
+    // One naming none inherits the Pipeline's; with the dropdown cleared, config's default_profile.
+    expect(stageProfileView(implement!.profile, file.pipeline!.profile, config)).toMatchObject({ name: "pi-gpt", inherited: true, label: "inherit → pi-gpt", headless: "pi · openai/gpt-5 · effort default · permission n/a" });
+    expect(stageProfileView(implement!.profile, null, config)).toMatchObject({ name: "claude-opus", inherited: true, label: "inherit → claude-opus", human: "claude · opus · effort default · auto" });
+    // A name config lacks, and no default at all, say so in place of the lines.
+    expect(stageProfileView("claude-ghost", null, config)).toMatchObject({ label: "claude-ghost", headless: "no profile named claude-ghost in config.yaml" });
+    expect(stageProfileView(null, null, { profiles: {}, default_profile: null })).toMatchObject({ name: null, label: "inherit → none", human: "no profile: config.yaml sets no default_profile" });
+  });
+
+  it("is on the page: the Stage profile button, its drawer choices, and the Pipeline dropdown", async () => {
+    const { lasso } = await lassoWithTicket();
+    const html = await (await lasso.page("/")).text();
+    expect(html).toMatch(/import \{[^}]*\bstageProfileView\b[^}]*\} from '\/metro\.js'/);
+    // The Stage card's button, with its two summary lines, opens the drawer with the Stage as context and two choices.
+    for (const role of ["stage-profile", "stage-profile-headless", "stage-profile-human", "stage-profile-choice", "profile-use", "profile-inherit", "pipeline-profile"]) expect(html).toContain(`'data-role': '${role}'`);
+    expect(html).toContain("context: 'Stage ' + stage + ' of Pipeline ' + profiles.pipeline");
+    expect(html).toContain("text: 'Use ' + name + ' for ' + stage");
+    expect(html).toContain("text: 'Inherit instead'");
+    // The Pipeline dropdown's blank names the default it falls back to; both save through the Pipeline patch.
+    expect(html).toContain("'config default (' + (profiles.config.default_profile || 'none') + ')'");
+    expect(html).toContain("if (profile.chosen() !== s.profile) patch.profile = profile.chosen();");
+    expect(html).toContain("if (profile.value !== (pipeline.profile || '')) patch.profile = profile.value || null;");
   });
 });
 

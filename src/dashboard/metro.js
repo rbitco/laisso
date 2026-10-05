@@ -348,3 +348,21 @@ export function profileWarnings(p) {
     return modes.length ? [pair.text + ' (' + modes.join(' and ') + ' Sessions)'] : [];
   });
 }
+
+/**
+ * What a Runner Stage's profile button says (LASSO-73): the profile it runs, "inherit → " when it names none and
+ * takes its Pipeline's or config's default_profile, and each mode's resolved line. A name config lacks says so.
+ * The Pipeline editor has no repo, so this resolves against the global profiles and default_profile only.
+ * @param {string | null} stageProfile the profile the Stage names, or null to inherit
+ * @param {string | null} pipelineProfile the profile the Pipeline names, or null
+ * @param {{ profiles: Record<string, ProfileConfig>, default_profile: string | null }} config
+ * @returns {{ name: string | null, inherited: boolean, label: string, headless: string, human: string }}
+ */
+export function stageProfileView(stageProfile, pipelineProfile, config) {
+  const name = stageProfile || pipelineProfile || config.default_profile || null;
+  const inherited = !stageProfile;
+  const label = (inherited ? 'inherit → ' : '') + (name || 'none');
+  const p = name ? config.profiles[name] : undefined;
+  const missing = name ? 'no profile named ' + name + ' in config.yaml' : 'no profile: config.yaml sets no default_profile';
+  return { name, inherited, label, headless: p ? profileLine(p, 'headless') : missing, human: p ? profileLine(p, 'human') : missing };
+}

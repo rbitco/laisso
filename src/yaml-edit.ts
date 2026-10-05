@@ -1,4 +1,4 @@
-import { isMap, type Document, type ToStringOptions } from "yaml";
+import { isMap, isNode, isScalar, type Document, type ToStringOptions } from "yaml";
 import { isPlainObject } from "./fields.ts";
 
 /**
@@ -13,6 +13,7 @@ export function applyPatch(doc: Document, patch: Record<string, unknown>, path: 
   for (const [key, value] of Object.entries(patch)) {
     const at = [...path, key];
     if (value === null) {
+      keepHeader(doc, at);
       doc.deleteIn(at);
     } else if (isPlainObject(value)) {
       applyPatch(doc, value, at);
@@ -24,6 +25,19 @@ export function applyPatch(doc: Document, patch: Record<string, unknown>, path: 
   }
 }
 
+/**
+ * A comment at the top of a file with no blank line under it belongs to the
+ * first key as far as the parser is concerned, so deleting that key would
+ * take the file's header with it: hand it to the document instead.
+ */
+function keepHeader(doc: Document, at: Array<string | number>): void {
+  if (at.length !== 1 || !isMap(doc.contents)) return;
+  const [first, next] = doc.contents.items;
+  if (!first || !isScalar(first.key) || first.key.value !== at[0] || !first.key.commentBefore) return;
+  doc.commentBefore = doc.commentBefore ? doc.commentBefore + "\n" + first.key.commentBefore : first.key.commentBefore;
+  // The document comment brings its own blank line.
+  if (next && isNode(next.key)) next.key.spaceBefore = false;
+}
 
 /**
  * Keep what an edit does not touch as it was: no line folding, and [flow]

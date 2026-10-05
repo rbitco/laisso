@@ -87,6 +87,31 @@ describe("Pipeline files", () => {
     expect((await lasso.api<PipelineFile>("/api/pipelines/work")).text).toBe(text);
   });
 
+  it("sets and clears a Stage's and the Pipeline's profile as the editor's profile button and dropdown save them, keeping comments", async () => {
+    const lasso = await lassoWith();
+    // "Use claude-fable for implement", and the Pipeline dropdown back to config default.
+    const set = await lasso.api<PipelineFile>("/api/pipelines/work", { method: "PATCH", body: json({ profile: null, stages: { implement: { profile: "claude-fable" } } }) });
+    expect(set.pipeline).toMatchObject({ profile: null, stages: [{ name: "implement", profile: "claude-fable" }, { name: "notes", profile: null }] });
+    // The file's header comment sat on the cleared first key; it stays at the top.
+    expect(set.text.startsWith("# The work Pipeline. Keep this comment.\n\nstages:\n")).toBe(true);
+    expect(set.text).toContain("  - name: implement # first\n    prompt: Do the work.\n    artifact: commits-on-branch\n    budget: { attempts: 1 }\n    profile: claude-fable\n");
+    expect(set.text).not.toMatch(/^profile:/m);
+
+    // "Inherit instead" on implement, and the dropdown set to a profile again.
+    const cleared = await lasso.api<PipelineFile>("/api/pipelines/work", { method: "PATCH", body: json({ profile: "claude-sonnet", stages: { implement: { profile: null } } }) });
+    expect(cleared.pipeline).toMatchObject({ profile: "claude-sonnet", stages: [{ name: "implement", profile: null }, { name: "notes", profile: null }] });
+    expect(cleared.text).toContain("# The work Pipeline. Keep this comment.");
+    expect(cleared.text).toMatch(/^profile: claude-sonnet$/m);
+    expect(cleared.text).toContain("  - name: implement # first\n");
+    expect(cleared.text).not.toContain("claude-fable");
+    expect(await pipelineText(lasso, "work")).toBe(cleared.text);
+
+    // An unknown profile, from the button or the dropdown, is refused as a hand edit is, and the file stays.
+    await expect(lasso.api("/api/pipelines/work", { method: "PATCH", body: json({ stages: { implement: { profile: "claude-ghost" } } }) })).rejects.toThrow(/Pipeline work Stage implement: no profile named claude-ghost in config\.yaml/);
+    await expect(lasso.api("/api/pipelines/work", { method: "PATCH", body: json({ profile: "claude-ghost" }) })).rejects.toThrow(/Pipeline work: no profile named claude-ghost in config\.yaml/);
+    expect(await pipelineText(lasso, "work")).toBe(cleared.text);
+  });
+
   it("removes Stages named out of the order, keeping the others' comments, with field edits and renames in the same save", async () => {
     const THREE = WORK + `
   # ship it

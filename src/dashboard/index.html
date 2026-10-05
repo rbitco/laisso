@@ -267,6 +267,9 @@
   .pf-drawer nav button { justify-self: start; margin-top: 4px; }
   .pf-drawer section { padding: 16px; overflow: auto; display: grid; gap: 12px; align-content: start; }
   .pf-drawer h2 { margin: 0; font-size: 16px; }
+  .pf-pickbtn { display: grid; gap: 2px; justify-items: start; text-align: left; width: 100%; padding: 6px 10px; }
+  .pf-pickbtn .pf-pickname { font-weight: 600; }
+  .pf-pickbtn .pf-summary { white-space: pre-wrap; }
 </style>
 </head>
 <body>
@@ -297,7 +300,7 @@
   </div>
 </main>
 <script type="module">
-import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, relative, tickIndicator, sessionProfile, MODEL_SUGGESTIONS, profileApplies, profileMode, profileLine, profileSummary, profileUsers, usedByLine, profileWarnings } from '/metro.js';
+import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, relative, tickIndicator, sessionProfile, MODEL_SUGGESTIONS, profileApplies, profileMode, profileLine, profileSummary, profileUsers, usedByLine, profileWarnings, stageProfileView } from '/metro.js';
 (function () {
   const $ = (sel) => document.querySelector(sel);
   const layout = $('[data-role="layout"]');
@@ -793,11 +796,11 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
     return [input, el('label', { class: 'check' }, [input, label])];
   }
   // The Agent Profiles config.yaml defines, by name; blank inherits. A name config lacks stays pickable so the form shows it.
-  function profileSelect(name, value, names, blank) {
-    const s = el('select', { name });
-    s.appendChild(el('option', { value: '', text: blank }));
+  // Filling an existing select again (after the drawer adds or deletes a profile) keeps what it shows.
+  function profileOptions(s, value, names, blank) {
     const all = value && !names.includes(value) ? [value, ...names] : names;
-    for (const r of all) { const o = el('option', { value: r, text: names.includes(r) ? r : r + ' (not in config.yaml)' }); if (r === value) o.selected = true; s.appendChild(o); }
+    s.replaceChildren(el('option', { value: '', text: blank }), ...all.map((r) => el('option', { value: r, text: names.includes(r) ? r : r + ' (not in config.yaml)' })));
+    s.value = value || '';
     return s;
   }
   // A blank clears the key; a number field must hold a number; unchanged fields stay out of the patch.
@@ -863,7 +866,9 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
     });
     const actions = await api('/api/actions').catch(() => []);
     const config = await api('/api/config').then((c) => c.config).catch(() => ({ profiles: {}, default_profile: null }));
-    const profiles = { names: Object.keys(config.profiles).sort(), fallback: config.default_profile };
+    // What the Pipeline and Stage cards share about profiles: config as last read (a drawer save refreshes it),
+    // the Pipeline dropdown's choice, and each card's redraw, run when either changes.
+    const profiles = { config, pipeline: name, chosen: () => null, redraws: [], changed(next) { if (next) this.config = next; for (const r of this.redraws) r(); } };
     const structured = p.pipeline ? stagesForm(p, actions, profiles) : el('div', { class: 'card problem' }, [el('div', { class: 'why', text: 'This file does not load: ' + p.problem + '. Fix it as text.' })]);
     const raw = rawForm(p);
     raw.hidden = !!p.pipeline;
@@ -925,7 +930,14 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
     const params = {};
     for (const a of actions) if (!params[a.name]) params[a.name] = a.params;
     const form = el('form', { class: 'panel', 'data-role': 'pipeline-fields' });
-    const profile = profileSelect('profile', pipeline.profile, profiles.names, 'config default (' + (profiles.fallback || 'none') + ')');
+    // The Pipeline's profile: blank leaves its Stages to config's default_profile. A change redraws each Stage's button.
+    const profile = el('select', { name: 'profile', 'data-role': 'pipeline-profile' });
+    const fillProfile = () => profileOptions(profile, profile.dataset.drawn ? profile.value : pipeline.profile, Object.keys(profiles.config.profiles).sort(), 'config default (' + (profiles.config.default_profile || 'none') + ')');
+    fillProfile();
+    profile.dataset.drawn = '1';
+    profiles.chosen = () => profile.value || null;
+    profiles.redraws.push(fillProfile);
+    profile.addEventListener('change', () => profiles.changed());
     const spend = el('input', { name: 'spend', value: pipeline.budget.spend === undefined ? '' : String(pipeline.budget.spend), placeholder: 'global default' });
     form.appendChild(el('div', { class: 'card' }, [el('h3', { text: 'Pipeline' }), el('div', { class: 'fields' }, [field('profile', profile), field('spend per Ticket (USD)', spend)])]));
     // The Stages as they will be saved: additions, moves and removals wait for Save, and undo brings a Stage back as it was.
@@ -1014,7 +1026,8 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
   const BLANK_ACTION = { kind: 'action', name: '', action: '', with: {} };
 
   // params: each Action config.yaml defines, by name, with the params a Stage supplies under with: (ADR 0010).
-  function stageCard(s, pipeline, fresh, params = {}, profiles = { names: [], fallback: null }) {
+  // profiles: the editor's shared profile context (pipelineEditor), so the profile button resolves what a Stage inherits.
+  function stageCard(s, pipeline, fresh, params = {}, profiles) {
     if (s.kind === 'action') {
       // The Action is picked from config and shows one field per param; a Stage naming an Action config lacks keeps its own params.
       const names = Object.keys(params).sort();
@@ -1053,7 +1066,7 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
     const name = el('input', { name: 'name', value: s.name });
     const prompt = el('textarea', { name: 'prompt' }); prompt.value = s.prompt || '';
     const skills = el('input', { name: 'skills', value: s.skills.join(', '), placeholder: 'grilling, to-spec' });
-    const profile = profileSelect('profile', s.profile, profiles.names, 'inherit (' + (pipeline.profile || profiles.fallback || 'none') + ')');
+    const profile = stageProfileButton(s, name, profiles);
     const artifact = el('input', { name: 'artifact', value: s.artifact || '', placeholder: 'commits-on-branch, file NOTES.md' });
     const [human, humanLabel] = check('human: opens a terminal for me', 'human', s.human);
     const [advance, advanceLabel] = check('advance to the next Stage on its own', 'advance', s.advance);
@@ -1063,7 +1076,7 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
     const wallTime = el('input', { name: 'wallTime', value: s.budget.wallTime || '', placeholder: '30m' });
     const node = el('div', { class: 'card' }, [
       el('h3', {}, [el('span', { class: 'kind', text: s.human ? 'human' : 'runner' }), s.name || 'new Stage']),
-      el('div', { class: 'fields' }, [field('name', name), field('profile', profile), field('artifact', artifact), field('skills', skills), field('prompt', prompt, true), humanLabel, advanceLabel, repeatLabel, field('rounds', rounds), field('attempts', attempts), field('wall time', wallTime)]),
+      el('div', { class: 'fields' }, [field('name', name), field('profile', profile.node, true), field('artifact', artifact), field('skills', skills), field('prompt', prompt, true), humanLabel, advanceLabel, repeatLabel, field('rounds', rounds), field('attempts', attempts), field('wall time', wallTime)]),
     ]);
     return {
       name: s.name, node,
@@ -1073,7 +1086,7 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
         changed(patch, 'prompt', s.prompt, prompt.value === '' ? null : prompt.value);
         const list = skills.value.split(',').map((x) => x.trim()).filter(Boolean);
         if (list.join(',') !== s.skills.join(',')) patch.skills = list.length ? list : null;
-        if (profile.value !== (s.profile || '')) patch.profile = profile.value || null;
+        if (profile.chosen() !== s.profile) patch.profile = profile.chosen();
         changed(patch, 'artifact', s.artifact, artifact.value.trim() === '' ? null : artifact.value.trim());
         if (human.checked !== s.human) patch.human = human.checked ? true : null;
         if (advance.checked !== s.advance) patch.advance = advance.checked ? null : false;
@@ -1084,6 +1097,47 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
         return prune(patch);
       },
     };
+  }
+
+  // A Runner Stage's profile: a button naming what it runs ("inherit → <profile>" when it names none) over each
+  // mode's resolved line. It opens the profile drawer, which edits profiles at once; "Use <profile> for <stage>" and
+  // "Inherit instead" only change this card, and the Pipeline's Save writes them, like every other field here.
+  // The Pipeline editor has no repo, so what it shows resolves against the global profiles and default_profile.
+  function stageProfileButton(s, nameInput, profiles) {
+    let chosen = s.profile;
+    const button = el('button', { type: 'button', class: 'pf-pickbtn', 'data-role': 'stage-profile', title: 'resolved from config.yaml\'s global profiles; a repo\'s own default_profile or override may differ' });
+    const draw = () => {
+      const v = stageProfileView(chosen, profiles.chosen(), profiles.config);
+      button.replaceChildren(
+        el('span', { class: 'pf-pickname', text: v.label + '  ✎' + (chosen !== s.profile ? '  (unsaved)' : '') }),
+        el('span', { class: 'pf-summary', 'data-role': 'stage-profile-headless', text: 'headless  ' + v.headless }),
+        el('span', { class: 'pf-summary', 'data-role': 'stage-profile-human', text: 'human     ' + v.human }),
+      );
+    };
+    const choose = (name) => {
+      if (profileDrawer && profileDrawer.dirty && !confirm('Drop the unsaved changes to ' + profileDrawer.name + '?')) return;
+      chosen = name;
+      draw();
+      closeProfileDrawer();
+    };
+    button.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      const stage = nameInput.value.trim() || 'the new Stage';
+      openProfileDrawer(stageProfileView(chosen, profiles.chosen(), profiles.config).name, {
+        context: 'Stage ' + stage + ' of Pipeline ' + profiles.pipeline,
+        extra: (name) => {
+          const use = el('button', { type: 'button', class: 'primary', 'data-role': 'profile-use', text: 'Use ' + name + ' for ' + stage });
+          const inherit = el('button', { type: 'button', 'data-role': 'profile-inherit', text: 'Inherit instead' });
+          use.addEventListener('click', () => choose(name));
+          inherit.addEventListener('click', () => choose(null));
+          return [el('div', { class: 'bar', 'data-role': 'stage-profile-choice' }, [use, inherit, el('span', { class: 'why', text: 'sets this Stage in the editor; the Pipeline\'s Save writes it' })])];
+        },
+        onChange: (config) => profiles.changed(config),
+      });
+    });
+    profiles.redraws.push(draw);
+    draw();
+    return { node: button, chosen: () => chosen };
   }
 
   // Config: every key the dashboard may set, edited in place; repos stay a hand edit.
