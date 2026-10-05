@@ -1,7 +1,8 @@
 /** The embedded default Pipeline, written to pipelines/default.yaml on first run and never touched again. */
 export const DEFAULT_PIPELINE_YAML = `# Lasso's default Pipeline. Edit freely: Lasso never overwrites this file.
 # Runner-run Stages take a prompt and/or skills; action Stages take an action.
-runner: claude
+# Each Runner Stage runs under config.yaml's default_profile unless it, or the
+# Pipeline, names a profile:.
 
 stages:
   - name: grill

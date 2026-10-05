@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import path from "node:path";
-import { renderPrompt, ticketEnv, extraArgs, jsonLines, str, obj, type RunnerAdapter, type RunRequest, type Command, type Outcome, type OutcomeStatus } from "./adapter.ts";
+import { renderPrompt, ticketEnv, profileArgs, jsonLines, str, obj, type RunnerAdapter, type RunRequest, type Command, type Outcome, type OutcomeStatus } from "./adapter.ts";
 
 interface Header {
   type?: unknown;
@@ -31,7 +31,7 @@ export const piAdapter: RunnerAdapter = {
   command(request: RunRequest): Command {
     const prompt = renderPrompt(request, (name) => `/skill:${name}`);
     const env = ticketEnv(request);
-    const args = extraArgs(request.runnerOptions);
+    const args = profileArgs(request.profile, "--model");
     if (request.mode === "terminal") {
       if (request.resume) return { argv: ["pi", "--session-id", request.runnerSessionId ?? request.sessionId, "-a", ...args], cwd: request.cwd, env };
       const argv = ["pi", "--session-id", request.sessionId];

@@ -11,8 +11,7 @@ afterEach(async () => {
   while (running.length) await running.pop()!.destroy();
 });
 
-const FAST_PIPELINE = `runner: claude
-stages:
+const FAST_PIPELINE = `stages:
   - name: implement
     prompt: just do it
     artifact: commits-on-branch

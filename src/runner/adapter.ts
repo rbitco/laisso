@@ -1,4 +1,5 @@
 import type { RunnerName } from "../pipeline/load.ts";
+import type { ProfileConfig } from "../server/config.ts";
 import { renderFeedback, type FeedbackItem } from "../review/feedback.ts";
 
 export type OutcomeStatus = "succeeded" | "failed" | "exhausted" | "interrupted";
@@ -35,7 +36,8 @@ export interface RunRequest {
   /** A human-readable label for terminal Sessions; never an identity. */
   name?: string;
   limits: RunLimits;
-  runnerOptions: Record<string, unknown>;
+  /** The Agent Profile the Session runs under, resolved from config as it starts (ADR 0011). */
+  profile: ProfileConfig;
   /** A Round of a repeating Stage: the Feedback snapshot it addresses and the marker its comments carry. */
   feedback?: RoundContext;
 }
@@ -85,14 +87,14 @@ export interface RunnerAdapter {
 }
 
 /** The part of a RunRequest that comes from the Ticket and the Stage; the caller adds mode, session id, and limits. */
-export function requestFor(ticket: TicketLike, stage: StageLike): Pick<RunRequest, "stage" | "prompt" | "skills" | "context" | "cwd" | "runnerOptions"> {
+export function requestFor(ticket: TicketLike, stage: StageLike, profile: ProfileConfig): Pick<RunRequest, "stage" | "prompt" | "skills" | "context" | "cwd" | "profile"> {
   return {
     stage: stage.name,
     prompt: stage.prompt,
     skills: stage.skills,
     context: { id: ticket.id, reference: ticket.reference, repo: ticket.repo, branch: ticket.branch, title: ticket.title, body: ticket.origin === "prompt" ? ticket.prompt : ticket.body },
     cwd: ticket.worktree,
-    runnerOptions: stage.runnerOptions,
+    profile,
   };
 }
 
@@ -112,7 +114,6 @@ interface StageLike {
   name: string;
   prompt: string | null;
   skills: string[];
-  runnerOptions: RunRequest["runnerOptions"];
 }
 
 /** The Ticket context and Stage prompt every Runner sees, with skills in the Runner's own invocation form. */
@@ -144,9 +145,9 @@ export function ticketEnv(request: RunRequest): Record<string, string> {
   };
 }
 
-/** Extra argv a Pipeline may pass through `runnerOptions: { args: [...] }`; the one knob Lasso does not model. */
-export function extraArgs(options: Record<string, unknown>): string[] {
-  return Array.isArray(options.args) ? options.args.map(String) : [];
+/** The profile's model under the Runner's own flag, then its extra args: the flags a profile adds to the baseline, in that order. */
+export function profileArgs(profile: ProfileConfig, modelFlag: string): string[] {
+  return [...(profile.model ? [modelFlag, profile.model] : []), ...(profile.args ?? [])];
 }
 
 /** Every well-formed JSON object on its own line of captured stdout; anything else is skipped. */

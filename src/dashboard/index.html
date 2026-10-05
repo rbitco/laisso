@@ -757,8 +757,7 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
     return el('dd', { 'data-role': 'pipeline-version' }, note ? [link, el('span', { class: 'drift', text: ' · ' + note })] : [link]);
   }
 
-  const RUNNERS = ['claude', 'codex', 'pi'];
-  const BLANK_PIPELINE = 'runner: claude\nstages:\n  - name: implement\n    prompt: Do the work.\n    artifact: commits-on-branch\n';
+  const BLANK_PIPELINE = 'stages:\n  - name: implement\n    prompt: Do the work.\n    artifact: commits-on-branch\n';
 
   function field(label, input, wide) { return el('label', { class: wide ? 'wide' : '' }, [label, input]); }
   function check(label, name, on) {
@@ -766,10 +765,12 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
     input.checked = on;
     return [input, el('label', { class: 'check' }, [input, label])];
   }
-  function runnerSelect(name, value, blank) {
+  // The Agent Profiles config.yaml defines, by name; blank inherits. A name config lacks stays pickable so the form shows it.
+  function profileSelect(name, value, names, blank) {
     const s = el('select', { name });
-    if (blank) s.appendChild(el('option', { value: '', text: blank }));
-    for (const r of RUNNERS) { const o = el('option', { value: r, text: r }); if (r === value) o.selected = true; s.appendChild(o); }
+    s.appendChild(el('option', { value: '', text: blank }));
+    const all = value && !names.includes(value) ? [value, ...names] : names;
+    for (const r of all) { const o = el('option', { value: r, text: names.includes(r) ? r : r + ' (not in config.yaml)' }); if (r === value) o.selected = true; s.appendChild(o); }
     return s;
   }
   // A blank clears the key; a number field must hold a number; unchanged fields stay out of the patch.
@@ -834,7 +835,9 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
       save(remove, () => api('/api/pipelines/' + encodeURIComponent(name), { method: 'DELETE' }), () => { location.hash = 'pipelines'; });
     });
     const actions = await api('/api/actions').catch(() => []);
-    const structured = p.pipeline ? stagesForm(p, actions) : el('div', { class: 'card problem' }, [el('div', { class: 'why', text: 'This file does not load: ' + p.problem + '. Fix it as text.' })]);
+    const config = await api('/api/config').then((c) => c.config).catch(() => ({ profiles: {}, default_profile: null }));
+    const profiles = { names: Object.keys(config.profiles).sort(), fallback: config.default_profile };
+    const structured = p.pipeline ? stagesForm(p, actions, profiles) : el('div', { class: 'card problem' }, [el('div', { class: 'why', text: 'This file does not load: ' + p.problem + '. Fix it as text.' })]);
     const raw = rawForm(p);
     raw.hidden = !!p.pipeline;
     asText.addEventListener('click', () => { raw.hidden = !raw.hidden; structured.hidden = !raw.hidden; asText.textContent = raw.hidden ? 'Edit as text' : 'Edit as fields'; });
@@ -867,13 +870,13 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
       : el('div', { class: 'card' }, [
         el('h3', {}, [el('span', { class: 'kind', text: s.human ? 'human' : 'runner' }), s.name]),
         el('div', { class: 'fields' }, [
-          ro('runner', s.runner || 'Pipeline default (' + v.pipeline.runner + ')'), ro('artifact', s.artifact || 'none'), ro('skills', s.skills.join(', ') || 'none'),
+          ro('profile', s.profile || (v.pipeline.profile ? 'Pipeline\'s (' + v.pipeline.profile + ')' : 'config default')), ro('artifact', s.artifact || 'none'), ro('skills', s.skills.join(', ') || 'none'),
           ro('advances on its own', yes(s.advance)), ro('repeats on Feedback', yes(s.repeat === 'feedback')), ro('budget', budget(s.budget)),
           el('div', { class: 'ro wide' }, ['prompt', el('pre', { text: s.prompt || '(none)' })]),
         ]),
       ]));
     const head = el('div', { class: 'bar' }, [el('h2', { text: name + ' v' + version }), el('span', { class: 'why', text: 'read-only · frozen ' + relative(v.createdAt) + ' · ' + v.live + ' active Ticket' + (v.live === 1 ? '' : 's') }), v.deleted ? el('span', { class: 'drift', text: 'Pipeline deleted' }) : el('a', { href: '#pipelines/' + encodeURIComponent(name), text: 'current Pipeline' })]);
-    const pipelineCard = el('div', { class: 'card' }, [el('h3', { text: 'Pipeline' }), el('div', { class: 'fields' }, [ro('runner', v.pipeline.runner), ro('spend per Ticket (USD)', v.pipeline.budget.spend === undefined ? 'global default' : String(v.pipeline.budget.spend))])]);
+    const pipelineCard = el('div', { class: 'card' }, [el('h3', { text: 'Pipeline' }), el('div', { class: 'fields' }, [ro('profile', v.pipeline.profile || 'config default'), ro('spend per Ticket (USD)', v.pipeline.budget.spend === undefined ? 'global default' : String(v.pipeline.budget.spend))])]);
     return el('div', { class: 'panel', 'data-role': 'pipeline-version' }, [head, pipelineCard, ...cards]);
   }
 
@@ -889,17 +892,17 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
     return form;
   }
 
-  function stagesForm(p, actions) {
+  function stagesForm(p, actions, profiles) {
     const pipeline = p.pipeline;
     // Each configured Action's params, by name; a global one stands ahead of a repo's own of the same name.
     const params = {};
     for (const a of actions) if (!params[a.name]) params[a.name] = a.params;
     const form = el('form', { class: 'panel', 'data-role': 'pipeline-fields' });
-    const runner = runnerSelect('runner', pipeline.runner);
+    const profile = profileSelect('profile', pipeline.profile, profiles.names, 'config default (' + (profiles.fallback || 'none') + ')');
     const spend = el('input', { name: 'spend', value: pipeline.budget.spend === undefined ? '' : String(pipeline.budget.spend), placeholder: 'global default' });
-    form.appendChild(el('div', { class: 'card' }, [el('h3', { text: 'Pipeline' }), el('div', { class: 'fields' }, [field('runner', runner), field('spend per Ticket (USD)', spend)])]));
+    form.appendChild(el('div', { class: 'card' }, [el('h3', { text: 'Pipeline' }), el('div', { class: 'fields' }, [field('profile', profile), field('spend per Ticket (USD)', spend)])]));
     // The Stages as they will be saved: additions, moves and removals wait for Save, and undo brings a Stage back as it was.
-    const stages = pipeline.stages.map((s) => withTools(stageCard(s, pipeline, false, params)));
+    const stages = pipeline.stages.map((s) => withTools(stageCard(s, pipeline, false, params, profiles)));
     const list = el('div', { class: 'stack', 'data-role': 'stage-list' });
     const draw = () => {
       const kept = stages.filter((c) => !c.removed).length;
@@ -926,7 +929,7 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
       const kinds = [['Runner Stage', 'add-runner', BLANK_STAGE], ['action Stage', 'add-action', BLANK_ACTION]].map(([text, role, blank]) => {
         const b = el('button', { type: 'button', class: 'sm', 'data-role': role, text: '+ ' + text });
         b.addEventListener('click', () => {
-          const card = withTools(stageCard(blank, pipeline, true, params));
+          const card = withTools(stageCard(blank, pipeline, true, params, profiles));
           card.fresh = true;
           card.node.classList.add('fresh');
           stages.splice(stages.indexOf(after) + 1, 0, card);
@@ -964,7 +967,7 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
       ev.preventDefault();
       save(button, async () => {
         const patch = { budget: {}, stages: {} };
-        changed(patch, 'runner', pipeline.runner, runner.value);
+        if (profile.value !== (pipeline.profile || '')) patch.profile = profile.value || null;
         changed(patch.budget, 'spend', pipeline.budget.spend === undefined ? null : pipeline.budget.spend, numberOrNull(spend, 'spend'));
         const kept = stages.filter((c) => !c.removed);
         for (const card of kept) { if (card.fresh) continue; const sp = card.patch(); if (Object.keys(sp).length) patch.stages[card.name] = sp; }
@@ -980,11 +983,11 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
   }
 
   // What a new Stage starts as: every field at its default.
-  const BLANK_STAGE = { kind: 'runner', name: '', prompt: null, skills: [], runner: null, human: false, advance: true, artifact: null, repeat: null, budget: {} };
+  const BLANK_STAGE = { kind: 'runner', name: '', prompt: null, skills: [], profile: null, human: false, advance: true, artifact: null, repeat: null, budget: {} };
   const BLANK_ACTION = { kind: 'action', name: '', action: '', with: {} };
 
   // params: each Action config.yaml defines, by name, with the params a Stage supplies under with: (ADR 0010).
-  function stageCard(s, pipeline, fresh, params = {}) {
+  function stageCard(s, pipeline, fresh, params = {}, profiles = { names: [], fallback: null }) {
     if (s.kind === 'action') {
       // The Action is picked from config and shows one field per param; a Stage naming an Action config lacks keeps its own params.
       const names = Object.keys(params).sort();
@@ -1023,7 +1026,7 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
     const name = el('input', { name: 'name', value: s.name });
     const prompt = el('textarea', { name: 'prompt' }); prompt.value = s.prompt || '';
     const skills = el('input', { name: 'skills', value: s.skills.join(', '), placeholder: 'grilling, to-spec' });
-    const runner = runnerSelect('runner', s.runner, 'Pipeline default (' + pipeline.runner + ')');
+    const profile = profileSelect('profile', s.profile, profiles.names, 'inherit (' + (pipeline.profile || profiles.fallback || 'none') + ')');
     const artifact = el('input', { name: 'artifact', value: s.artifact || '', placeholder: 'commits-on-branch, file NOTES.md' });
     const [human, humanLabel] = check('human: opens a terminal for me', 'human', s.human);
     const [advance, advanceLabel] = check('advance to the next Stage on its own', 'advance', s.advance);
@@ -1033,7 +1036,7 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
     const wallTime = el('input', { name: 'wallTime', value: s.budget.wallTime || '', placeholder: '30m' });
     const node = el('div', { class: 'card' }, [
       el('h3', {}, [el('span', { class: 'kind', text: s.human ? 'human' : 'runner' }), s.name || 'new Stage']),
-      el('div', { class: 'fields' }, [field('name', name), field('runner', runner), field('artifact', artifact), field('skills', skills), field('prompt', prompt, true), humanLabel, advanceLabel, repeatLabel, field('rounds', rounds), field('attempts', attempts), field('wall time', wallTime)]),
+      el('div', { class: 'fields' }, [field('name', name), field('profile', profile), field('artifact', artifact), field('skills', skills), field('prompt', prompt, true), humanLabel, advanceLabel, repeatLabel, field('rounds', rounds), field('attempts', attempts), field('wall time', wallTime)]),
     ]);
     return {
       name: s.name, node,
@@ -1043,7 +1046,7 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
         changed(patch, 'prompt', s.prompt, prompt.value === '' ? null : prompt.value);
         const list = skills.value.split(',').map((x) => x.trim()).filter(Boolean);
         if (list.join(',') !== s.skills.join(',')) patch.skills = list.length ? list : null;
-        if (runner.value !== (s.runner || '')) patch.runner = runner.value === '' ? null : runner.value;
+        if (profile.value !== (s.profile || '')) patch.profile = profile.value || null;
         changed(patch, 'artifact', s.artifact, artifact.value.trim() === '' ? null : artifact.value.trim());
         if (human.checked !== s.human) patch.human = human.checked ? true : null;
         if (advance.checked !== s.advance) patch.advance = advance.checked ? null : false;

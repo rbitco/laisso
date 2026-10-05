@@ -1,7 +1,7 @@
 import { mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { homedir } from "node:os";
-import { actionsFor, currentConfig, type Config, type RepoConfig } from "../server/config.ts";
+import { actionsFor, currentConfig, resolveProfile, type Config, type RepoConfig } from "../server/config.ts";
 import type { LassoHome } from "../server/home.ts";
 import { shortId, type Tickets, type TicketRow, type NewTicket } from "../store/tickets.ts";
 import type { PipelineVersions } from "../store/versions.ts";
@@ -89,7 +89,13 @@ export class Intake {
     let pipeline: Pipeline;
     try {
       pipeline = loadPipeline(home.pipelinesDir, pipelineName);
-      checkActions(pipeline, actionsFor(currentConfig(home, config), repoName));
+      const now = currentConfig(home, config);
+      checkActions(pipeline, actionsFor(now, repoName));
+      // Every Runner Stage must reach a profile config defines, the inherited default included.
+      for (const stage of pipeline.stages) {
+        const profile = stage.kind === "runner" ? resolveProfile(now, pipeline, stage) : null;
+        if (profile && "problem" in profile) throw new PipelineError(`Pipeline ${pipeline.name}: ${profile.problem}`);
+      }
     } catch (error) {
       if (error instanceof PipelineError) throw new IntakeError(error.message);
       throw error;

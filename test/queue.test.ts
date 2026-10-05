@@ -12,14 +12,12 @@ afterEach(async () => {
   while (running.length) await running.pop()!.destroy();
 });
 
-const HEADLESS = `runner: claude
-stages:
+const HEADLESS = `stages:
   - name: implement
     prompt: Do the work.
     artifact: commits-on-branch
 `;
-const HUMAN = `runner: claude
-stages:
+const HUMAN = `stages:
   - name: grill
     prompt: Interview me.
     human: true

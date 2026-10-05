@@ -1,13 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { checkActions, parsePipeline, PipelineError } from "../src/pipeline/load.ts";
+import { checkActions, checkProfiles, parsePipeline, PipelineError } from "../src/pipeline/load.ts";
+import { DEFAULT_PIPELINE_YAML } from "../src/pipeline/default.ts";
 
 // Seam two, pure: every rule of the spec's Pipeline format, each with a
 // failing case (LASSO-40), and one Pipeline that uses every field.
-const STAGES = (body: string) => `runner: claude\nstages:\n${body}`;
+const STAGES = (body: string) => `profile: claude\nstages:\n${body}`;
 
 const FAILING: Array<[string, string, RegExp]> = [
   ["an empty file", "", /is empty/],
-  ["no stages", "runner: claude\n", /has no stages/],
+  ["no stages", "profile: claude\n", /has no stages/],
   ["a stage that is not a mapping", STAGES("  - implement\n"), /stage 1 is not a mapping/],
   ["a stage with both action and prompt", STAGES("  - name: x\n    prompt: p\n    action: tracker.transition\n    with: { status: Done }\n"), /has both action and prompt\/skills/],
   ["a stage with neither prompt, skills nor action", STAGES("  - name: x\n    artifact: pr-exists\n"), /needs a prompt, skills, or an action/],
@@ -26,8 +27,11 @@ const FAILING: Array<[string, string, RegExp]> = [
   ["a repeat trigger other than feedback", STAGES("  - name: x\n    prompt: p\n    repeat: always\n"), /repeat must be feedback/],
   ["a repeating stage with no artifact to end it", STAGES("  - name: x\n    prompt: p\n    repeat: feedback\n"), /a repeating Stage needs an artifact/],
   ["two transitions to one status", STAGES("  - action: tracker.transition\n    with: { status: Done }\n  - action: tracker.transition\n    with: { status: Done }\n"), /has two Stages named transition-done/],
-  ["an unknown Pipeline runner", "runner: gemini\nstages:\n  - name: x\n    prompt: p\n", /Pipeline p: unknown runner gemini/],
-  ["an unknown Stage runner", STAGES("  - name: x\n    prompt: p\n    runner: gemini\n"), /stage 1: unknown runner gemini/],
+  ["a Pipeline runner, as before ADR 0011", "runner: codex\nstages:\n  - name: x\n    prompt: p\n", /Pipeline p: runner is now an Agent Profile in config\.yaml; write profile: codex/],
+  ["a Stage runner, as before ADR 0011", STAGES("  - name: x\n    prompt: p\n    runner: pi\n"), /stage 1: runner is now an Agent Profile in config\.yaml; write profile: pi/],
+  ["runnerOptions, as before ADR 0011", STAGES("  - name: x\n    prompt: p\n    runnerOptions: { args: [--verbose] }\n"), /stage 1: runnerOptions are now an Agent Profile in config\.yaml; .*write profile: p-x/],
+  ["a profile that could not be a profile's name", STAGES("  - name: x\n    prompt: p\n    profile: Big Model\n"), /stage 1: profile must name an Agent Profile, not Big Model/],
+  ["a Pipeline profile that is not text", "profile: [a]\nstages:\n  - name: x\n    prompt: p\n", /Pipeline p: profile must name an Agent Profile/],
   ["skills that are not strings", STAGES("  - name: x\n    skills: [1, 2]\n"), /skills must be a list of skill names/],
   ["skills that are not a list", STAGES("  - name: x\n    skills: grilling\n"), /skills must be a list of skill names/],
   ["a prompt that is not text", STAGES("  - name: x\n    prompt: [a]\n"), /prompt must be text/],
@@ -40,8 +44,7 @@ const FAILING: Array<[string, string, RegExp]> = [
   ["a Pipeline spend that is not a number", "budget: { spend: lots }\nstages:\n  - name: x\n    prompt: p\n", /budget\.spend must be a number of 0 or more USD/],
   ["a Pipeline budget with rounds", "budget: { rounds: 3 }\nstages:\n  - name: x\n    prompt: p\n", /budget\.rounds belongs to a Stage, not the Pipeline/],
   ["an unknown Stage field", STAGES("  - name: x\n    prompt: p\n    artefact: pr-exists\n"), /stage 1: unknown field artefact/],
-  ["an unknown Pipeline field", "runer: claude\nstages:\n  - name: x\n    prompt: p\n", /Pipeline p: unknown field runer/],
-  ["runnerOptions that are not a mapping", STAGES("  - name: x\n    prompt: p\n    runnerOptions: fast\n"), /runnerOptions must be a mapping/],
+  ["an unknown Pipeline field", "profle: claude\nstages:\n  - name: x\n    prompt: p\n", /Pipeline p: unknown field profle/],
 ];
 
 describe("parsePipeline refuses", () => {
@@ -54,7 +57,7 @@ describe("parsePipeline refuses", () => {
 describe("parsePipeline accepts", () => {
   it("every field of the format", () => {
     const pipeline = parsePipeline("full", `# a comment
-runner: codex
+profile: codex-fast
 budget:
   spend: 12.5
 stages:
@@ -64,8 +67,7 @@ stages:
     skills: [grilling, to-spec]
     prompt: Talk.
     artifact: tracker-spec
-    runner: claude
-    runnerOptions: { model: opus }
+    profile: claude-opus
     budget: { rounds: 1, attempts: 3, wallTime: 45m }
   - action: tracker.transition
     with: { status: In Progress }
@@ -83,15 +85,15 @@ stages:
 `);
     expect(pipeline).toEqual({
       name: "full",
-      runner: "codex",
+      profile: "codex-fast",
       budget: { spend: 12.5 },
       stages: [
-        { kind: "runner", name: "grill", prompt: "Talk.", skills: ["grilling", "to-spec"], runner: "claude", human: true, advance: false, artifact: "tracker-spec", repeat: null, budget: { rounds: 1, attempts: 3, wallTime: "45m" }, runnerOptions: { model: "opus" }, inheritsRunner: false },
+        { kind: "runner", name: "grill", prompt: "Talk.", skills: ["grilling", "to-spec"], profile: "claude-opus", human: true, advance: false, artifact: "tracker-spec", repeat: null, budget: { rounds: 1, attempts: 3, wallTime: "45m" } },
         { kind: "action", name: "transition-in-progress", action: "tracker.transition", with: { status: "In Progress" } },
         { kind: "action", name: "post-ops-2", action: "slack.post", with: { channel: "ops", count: "2" } },
         { kind: "action", name: "tell-team", action: "slack.post", with: {} },
-        { kind: "runner", name: "review", prompt: "Address feedback.", skills: [], runner: "codex", human: false, advance: true, artifact: "pr-merged", repeat: "feedback", budget: { rounds: undefined, attempts: undefined, wallTime: undefined }, runnerOptions: {}, inheritsRunner: true },
-        { kind: "runner", name: "notes", prompt: "Write.", skills: [], runner: "codex", human: false, advance: true, artifact: "file docs/NOTES.md", repeat: null, budget: { rounds: undefined, attempts: undefined, wallTime: undefined }, runnerOptions: {}, inheritsRunner: true },
+        { kind: "runner", name: "review", prompt: "Address feedback.", skills: [], profile: null, human: false, advance: true, artifact: "pr-merged", repeat: "feedback", budget: { rounds: undefined, attempts: undefined, wallTime: undefined } },
+        { kind: "runner", name: "notes", prompt: "Write.", skills: [], profile: null, human: false, advance: true, artifact: "file docs/NOTES.md", repeat: null, budget: { rounds: undefined, attempts: undefined, wallTime: undefined } },
       ],
     });
   });
@@ -110,5 +112,26 @@ describe("checkActions", () => {
     expect(check("  - action: notify\n")).toThrow(/Stage notify: notify needs with\.channel/);
     expect(check("  - action: notify\n    with: { channel: ops, loud: true }\n")).toThrow(/notify takes no param loud/);
     expect(check("  - action: tracker.transition\n    with: { status: Done }\n")).toThrow(/Stage transition-done: no Action named tracker\.transition in config\.yaml/);
+  });
+});
+
+describe("checkProfiles", () => {
+  const profiles = { claude: { runner: "claude" as const }, "codex-fast": { runner: "codex" as const, model: "gpt-5-codex" } };
+
+  it("accepts profiles config defines, and Stages that name none", () => {
+    expect(() => checkProfiles(parsePipeline("p", "profile: codex-fast\nstages:\n  - name: x\n    prompt: p\n    profile: claude\n  - name: y\n    prompt: q\n"), profiles)).not.toThrow();
+  });
+
+  it("refuses a profile config lacks, on the Pipeline or a Stage", () => {
+    expect(() => checkProfiles(parsePipeline("p", "profile: opus\nstages:\n  - name: x\n    prompt: p\n"), profiles)).toThrow(/Pipeline p: no profile named opus in config\.yaml/);
+    expect(() => checkProfiles(parsePipeline("p", STAGES("  - name: x\n    prompt: p\n    profile: sonnet\n")), profiles)).toThrow(/Pipeline p Stage x: no profile named sonnet in config\.yaml/);
+  });
+});
+
+describe("the default Pipeline", () => {
+  it("names no profile, so every Stage runs under config's default_profile", () => {
+    const pipeline = parsePipeline("default", DEFAULT_PIPELINE_YAML);
+    expect(pipeline.profile).toBeNull();
+    expect(pipeline.stages.flatMap((s) => (s.kind === "runner" ? [s.profile] : []))).toEqual([null, null, null, null, null, null]);
   });
 });

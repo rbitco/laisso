@@ -1,7 +1,16 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { OutcomeStatus } from "../runner/adapter.ts";
+import type { RunnerName } from "../pipeline/load.ts";
 
 export type SessionMode = "headless" | "terminal" | "action";
+
+/** The Agent Profile a Session ran under, by name, and what it resolved to then; profiles are live config, so this is the record. */
+export interface SessionProfile {
+  name: string;
+  runner: RunnerName;
+  model: string | null;
+  args: string[];
+}
 export type EndedReason = "shutdown" | "wall_time" | "abandon" | "stop";
 
 export interface SessionRow {
@@ -31,9 +40,11 @@ export interface SessionRow {
   opened_at: string | null;
   /** The id the Runner gave this Session when it names its own (a Codex thread); null when it took Lasso's. */
   runner_session_id: string | null;
+  /** A SessionProfile as JSON; null for action Sessions and those from before Agent Profiles. */
+  profile: string | null;
 }
 
-export type NewSession = Pick<SessionRow, "id" | "ticket" | "stage" | "stage_snapshot" | "mode" | "started_by" | "stdout_path" | "limits_honoured"> & Partial<Pick<SessionRow, "transcript_path" | "round">>;
+export type NewSession = Pick<SessionRow, "id" | "ticket" | "stage" | "stage_snapshot" | "mode" | "started_by" | "stdout_path" | "limits_honoured"> & Partial<Pick<SessionRow, "transcript_path" | "round" | "profile">>;
 
 export type SessionEnd = Pick<SessionRow, "ended_by" | "ended_reason" | "outcome" | "final_message" | "usage" | "cost_usd" | "transcript_path"> & Partial<Pick<SessionRow, "runner_session_id">>;
 
@@ -52,10 +63,10 @@ export class Sessions {
     const ordinal = this.count(session.ticket, session.stage) + 1;
     this.db
       .prepare(
-        `INSERT INTO sessions (id, ticket, stage, ordinal, stage_snapshot, mode, started_by, started_at, stdout_path, limits_honoured, transcript_path, round)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO sessions (id, ticket, stage, ordinal, stage_snapshot, mode, started_by, started_at, stdout_path, limits_honoured, transcript_path, round, profile)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(session.id, session.ticket, session.stage, ordinal, session.stage_snapshot, session.mode, session.started_by, now, session.stdout_path, session.limits_honoured, session.transcript_path ?? null, session.round ?? null);
+      .run(session.id, session.ticket, session.stage, ordinal, session.stage_snapshot, session.mode, session.started_by, now, session.stdout_path, session.limits_honoured, session.transcript_path ?? null, session.round ?? null, session.profile ?? null);
     this.changed(session.ticket);
     return this.get(session.id)!;
   }
@@ -125,5 +136,22 @@ export class Sessions {
   private count(ticket: string, stage: string): number {
     const row = this.db.prepare(`SELECT COUNT(*) AS n FROM sessions WHERE ticket = ? AND stage = ?`).get(ticket, stage) as { n: number };
     return row.n;
+  }
+}
+
+/** The record of what a Session runs under, for its row. */
+export function sessionProfile(name: string, profile: { runner: RunnerName; model?: string; args?: string[] }): string {
+  const record: SessionProfile = { name, runner: profile.runner, model: profile.model ?? null, args: profile.args ?? [] };
+  return JSON.stringify(record);
+}
+
+/** The Runner a Session ran on: its profile record, else the Stage snapshot of a Session from before Agent Profiles; null for neither. */
+export function runnerOf(row: SessionRow): RunnerName | null {
+  if (row.profile) return (JSON.parse(row.profile) as SessionProfile).runner;
+  try {
+    const runner = (JSON.parse(row.stage_snapshot) as { runner?: unknown }).runner;
+    return typeof runner === "string" ? (runner as RunnerName) : null;
+  } catch {
+    return null;
   }
 }

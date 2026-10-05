@@ -100,7 +100,7 @@ describe("admitting a reference Ticket", () => {
 
   it("keeps a GitHub issue's body", async () => {
     const { lasso } = await lassoWith({ web: { tracker: "github", project: "acme/web", pipeline: "gh" } });
-    await writeFile(path.join(lasso.home, "pipelines", "gh.yaml"), "runner: claude\nstages:\n  - name: implement\n    prompt: do it\n  - action: tracker.transition\n    with: { status: Closed }\n");
+    await writeFile(path.join(lasso.home, "pipelines", "gh.yaml"), "stages:\n  - name: implement\n    prompt: do it\n  - action: tracker.transition\n    with: { status: Closed }\n");
     await lasso.tracker.reply({ tool: "gh", match: ["issue view 7"], stdout: ghView("Fix the footer links", "They 404.") });
     const t = await admit(lasso, "acme/web#7");
     expect(t).toMatchObject({ reference: "acme/web#7", branch: "acme-web-7-fix-the-footer", pipeline: "gh" });
@@ -151,7 +151,7 @@ describe("admitting a reference Ticket", () => {
   it("refuses a Pipeline still giving a transition its status the old way, pointing at with", async () => {
     const { lasso } = await lassoWith({ app: { tracker: "jira", project: "APP", pipeline: "odd" } });
     // Startup migration rewrote the files there were; this one is a hand edit made after.
-    await writeFile(path.join(lasso.home, "pipelines", "odd.yaml"), "runner: claude\nstages:\n  - name: implement\n    prompt: do it\n  - action: tracker.transition\n    status: Shipped\n");
+    await writeFile(path.join(lasso.home, "pipelines", "odd.yaml"), "stages:\n  - name: implement\n    prompt: do it\n  - action: tracker.transition\n    status: Shipped\n");
     await lasso.tracker.reply({ tool: "acli", match: ["workitem view APP-12"], stdout: jiraView("APP-12", "Add dark mode") });
     const res = await lasso.api<Response>("/api/tickets", { method: "POST", raw: true, body: JSON.stringify({ input: "APP-12" }) });
     expect(res.status).toBe(400);
@@ -161,8 +161,8 @@ describe("admitting a reference Ticket", () => {
 
   it("refuses an unknown artifact or action with the reason", async () => {
     const { lasso } = await lassoWith({ app: { tracker: "jira", project: "APP" } });
-    await writeFile(path.join(lasso.home, "pipelines", "bad-artifact.yaml"), "runner: claude\nstages:\n  - name: implement\n    prompt: do it\n    artifact: pr-approved\n");
-    await writeFile(path.join(lasso.home, "pipelines", "bad-action.yaml"), "runner: claude\nstages:\n  - action: tracker.assign\n");
+    await writeFile(path.join(lasso.home, "pipelines", "bad-artifact.yaml"), "stages:\n  - name: implement\n    prompt: do it\n    artifact: pr-approved\n");
+    await writeFile(path.join(lasso.home, "pipelines", "bad-action.yaml"), "stages:\n  - action: tracker.assign\n");
     await lasso.tracker.reply({ tool: "acli", match: ["workitem view APP-12"], stdout: jiraView("APP-12", "Add dark mode") });
     for (const [pipeline, reason] of [["bad-artifact", "pr-approved"], ["bad-action", "tracker.assign"]]) {
       const res = await lasso.api<Response>("/api/tickets", { method: "POST", raw: true, body: JSON.stringify({ input: "APP-12", pipeline }) });

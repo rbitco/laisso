@@ -18,7 +18,7 @@ const request: RunRequest = {
   mode: "headless",
   sessionId: "7d3f2c10-5b1e-4a8c-9e2f-1234567890ab",
   limits: { wallTimeMs: 60_000, remainingSpendUsd: 4.5 },
-  runnerOptions: {},
+  profile: { runner: "pi" },
 };
 
 const sessionsDir = path.join(homedir(), ".pi", "agent", "sessions", "--Users-matt-.claude-jobs-dcee61b2-tmp-piprobe--");
@@ -49,9 +49,10 @@ describe("pi adapter command", () => {
     expect(piAdapter.sessionIds).toBe("lasso");
   });
 
-  it("passes runnerOptions.args through before the prompt", () => {
-    const cmd = piAdapter.command({ ...request, runnerOptions: { args: ["--model", "openai/gpt-5"] } });
-    expect(cmd.argv.slice(7, 9)).toEqual(["--model", "openai/gpt-5"]);
+  it("passes the profile's model under --model and its args through before the prompt", () => {
+    const cmd = piAdapter.command({ ...request, profile: { runner: "pi", model: "openai/gpt-5", args: ["--thinking", "high"] } });
+    expect(cmd.argv.slice(7, 11)).toEqual(["--model", "openai/gpt-5", "--thinking", "high"]);
+    expect(cmd.argv).toHaveLength(12);
     expect(cmd.argv.at(-1)!.startsWith("/skill:implement\n")).toBe(true);
   });
 

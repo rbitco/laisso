@@ -1,6 +1,6 @@
 import { shortId, type TicketRow } from "../store/tickets.ts";
-import type { SessionRow } from "../store/sessions.ts";
-import { type Pipeline, type RunnerName, type Stage } from "../pipeline/load.ts";
+import { runnerOf, type SessionProfile, type SessionRow } from "../store/sessions.ts";
+import { type Pipeline, type Stage } from "../pipeline/load.ts";
 import type { PipelineSource } from "../pipeline/files.ts";
 import type { Drift, VersionRow } from "../store/versions.ts";
 import type { ActionConfig, Config } from "../server/config.ts";
@@ -111,6 +111,8 @@ export interface SessionView {
   openedAt: string | null;
   /** The Runner's own id for the Session when it names its own (a Codex thread), for resuming by hand. */
   runnerSessionId: string | null;
+  /** The Agent Profile it ran under and what that resolved to as it started; null for action Sessions and those from before profiles. */
+  profile: SessionProfile | null;
   stdoutPath: string | null;
   transcriptPath: string | null;
   running: boolean;
@@ -151,13 +153,13 @@ export const LEDGER_ORDER: DisplayState[] = ["flagged", "needs_you", "holding", 
 
 /** A Pipeline as the editor sees it: every field of every Stage, action Stages included. */
 export interface PipelineView {
-  runner: RunnerName;
+  profile: string | null;
   budget: { spend?: number };
   stages: StageFields[];
 }
 
 export type StageFields =
-  | { kind: "runner"; name: string; label: string; prompt: string | null; skills: string[]; runner: RunnerName | null; human: boolean; advance: boolean; artifact: string | null; repeat: "feedback" | null; budget: { rounds?: number; attempts?: number; wallTime?: string }; runnerOptions: Record<string, unknown> }
+  | { kind: "runner"; name: string; label: string; prompt: string | null; skills: string[]; profile: string | null; human: boolean; advance: boolean; artifact: string | null; repeat: "feedback" | null; budget: { rounds?: number; attempts?: number; wallTime?: string } }
   | { kind: "action"; name: string; label: string; action: string; with: Record<string, string> };
 
 export interface PipelineListing {
@@ -232,14 +234,12 @@ export function pipelineVersionView(row: VersionRow, pipeline: Pipeline, deleted
 }
 
 function pipelineFields(pipeline: Pipeline): PipelineView {
-  return { runner: pipeline.runner, budget: pipeline.budget, stages: pipeline.stages.map(stageFields) };
+  return { profile: pipeline.profile, budget: pipeline.budget, stages: pipeline.stages.map(stageFields) };
 }
 
-/** A Stage as the editor shows it: a runner it inherits from the Pipeline is null, so the form can say so. */
+/** A Stage as the editor shows it; a profile it inherits is null, so the form can say so. */
 function stageFields(stage: Stage): StageFields {
-  if (stage.kind === "action") return { ...stage, label: stageLabel(stage) };
-  const { inheritsRunner, ...fields } = stage;
-  return { ...fields, label: stageLabel(stage), runner: inheritsRunner ? null : stage.runner };
+  return { ...stage, label: stageLabel(stage) };
 }
 
 /** What the stepper calls a Stage: an action Stage with params by their values (a transition by its status), any other by its name. */
@@ -322,6 +322,7 @@ export function sessionView(row: SessionRow, now: number = Date.now(), feedback:
     limitsHonoured: row.limits_honoured ? (JSON.parse(row.limits_honoured) as string[]) : [],
     openedAt: row.opened_at,
     runnerSessionId: row.runner_session_id,
+    profile: row.profile ? (JSON.parse(row.profile) as SessionProfile) : null,
     stdoutPath: row.stdout_path,
     transcriptPath: row.transcript_path,
     running: row.ended_at === null,
@@ -348,9 +349,11 @@ function displayState(ticket: TicketRow, stage: Stage | null, latest: SessionRow
   return { state: "ready", why: `${name} starts on the next tick` };
 }
 
-function resumableHeadless(rows: SessionRow[], stage: string, runner: RunnerName): boolean {
+function resumableHeadless(rows: SessionRow[], stage: string): boolean {
   const last = rows.find((r) => r.stage === stage && r.mode === "headless");
-  return last !== undefined && (adapterFor(runner).sessionIds === "lasso" || last.runner_session_id !== null);
+  if (!last) return false;
+  const runner = runnerOf(last);
+  return runner === null || adapterFor(runner).sessionIds === "lasso" || last.runner_session_id !== null;
 }
 
 function ticketTriggers(ticket: TicketRow, stage: Stage | null, rows: SessionRow[]): Trigger[] {
@@ -360,7 +363,7 @@ function ticketTriggers(ticket: TicketRow, stage: Stage | null, rows: SessionRow
   if (ticket.flagged_at) {
     // Resume needs something to re-enter: a terminal window that opened, or the last headless Session of this
     // Stage, which a Runner that names its own sessions must have reported an id for.
-    const resumable = stage.kind === "runner" && (stage.human ? rows.some((r) => r.stage === stage.name && r.mode === "terminal" && r.ended_at === null && r.opened_at !== null) : resumableHeadless(rows, stage.name, stage.runner));
+    const resumable = stage.kind === "runner" && (stage.human ? rows.some((r) => r.stage === stage.name && r.mode === "terminal" && r.ended_at === null && r.opened_at !== null) : resumableHeadless(rows, stage.name));
     return [
       { action: "retry", label: `Retry ${stage.name}` },
       ...(resumable ? [{ action: "resume" as const, label: `Resume ${stage.name}` }] : []),

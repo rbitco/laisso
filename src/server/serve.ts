@@ -1,8 +1,8 @@
 import { serve as listen } from "@hono/node-server";
 import { createRequire } from "node:module";
 import { resolveHome, ensureHome } from "./home.ts";
-import { migrateHome, migrateVersions } from "./migrate.ts";
-import { loadConfig } from "./config.ts";
+import { migrateConfigProfiles, migrateHome, migrateVersions } from "./migrate.ts";
+import { applyLive, loadConfig } from "./config.ts";
 import { acquireLock, AlreadyRunning } from "./lock.ts";
 import { createLogger } from "./log.ts";
 import { Store } from "../store/store.ts";
@@ -36,7 +36,7 @@ export interface ServeOptions {
 export async function serve(opts: ServeOptions): Promise<number> {
   const home = resolveHome();
   const defaults = ensureHome(home);
-  // Before config or any Pipeline is read: tracker.transition moves into config (ADR 0010).
+  // Before config or any Pipeline is read: tracker.transition moves into config (ADR 0010), runners into profiles (ADR 0011).
   const migrated = migrateHome(home);
   const config = loadConfig(home, { port: opts.portFlag });
   const log = createLogger(home.logFile);
@@ -58,8 +58,13 @@ export async function serve(opts: ServeOptions): Promise<number> {
   const ticketChanged = (ticket: string) => changes.emit({ kind: "ticket", ticket });
   const tickets = new Tickets(store.db, ticketChanged);
   const versions = new PipelineVersions(store.db);
-  const migratedVersions = migrateVersions(store.db);
-  if (migrated.config || migrated.pipelines.length || migratedVersions) log.info("migrated.actions", { config: migrated.config, pipelines: migrated.pipelines.join(",") || null, versions: migratedVersions });
+  const migratedVersions = migrateVersions(store.db, home.pipelinesDir);
+  // A pinned Version may name a Runner no Pipeline file does any more; config.yaml gets its profile too.
+  if (migrateConfigProfiles(home, migratedVersions.profiles)) {
+    migrated.config = true;
+    applyLive(config, loadConfig(home));
+  }
+  if (migrated.config || migrated.pipelines.length || migratedVersions.versions) log.info("migrated", { config: migrated.config, pipelines: migrated.pipelines.join(",") || null, versions: migratedVersions.versions });
   versions.pinUnpinned(tickets, home.pipelinesDir);
   const sessions = new Sessions(store.db, ticketChanged);
   const feedback = new Feedback(store.db, ticketChanged);
@@ -80,7 +85,7 @@ export async function serve(opts: ServeOptions): Promise<number> {
   const teardown = new Teardown({ config, home, tickets, log, prs });
   const progress: Progress = new Progress({ home, tickets, versions, sessions, log, notifier, mirror, prProbe: (ticket) => () => review.probe(ticket), teardown });
   const review: Review = new Review({ tickets, sessions, feedback, progress, prs, log });
-  const terminal = new Terminal({ home, sessions, log });
+  const terminal = new Terminal({ config, home, sessions, log, flag: (ticket, reason, detail) => progress.flag(ticket, reason, detail) });
   const budgets = new Budgets({ config, sessions });
   const queue = new Queue({ home, tickets, sessions, progress, log, cap: config.concurrency });
   const runs = new Runs({ config, home, tickets, sessions, log, progress, budgets, queue, review, stdoutWritten: (ticket, session) => changes.emit({ kind: "stdout", ticket, session }), ended: () => tick.kick("session-end") });

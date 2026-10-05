@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { renderPrompt, ticketEnv, extraArgs, jsonLines, str, obj, type RunnerAdapter, type RunRequest, type Command, type Outcome } from "./adapter.ts";
+import { renderPrompt, ticketEnv, profileArgs, jsonLines, str, obj, type RunnerAdapter, type RunRequest, type Command, type Outcome } from "./adapter.ts";
 
 interface Item {
   type?: unknown;
@@ -15,7 +15,7 @@ interface Item {
  * from the thread table under CODEX_HOME by cwd and creation time. Skills
  * are link-form mentions by absolute path, which Codex resolves itself:
  * a path outside its skill roots is ignored without a word, so a Stage
- * whose skills live elsewhere sets `runnerOptions.skillsDir`.
+ * whose skills live elsewhere runs under a profile with `skills_dir`.
  */
 
 /** Codex's thread index; the name carries its schema version, so a newer Codex leaves resume finding nothing. */
@@ -26,11 +26,11 @@ export const codexAdapter: RunnerAdapter = {
   sessionIds: "runner",
 
   command(request: RunRequest): Command {
-    const skillsDir = typeof request.runnerOptions.skillsDir === "string" ? request.runnerOptions.skillsDir : path.join(homedir(), ".agents", "skills");
+    const skillsDir = request.profile.skills_dir ?? path.join(homedir(), ".agents", "skills");
     const prompt = renderPrompt(request, (name) => `[$${name}](${path.join(skillsDir, name, "SKILL.md")})`);
     // A terminal runs under the shell's environment: the home Lasso reads threads from must be the one Codex writes.
     const env = { ...ticketEnv(request), ...(process.env.CODEX_HOME ? { CODEX_HOME: process.env.CODEX_HOME } : {}) };
-    const args = extraArgs(request.runnerOptions);
+    const args = profileArgs(request.profile, "-m");
     if (request.mode === "terminal") {
       if (request.resume) return { argv: ["codex", "resume", request.runnerSessionId ?? request.sessionId, "-s", "workspace-write", ...args], cwd: request.cwd, env };
       return { argv: ["codex", "-s", "workspace-write", ...args, prompt], cwd: request.cwd, env };

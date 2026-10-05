@@ -3,7 +3,7 @@ import path from "node:path";
 import { parse } from "yaml";
 import { hyphenate } from "../intake/slug.ts";
 import { count, duration, isPlainObject, mapping, money, text, type Fail } from "../fields.ts";
-import { ACTION_NAME, type ActionConfig } from "../server/config.ts";
+import { ACTION_NAME, PROFILE_NAME, type ActionConfig, type ProfileConfig } from "../server/config.ts";
 
 export const RUNNERS = ["claude", "codex", "pi"] as const;
 export type RunnerName = (typeof RUNNERS)[number];
@@ -21,15 +21,13 @@ export interface RunnerStage {
   name: string;
   prompt: string | null;
   skills: string[];
-  runner: RunnerName;
-  /** True when the Stage names no runner of its own and follows the Pipeline's. */
-  inheritsRunner: boolean;
+  /** The Agent Profile the Stage names; null inherits the Pipeline's, then config's default_profile (ADR 0011). */
+  profile: string | null;
   human: boolean;
   advance: boolean;
   artifact: string | null;
   repeat: "feedback" | null;
   budget: StageBudget;
-  runnerOptions: Record<string, unknown>;
 }
 
 /** A Stage that runs an Action defined in config by name, with the params it supplies (ADR 0010). */
@@ -44,7 +42,8 @@ export type Stage = RunnerStage | ActionStage;
 
 export interface Pipeline {
   name: string;
-  runner: RunnerName;
+  /** The Agent Profile its Stages inherit; null leaves them to config's default_profile. */
+  profile: string | null;
   budget: { spend?: number };
   stages: Stage[];
 }
@@ -87,8 +86,8 @@ export function loadPipeline(dir: string, name: string): Pipeline {
   return parsePipeline(name, readFileSync(file, "utf8"));
 }
 
-const PIPELINE_FIELDS = new Set(["runner", "budget", "stages"]);
-const RUNNER_STAGE_FIELDS = new Set(["name", "prompt", "skills", "runner", "human", "advance", "artifact", "repeat", "budget", "runnerOptions"]);
+const PIPELINE_FIELDS = new Set(["profile", "budget", "stages"]);
+const RUNNER_STAGE_FIELDS = new Set(["name", "prompt", "skills", "profile", "human", "advance", "artifact", "repeat", "budget"]);
 const ACTION_STAGE_FIELDS = new Set(["action", "name", "with"]);
 
 export function parsePipeline(name: string, text: string): Pipeline {
@@ -96,11 +95,13 @@ export function parsePipeline(name: string, text: string): Pipeline {
   if (!raw || typeof raw !== "object") throw new PipelineError(`Pipeline ${name} is empty`);
   const doc = raw as Record<string, unknown>;
   const where = `Pipeline ${name}`;
+  // The form before ADR 0011; startup migration rewrites it, so only a hand edit meets this.
+  if (doc.runner !== undefined) throw new PipelineError(`${where}: runner is now an Agent Profile in config.yaml; write profile: ${String(doc.runner)}`);
   for (const key of Object.keys(doc)) if (!PIPELINE_FIELDS.has(key)) throw new PipelineError(`${where}: unknown field ${key}`);
-  const runner = asRunner(doc.runner, "claude", where);
+  const profile = asProfile(doc.profile, where);
   const stagesRaw = Array.isArray(doc.stages) ? doc.stages : null;
   if (!stagesRaw || stagesRaw.length === 0) throw new PipelineError(`${where} has no stages`);
-  const stages = stagesRaw.map((entry, i) => parseStage(name, entry, i, runner));
+  const stages = stagesRaw.map((entry, i) => parseStage(name, entry, i));
   const names = new Set<string>();
   for (const stage of stages) {
     if (names.has(stage.name)) throw new PipelineError(`${where} has two Stages named ${stage.name}`);
@@ -112,10 +113,10 @@ export function parsePipeline(name: string, text: string): Pipeline {
     if ((STAGE_BUDGET_KEYS as readonly string[]).includes(key)) throw new PipelineError(`${where}: budget.${key} belongs to a Stage, not the Pipeline`);
     throw new PipelineError(`${where}: unknown field budget.${key}`);
   }
-  return { name, runner, budget: { spend: budget.spend === undefined ? undefined : money(budget.spend, `${where}: budget.spend`, fail) }, stages };
+  return { name, profile, budget: { spend: budget.spend === undefined ? undefined : money(budget.spend, `${where}: budget.spend`, fail) }, stages };
 }
 
-function parseStage(pipeline: string, entry: unknown, index: number, defaultRunner: RunnerName): Stage {
+function parseStage(pipeline: string, entry: unknown, index: number): Stage {
   if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new PipelineError(`Pipeline ${pipeline} stage ${index + 1} is not a mapping`);
   const s = entry as Record<string, unknown>;
   const where = `Pipeline ${pipeline} stage ${index + 1}`;
@@ -124,6 +125,11 @@ function parseStage(pipeline: string, entry: unknown, index: number, defaultRunn
   if (isAction && isRunner) throw new PipelineError(`${where} has both action and prompt/skills`);
   if (isAction) return parseActionStage(s, where);
   if (!isRunner) throw new PipelineError(`${where} needs a prompt, skills, or an action`);
+  if (s.runnerOptions !== undefined) {
+    const named = typeof s.name === "string" ? `${pipeline}-${s.name}` : `${pipeline}-<stage>`;
+    throw new PipelineError(`${where}: runnerOptions are now an Agent Profile in config.yaml; define one there with the runner and args, and write profile: ${named}`);
+  }
+  if (s.runner !== undefined) throw new PipelineError(`${where}: runner is now an Agent Profile in config.yaml; write profile: ${String(s.runner)}`);
   for (const key of Object.keys(s)) if (!RUNNER_STAGE_FIELDS.has(key)) throw new PipelineError(`${where}: unknown field ${key}`);
   if (typeof s.name !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(s.name)) throw new PipelineError(`${where} needs a name of lowercase letters, digits, and hyphens`);
   if (s.prompt !== undefined) text(s.prompt, `${where}: prompt`, fail);
@@ -140,14 +146,12 @@ function parseStage(pipeline: string, entry: unknown, index: number, defaultRunn
     if (key === "spend") throw new PipelineError(`${where}: budget.spend belongs to the Pipeline, not a Stage`);
     throw new PipelineError(`${where}: unknown field budget.${key}`);
   }
-  if (s.runnerOptions !== undefined && (!s.runnerOptions || typeof s.runnerOptions !== "object" || Array.isArray(s.runnerOptions))) throw new PipelineError(`${where}: runnerOptions must be a mapping`);
   return {
     kind: "runner",
     name: s.name,
     prompt: typeof s.prompt === "string" ? s.prompt : null,
     skills: Array.isArray(s.skills) ? s.skills.map(String) : [],
-    runner: asRunner(s.runner, defaultRunner, where),
-    inheritsRunner: s.runner === undefined,
+    profile: asProfile(s.profile, where),
     human: s.human === true,
     advance: s.advance !== false,
     artifact,
@@ -157,7 +161,6 @@ function parseStage(pipeline: string, entry: unknown, index: number, defaultRunn
       attempts: budget.attempts === undefined ? undefined : count(budget.attempts, `${where}: budget.attempts`, fail),
       wallTime: budget.wallTime === undefined ? undefined : duration(budget.wallTime, `${where}: budget.wallTime`, fail),
     },
-    runnerOptions: (s.runnerOptions as Record<string, unknown> | undefined) ?? {},
   };
 }
 
@@ -219,10 +222,21 @@ export function checkActionsAny(pipeline: Pipeline, sets: Array<Record<string, A
   if (telling) throw telling;
 }
 
-function asRunner(value: unknown, fallback: RunnerName, where: string): RunnerName {
-  if (value === undefined) return fallback;
-  if ((RUNNERS as readonly string[]).includes(String(value))) return value as RunnerName;
-  throw new PipelineError(`${where}: unknown runner ${String(value)}`);
+function asProfile(value: unknown, where: string): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value === "string" && PROFILE_NAME.test(value)) return value;
+  throw new PipelineError(`${where}: profile must name an Agent Profile, not ${String(value)}`);
+}
+
+/**
+ * Every profile the Pipeline or a Stage names is one config defines.
+ * Parsing cannot check this, since profiles live in config; saving a
+ * Pipeline does, and Intake asks for each Stage's resolved profile instead.
+ */
+export function checkProfiles(pipeline: Pipeline, profiles: Record<string, ProfileConfig>): void {
+  const named: Array<[string, string]> = pipeline.profile ? [[`Pipeline ${pipeline.name}`, pipeline.profile]] : [];
+  for (const stage of pipeline.stages) if (stage.kind === "runner" && stage.profile) named.push([`Pipeline ${pipeline.name} Stage ${stage.name}`, stage.profile]);
+  for (const [where, profile] of named) if (!profiles[profile]) throw new PipelineError(`${where}: no profile named ${profile} in config.yaml`);
 }
 
 export function isKnownArtifact(artifact: string): boolean {

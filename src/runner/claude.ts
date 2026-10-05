@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import path from "node:path";
-import { renderPrompt, ticketEnv, extraArgs, jsonLines, str, obj, type RunnerAdapter, type RunRequest, type Command, type Outcome, type OutcomeStatus } from "./adapter.ts";
+import { renderPrompt, ticketEnv, profileArgs, jsonLines, str, obj, type RunnerAdapter, type RunRequest, type Command, type Outcome, type OutcomeStatus } from "./adapter.ts";
 
 interface ResultRecord {
   type?: unknown;
@@ -26,13 +26,14 @@ export const claudeAdapter: RunnerAdapter = {
   command(request: RunRequest): Command {
     const prompt = renderPrompt(request, (name) => `/${name}`);
     const env = ticketEnv(request);
+    const extra = profileArgs(request.profile, "--model");
     if (request.mode === "terminal") {
       if (request.resume) {
-        return { argv: ["claude", "--resume", request.sessionId, "--permission-mode", "acceptEdits", ...extraArgs(request.runnerOptions)], cwd: request.cwd, env };
+        return { argv: ["claude", "--resume", request.sessionId, "--permission-mode", "acceptEdits", ...extra], cwd: request.cwd, env };
       }
       const argv = ["claude", "--session-id", request.sessionId, "--permission-mode", "acceptEdits"];
       if (request.name) argv.push("--name", request.name);
-      argv.push(...extraArgs(request.runnerOptions), prompt);
+      argv.push(...extra, prompt);
       return { argv, cwd: request.cwd, env };
     }
     // Headless baseline: auto mode lets the Runner test, lint and commit, and refuses what its classifier finds risky;
@@ -41,7 +42,7 @@ export const claudeAdapter: RunnerAdapter = {
     // Resume re-enters the earlier session, which keeps its id; a fresh run takes the id Lasso chose.
     argv.push(...(request.resume ? ["--resume", request.runnerSessionId ?? request.sessionId] : ["--session-id", request.sessionId]));
     if (request.limits.remainingSpendUsd !== undefined) argv.push("--max-budget-usd", String(request.limits.remainingSpendUsd));
-    argv.push(...extraArgs(request.runnerOptions));
+    argv.push(...extra);
     return { argv, cwd: request.cwd, env };
   },
 

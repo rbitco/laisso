@@ -4,8 +4,8 @@ import path from "node:path";
 import { parseDocument, isMap, isScalar, isSeq, type Document } from "yaml";
 import { applyPatch } from "../yaml-edit.ts";
 import { isPlainObject } from "../fields.ts";
-import { checkActionsAny, parsePipeline, pipelineFile, listPipelines, PipelineError, NAME, type Pipeline } from "./load.ts";
-import type { ActionConfig } from "../server/config.ts";
+import { checkActionsAny, checkProfiles, parsePipeline, pipelineFile, listPipelines, PipelineError, NAME, type Pipeline } from "./load.ts";
+import { actionSets, type Config } from "../server/config.ts";
 
 /** A Pipeline file as read: the text as written, and what it parses to or why it does not. */
 export interface PipelineSource {
@@ -24,7 +24,7 @@ export interface PipelineSource {
  * fields. The result must still parse, or nothing is written.
  */
 export interface PipelinePatch {
-  runner?: string | null;
+  profile?: string | null;
   budget?: Record<string, unknown> | null;
   stages?: Record<string, Record<string, unknown>>;
   order?: Array<string | Record<string, unknown>>;
@@ -33,12 +33,12 @@ export interface PipelinePatch {
 /** The Pipeline files under the Lasso home, edited in place with their comments kept. */
 export class PipelineFiles {
   private dir: string;
-  private actions: () => Array<Record<string, ActionConfig>>;
+  private config: () => Config;
 
-  /** `actions` are the sets config gives repos (see actionSets), read at each save so an edit to config.yaml counts at once. */
-  constructor(dir: string, actions: () => Array<Record<string, ActionConfig>>) {
+  /** `config` is read at each save, so an edit to config.yaml's Actions or profiles counts at once. */
+  constructor(dir: string, config: () => Config) {
     this.dir = dir;
-    this.actions = actions;
+    this.config = config;
   }
 
   list(): PipelineSource[] {
@@ -59,7 +59,7 @@ export class PipelineFiles {
   write(name: string, text: unknown, opts: { create?: boolean } = {}): PipelineSource {
     checkName(name);
     if (typeof text !== "string") throw new PipelineError("text must be the whole Pipeline file");
-    checkActionsAny(parsePipeline(name, text), this.actions());
+    this.check(parsePipeline(name, text));
     const existing = pipelineFile(this.dir, name);
     if (existing && opts.create) throw new PipelineError(`Pipeline ${name} already exists`);
     const file = existing ?? path.join(this.dir, `${name}.yaml`);
@@ -86,9 +86,16 @@ export class PipelineFiles {
     }
     if (order !== undefined) reorderStages(doc, name, current.pipeline.stages.map((s) => s.name), order);
     const text = doc.toString();
-    checkActionsAny(parsePipeline(name, text), this.actions());
+    this.check(parsePipeline(name, text));
     replaceFile(current.file, text);
     return sourceOf(name, current.file, text);
+  }
+
+  /** What parsing cannot see: each action Stage fits the Actions some repo has (see actionSets), and each profile named exists. */
+  private check(pipeline: Pipeline): void {
+    const config = this.config();
+    checkActionsAny(pipeline, actionSets(config));
+    checkProfiles(pipeline, config.profiles);
   }
 
   remove(name: string): boolean {

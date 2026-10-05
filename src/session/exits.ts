@@ -1,7 +1,7 @@
 import type { Logger } from "../server/log.ts";
 import type { Tick } from "../server/tick.ts";
 import type { Tickets, TicketRow } from "../store/tickets.ts";
-import type { Sessions } from "../store/sessions.ts";
+import { runnerOf, type Sessions } from "../store/sessions.ts";
 import type { Pipeline, Stage } from "../pipeline/load.ts";
 import type { Budgets } from "../budget/budgets.ts";
 import { adapterFor } from "../runner/adapters.ts";
@@ -53,7 +53,7 @@ export class Exits {
       if (stage.kind === "action") await tick.run("start");
       else if (stage.human) {
         progress.endHumanSessions(cleared);
-        await terminal.open(cleared, stage);
+        await terminal.open(cleared, pipeline, stage);
       } else await runs.launch(cleared, pipeline, stage, "human");
     });
   }
@@ -67,12 +67,14 @@ export class Exits {
       const held = sessions.running(ticket.id).find((s) => s.mode === "terminal" && s.stage === stage.name && s.opened_at !== null);
       if (!held) throw new TriggerError(`no terminal Session of ${stage.name} to resume; Retry opens a fresh one`);
       this.affordable(ticket, pipeline, stage);
-      return this.cleared(ticket, "resume", (cleared) => terminal.open(cleared, stage));
+      return this.cleared(ticket, "resume", (cleared) => terminal.open(cleared, pipeline, stage));
     }
     const last = sessions.forTicket(ticket.id).find((s) => s.mode === "headless" && s.stage === stage.name) ?? null;
     if (!last) throw new TriggerError(`no Session of ${stage.name} to resume; Retry starts a fresh one`);
-    const adapter = adapterFor(stage.runner);
-    if (adapter.sessionIds === "runner" && !last.runner_session_id) throw new TriggerError(`${adapter.name} left no session id to resume on ${stage.name}; Retry starts afresh`);
+    // The Runner the last Session ran on is the one that would re-enter it.
+    const runner = runnerOf(last);
+    const adapter = runner ? adapterFor(runner) : null;
+    if (adapter?.sessionIds === "runner" && !last.runner_session_id) throw new TriggerError(`${adapter.name} left no session id to resume on ${stage.name}; Retry starts afresh`);
     this.affordable(ticket, pipeline, stage);
     return this.cleared(ticket, "resume", (cleared) => runs.launch(cleared, pipeline, stage, "human", last));
   }

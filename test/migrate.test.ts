@@ -3,9 +3,9 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { parse } from "yaml";
-import { startLasso, startLassoWithRepos, waitFor, type Lasso } from "./harness.ts";
+import { startLasso, startLassoWithRepos, waitFor, runnerFixture, type Lasso } from "./harness.ts";
 import type { TicketDetail, IntakeResult } from "../src/api/views.ts";
-import { migrateConfigText, migratePipelineText, JIRA_TRANSITION, GITHUB_TRANSITION } from "../src/server/migrate.ts";
+import { migrateConfigText, migratePipelineText, migrateConfigProfilesText, migratePipelineProfilesText, JIRA_TRANSITION, GITHUB_TRANSITION } from "../src/server/migrate.ts";
 import { parseConfig } from "../src/server/config.ts";
 import { parsePipeline } from "../src/pipeline/load.ts";
 
@@ -16,7 +16,6 @@ afterEach(async () => {
 });
 
 const OLD_PIPELINE = `# Keep this comment.
-runner: claude
 stages:
   - name: grill
     human: true
@@ -125,7 +124,7 @@ describe("the migration at startup", () => {
     expect(parsed.actions["tracker.transition"]!.run).toBe(JIRA_TRANSITION.run);
     expect(parsed.repos.web!.actions["tracker.transition"]!.run).toBe(GITHUB_TRANSITION.run);
     expect(await readFile(pipelineFile, "utf8")).toBe(migratePipelineText(OLD_PIPELINE));
-    expect(again.stdout()).toMatch(/migrated\.actions config=true pipelines=flow versions=1/);
+    expect(again.stdout()).toMatch(/migrated config=true pipelines=flow versions=1/);
 
     const detail = await detailOf(again, ticket.id);
     expect(detail.pipelineDrift).toBe("same");
@@ -144,13 +143,206 @@ describe("the migration at startup", () => {
     running.push(third);
     expect(await readFile(configFile, "utf8")).toBe(migratedConfig);
     expect(await readFile(pipelineFile, "utf8")).toBe(pipelineText);
-    expect(third.stdout()).not.toMatch(/migrated\.actions/);
+    expect(third.stdout()).not.toMatch(/migrated config=/);
+  });
+});
+
+// runner: and runnerOptions become Agent Profiles in config (ADR 0011, LASSO-66).
+const RUNNER_PIPELINE = `# Keep me.
+runner: codex # the team's Runner
+stages:
+  - name: grill
+    human: true
+    prompt: Talk.
+    runner: claude # the human's
+  - name: implement
+    prompt: Work.
+    runnerOptions: { args: [ --verbose ], skillsDir: /opt/skills }
+  - name: notes
+    prompt: Notes.
+    runner: pi
+    runnerOptions: {}
+`;
+
+describe("migratePipelineProfilesText", () => {
+  it("turns runner: into profile: and a Stage's runnerOptions into a <pipeline>-<stage> profile, keeping comments", () => {
+    const { text, profiles } = migratePipelineProfilesText("release", RUNNER_PIPELINE)!;
+    expect(text).toContain("# Keep me.\nprofile: codex # the team's Runner\n");
+    expect(text).toContain("    profile: claude # the human's\n");
+    expect(text).toContain("    prompt: Work.\n    profile: release-implement\n");
+    expect(text).toContain("    prompt: Notes.\n    profile: pi\n");
+    expect(text).not.toMatch(/runner|runnerOptions|skillsDir/);
+    const pipeline = parsePipeline("release", text);
+    expect(pipeline.profile).toBe("codex");
+    expect(pipeline.stages.map((s) => (s.kind === "runner" ? s.profile : null))).toEqual(["claude", "release-implement", "pi"]);
+    expect(profiles).toEqual({
+      codex: { runner: "codex" },
+      claude: { runner: "claude" },
+      pi: { runner: "pi" },
+      // The Stage inherited codex, so its own profile runs codex with its options.
+      "release-implement": { runner: "codex", args: ["--verbose"], skills_dir: "/opt/skills" },
+    });
+  });
+
+  it("changes nothing the second time, or in a Pipeline with no runner", () => {
+    expect(migratePipelineProfilesText("release", migratePipelineProfilesText("release", RUNNER_PIPELINE)!.text)).toBeNull();
+    expect(migratePipelineProfilesText("p", "stages:\n  - name: x\n    prompt: p\n")).toBeNull();
+  });
+
+  it("leaves a Pipeline naming a Runner Lasso does not have for its refusal to explain", () => {
+    expect(() => migratePipelineProfilesText("p", "runner: gemini\nstages:\n  - name: x\n    prompt: p\n")).toThrow(/gemini/);
+  });
+});
+
+describe("migrateConfigProfilesText", () => {
+  const CONFIG = `# My config.
+repos:
+  app: { tracker: jira, project: APP, path: /a }
+profiles:
+  codex: { runner: codex, args: [ --mine ] } # hand-made
+tick: 30 # fast
+`;
+  const named = migratePipelineProfilesText("release", RUNNER_PIPELINE)!.profiles;
+
+  it("adds a runner-only profile per Runner in use and each Stage's own, without touching one already there", () => {
+    const text = migrateConfigProfilesText(CONFIG, named)!;
+    expect(text).toContain("# My config.");
+    expect(text).toContain("tick: 30 # fast");
+    expect(text).toContain("  codex: { runner: codex, args: [ --mine ] } # hand-made\n");
+    // The file pads its inline collections, so the args written match.
+    expect(text).toContain("    args: [ --verbose ]\n");
+    const config = parseConfig(text, "config.yaml");
+    expect(config.profiles).toEqual({
+      codex: { runner: "codex", args: ["--mine"] },
+      claude: { runner: "claude" },
+      pi: { runner: "pi" },
+      "release-implement": { runner: "codex", args: ["--verbose"], skills_dir: "/opt/skills" },
+    });
+    expect(config.default_profile).toBe("claude");
+  });
+
+  it("gives a config with neither key the claude profile and default_profile, and changes nothing the second time", () => {
+    const text = migrateConfigProfilesText("tick: 30 # fast\n", {})!;
+    expect(text).toBe("tick: 30 # fast\nprofiles:\n  claude:\n    runner: claude\ndefault_profile: claude\n");
+    expect(migrateConfigProfilesText(text, {})).toBeNull();
+    expect(migrateConfigProfilesText(migrateConfigProfilesText(CONFIG, named)!, named)).toBeNull();
+  });
+
+  it("keeps a default_profile someone set, even to none", () => {
+    expect(migrateConfigProfilesText("profiles:\n  mine: { runner: pi }\ndefault_profile: mine\n", {})).toBeNull();
+    expect(migrateConfigProfilesText("profiles: {}\ndefault_profile: null\n", {})).toBeNull();
+  });
+});
+
+describe("the Agent Profile migration at startup", () => {
+  const NEW_PIPELINE = `profile: codex
+stages:
+  - name: implement
+    prompt: Work.
+    skills: [implement]
+    artifact: commits-on-branch
+    profile: release-implement
+  - name: notes
+    prompt: Notes.
+    artifact: file NOTES.md
+`;
+  const OLD = `# Before profiles.
+runner: codex
+stages:
+  - name: implement
+    prompt: Work.
+    skills: [implement]
+    artifact: commits-on-branch
+    runnerOptions: { args: [--verbose], skillsDir: /opt/skills }
+  - name: notes
+    prompt: Notes.
+    artifact: file NOTES.md
+`;
+  const profiles = { codex: { runner: "codex" as const }, "release-implement": { runner: "codex" as const, args: ["--verbose"], skills_dir: "/opt/skills" } };
+  const script = { stdout: runnerFixture("codex", "success.jsonl"), commands: [["git", "commit", "-q", "--allow-empty", "-m", "work"]], files: { "NOTES.md": "notes\n" } };
+  const intake = (lasso: Lasso) => lasso.api<IntakeResult>("/api/tickets", { method: "POST", body: JSON.stringify({ input: "Add dark mode", repo: "app", pipeline: "release" }) });
+  /** A launch with one Ticket's names taken out, so two Tickets' launches compare. */
+  const shape = (argv: string[], t: IntakeResult) => argv.map((a) => a.replaceAll(t.worktree, "<worktree>").replaceAll(t.branch, "<branch>").replaceAll(t.id, "<id>"));
+
+  it("rewrites config, Pipeline files and pinned Versions from runner:, and a live Ticket launches as it would have", async () => {
+    const started = await startLassoWithRepos({ app: { pipeline: "release" } }, { profiles }, { release: NEW_PIPELINE });
+    running.push(started.lasso);
+    const { lasso } = started;
+    const before = await intake(lasso);
+    await lasso.runner.script(script);
+    await checkNow(lasso);
+    await waitFor(async () => ((await detailOf(lasso, before.id)).state === "done" ? true : null), "the first Ticket to be done");
+    // The second Ticket waits, pinned to the same Version, for after the restart.
+    const live = await intake(lasso);
+    expect(live.pipelineVersion).toBe(before.pipelineVersion);
+    expect(await lasso.stop()).toBe(0);
+
+    // Put the home back as a Lasso from before ADR 0011 left it.
+    const configFile = path.join(lasso.home, "config.yaml");
+    const config = parse(await readFile(configFile, "utf8"));
+    delete config.profiles;
+    delete config.default_profile;
+    await writeFile(configFile, "# Hand-written.\n" + JSON.stringify(config, null, 2) + "\n");
+    const pipelineFile = path.join(lasso.home, "pipelines", "release.yaml");
+    await writeFile(pipelineFile, OLD);
+    const db = new DatabaseSync(path.join(lasso.home, "lasso.db"));
+    const rows = db.prepare("SELECT pipeline, version, definition FROM pipeline_versions").all() as Array<{ pipeline: string; version: number; definition: string }>;
+    for (const row of rows) {
+      const { name, profile, budget, stages } = JSON.parse(row.definition);
+      const runner = profile ?? "claude";
+      const old = {
+        name,
+        runner,
+        budget,
+        stages: stages.map((s: Record<string, unknown>) => {
+          if (s.kind !== "runner") return s;
+          const { kind, name: stage, prompt, skills, profile: own, human, advance, artifact, repeat, budget: b } = s;
+          const options = own === "release-implement" ? { args: ["--verbose"], skillsDir: "/opt/skills" } : {};
+          return { kind, name: stage, prompt, skills, runner, human, advance, artifact, repeat, budget: b, runnerOptions: options, inheritsRunner: own === null };
+        }),
+      };
+      db.prepare("UPDATE pipeline_versions SET definition = ? WHERE pipeline = ? AND version = ?").run(JSON.stringify(old), row.pipeline, row.version);
+    }
+    db.prepare("UPDATE sessions SET profile = NULL").run();
+    db.close();
+
+    const again = await startLasso({ home: lasso.home, pathDir: lasso.pathDir, port: lasso.port });
+    running.push(again);
+    expect(again.stdout()).toMatch(/migrated config=true pipelines=release versions=1/);
+    const migratedConfig = await readFile(configFile, "utf8");
+    expect(migratedConfig).toContain("# Hand-written.");
+    const parsed = parseConfig(migratedConfig, configFile);
+    expect(parsed.profiles).toEqual({ claude: { runner: "claude" }, codex: { runner: "codex" }, "release-implement": { runner: "codex", args: ["--verbose"], skills_dir: "/opt/skills" } });
+    expect(parsed.default_profile).toBe("claude");
+    const migratedPipeline = await readFile(pipelineFile, "utf8");
+    expect(migratedPipeline).toContain("# Before profiles.\nprofile: codex\n");
+    expect(parsePipeline("release", migratedPipeline)).toEqual(parsePipeline("release", NEW_PIPELINE));
+
+    const detail = await detailOf(again, live.id);
+    expect(detail.pipelineDrift).toBe("same");
+    // A Session from before profiles has no profile record to show.
+    expect((await detailOf(again, before.id)).sessions.every((s) => s.profile === null)).toBe(true);
+    await checkNow(again);
+    await waitFor(async () => ((await detailOf(again, live.id)).state === "done" ? true : null), "the live Ticket to be done");
+    const calls = await again.runner.calls();
+    expect(calls).toHaveLength(4);
+    expect(shape(calls[2]!.argv, live)).toEqual(shape(calls[0]!.argv, before));
+    expect(shape(calls[3]!.argv, live)).toEqual(shape(calls[1]!.argv, before));
+    expect(calls[2]!.argv).toContain("--verbose");
+    expect(calls[2]!.argv.at(-1)!.startsWith("[$implement](/opt/skills/implement/SKILL.md)")).toBe(true);
+
+    // A second start finds nothing to do.
+    expect(await again.stop()).toBe(0);
+    const third = await startLasso({ home: lasso.home, pathDir: lasso.pathDir, port: lasso.port });
+    running.push(third);
+    expect(await readFile(configFile, "utf8")).toBe(migratedConfig);
+    expect(await readFile(pipelineFile, "utf8")).toBe(migratedPipeline);
+    expect(third.stdout()).not.toMatch(/migrated config=/);
   });
 });
 
 describe("tracker.transition on a GitHub repo", () => {
-  const GH = `runner: claude
-stages:
+  const GH = `stages:
   - name: implement
     human: true
     prompt: Work.

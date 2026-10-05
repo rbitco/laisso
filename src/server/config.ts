@@ -3,6 +3,7 @@ import { parse, parseDocument } from "yaml";
 import { applyPatch } from "../yaml-edit.ts";
 import type { LassoHome } from "./home.ts";
 import { count, duration, flag, isPlainObject, mapping, money, positive, text, type Fail } from "../fields.ts";
+import { RUNNERS, type Pipeline, type RunnerName, type RunnerStage } from "../pipeline/load.ts";
 
 export interface RepoConfig {
   tracker: "jira" | "github";
@@ -35,9 +36,26 @@ export interface ActionConfig {
   timeout: string;
 }
 
+/**
+ * An Agent Profile (ADR 0011): the Runner a Stage runs under, with the model
+ * and extra args it is given. Fields left out keep the Runner's own default.
+ */
+export interface ProfileConfig {
+  runner: RunnerName;
+  /** Free text, passed to the Runner's model flag as written. */
+  model?: string;
+  /** Appended after every flag Lasso writes, so a repeated flag wins where the Runner lets the last one win. */
+  args?: string[];
+  /** Codex only: where the Stage's skills live; ~/.agents/skills when unset. */
+  skills_dir?: string;
+}
+
 export interface Config {
   repos: Record<string, RepoConfig>;
   actions: Record<string, ActionConfig>;
+  profiles: Record<string, ProfileConfig>;
+  /** The profile a Stage runs under when neither it nor its Pipeline names one. */
+  default_profile: string | null;
   budget: BudgetDefaults;
   tick: number;
   concurrency: number;
@@ -50,6 +68,8 @@ export interface Config {
 export const DEFAULT_CONFIG: Config = {
   repos: {},
   actions: {},
+  profiles: { claude: { runner: "claude" } },
+  default_profile: "claude",
   budget: { rounds: 5, attempts: 2, wallTime: "30m", spend: 25 },
   tick: 60,
   concurrency: 3,
@@ -76,6 +96,18 @@ actions: {}
 #    params: [channel]        # a Stage supplies these under with:, as LASSO_CHANNEL
 #    timeout: 5m              # killed and Flagged after this long
 #    run: echo "$LASSO_REFERENCE is at $LASSO_STAGE" >> ~/lasso-$LASSO_CHANNEL.log
+
+# Agent Profiles: the Runner a Stage runs under, and how. A Stage names one
+# with profile:, or inherits its Pipeline's, or default_profile below.
+profiles:
+  claude:
+    runner: claude
+#  codex-fast:
+#    runner: codex            # claude | codex | pi
+#    model: gpt-5-codex       # passed to the Runner's model flag; unset keeps its default
+#    args: [-c, foo=bar]      # extra flags, after the ones Lasso writes
+#    skills_dir: /opt/skills  # Codex only: where skills live; default ~/.agents/skills
+default_profile: claude
 
 # Global Budget defaults; a Pipeline or a Ticket may override each one.
 budget:
@@ -142,6 +174,8 @@ export function parseConfig(text: string, file: string, overrides: { port?: numb
   const config: Config = {
     repos: normaliseRepos(mapping(raw.repos, at("repos"), fail), at("repos")),
     actions: parseActions(mapping(raw.actions, at("actions"), fail), at("actions")),
+    profiles: raw.profiles === undefined ? structuredClone(D.profiles) : parseProfiles(mapping(raw.profiles, at("profiles"), fail), at("profiles")),
+    default_profile: raw.default_profile === undefined ? D.default_profile : raw.default_profile === null ? null : profileName(raw.default_profile, at("default_profile")),
     budget: {
       rounds: count(budget.rounds, at("budget.rounds"), fail, D.budget.rounds),
       attempts: count(budget.attempts, at("budget.attempts"), fail, D.budget.attempts),
@@ -190,7 +224,7 @@ export function patchConfigText(text: string, file: string, patch: unknown): { t
   if (!isPlainObject(patch)) throw new ConfigError("patch must be a mapping");
   if (Object.keys(patch).length === 0) throw new ConfigError("nothing to change");
   for (const [key, value] of Object.entries(patch)) {
-    if (key === "repos" || key === "actions") throw new ConfigError(`${key} are edited in config.yaml by hand`);
+    if (key === "repos" || key === "actions" || key === "profiles" || key === "default_profile") throw new ConfigError(`${key} ${key === "default_profile" ? "is" : "are"} edited in config.yaml by hand`);
     if (!(key in EDITABLE)) throw new ConfigError(`unknown field ${key}`);
     const fields = EDITABLE[key];
     if (fields && value !== null) {
@@ -212,6 +246,9 @@ export function applyLive(live: Config, fresh: Config): void {
   Object.assign(live.repos, fresh.repos);
   for (const key of Object.keys(live.actions)) delete live.actions[key];
   Object.assign(live.actions, fresh.actions);
+  for (const key of Object.keys(live.profiles)) delete live.profiles[key];
+  Object.assign(live.profiles, fresh.profiles);
+  live.default_profile = fresh.default_profile;
   live.concurrency = fresh.concurrency;
   live.retention = fresh.retention;
   live.branch_prefix = fresh.branch_prefix;
@@ -252,4 +289,63 @@ function parseActions(value: Record<string, unknown>, where: string): Record<str
     actions[name] = { run: action.run, params: params as string[], timeout: duration(action.timeout, `${at}.timeout`, fail, DEFAULT_ACTION_TIMEOUT) };
   }
   return actions;
+}
+
+/** What an Agent Profile may be called. */
+export const PROFILE_NAME = /^[a-z0-9][a-z0-9._-]*$/;
+const PROFILE_FIELDS = new Set(["runner", "model", "args", "skills_dir"]);
+
+function profileName(value: unknown, at: string): string {
+  if (typeof value !== "string" || !PROFILE_NAME.test(value)) throw new ConfigError(`${at}: a profile name is lowercase letters, digits, dots, hyphens, and underscores, not ${String(value)}`);
+  return value;
+}
+
+function parseProfiles(value: Record<string, unknown>, where: string): Record<string, ProfileConfig> {
+  const profiles: Record<string, ProfileConfig> = {};
+  for (const [name, entry] of Object.entries(value)) {
+    const at = `${where}.${name}`;
+    profileName(name, at);
+    const profile = mapping(entry, at, fail);
+    for (const key of Object.keys(profile)) if (!PROFILE_FIELDS.has(key)) throw new ConfigError(`${at}: unknown field ${key}`);
+    if (!(RUNNERS as readonly unknown[]).includes(profile.runner)) throw new ConfigError(`${at}: runner must be one of ${RUNNERS.join(", ")}, not ${String(profile.runner ?? "unset")}`);
+    const parsed: ProfileConfig = { runner: profile.runner as RunnerName };
+    if (profile.model !== undefined) {
+      if (typeof profile.model !== "string" || !profile.model.trim()) throw new ConfigError(`${at}.model must be a model name`);
+      parsed.model = profile.model;
+    }
+    if (profile.args !== undefined) {
+      if (!Array.isArray(profile.args) || !profile.args.every((a) => typeof a === "string" || typeof a === "number")) throw new ConfigError(`${at}.args must be a list of arguments`);
+      parsed.args = profile.args.map(String);
+    }
+    if (profile.skills_dir !== undefined) {
+      if (typeof profile.skills_dir !== "string" || !profile.skills_dir.trim()) throw new ConfigError(`${at}.skills_dir must be a directory`);
+      parsed.skills_dir = profile.skills_dir;
+    }
+    profiles[name] = parsed;
+  }
+  return profiles;
+}
+
+/** Where a Session's profile was named: the Stage, its Pipeline, or config's default_profile. */
+export type ProfileSource = "stage" | "pipeline" | "default";
+
+/** The Agent Profile a Stage runs under, as config has it when the Session starts. */
+export interface ResolvedProfile {
+  name: string;
+  from: ProfileSource;
+  profile: ProfileConfig;
+}
+
+/**
+ * A Stage's profile: its own, else its Pipeline's, else default_profile
+ * (ADR 0011). Profiles are live config, so this is asked at each Session
+ * start; a name config no longer has is a problem, never a fallback.
+ */
+export function resolveProfile(config: Pick<Config, "profiles" | "default_profile">, pipeline: Pick<Pipeline, "name" | "profile">, stage: Pick<RunnerStage, "name" | "profile">): ResolvedProfile | { problem: string } {
+  const [name, from] = stage.profile ? [stage.profile, "stage" as const] : pipeline.profile ? [pipeline.profile, "pipeline" as const] : [config.default_profile, "default" as const];
+  if (name === null) return { problem: `Stage ${stage.name} names no profile, nor does Pipeline ${pipeline.name}, and config.yaml has no default_profile` };
+  const profile = config.profiles[name];
+  if (profile) return { name, from, profile };
+  const by = from === "stage" ? `Stage ${stage.name}` : from === "pipeline" ? `Pipeline ${pipeline.name}` : "default_profile";
+  return { problem: `no profile named ${name} in config.yaml, which ${by} names` };
 }

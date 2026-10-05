@@ -13,8 +13,10 @@ afterEach(async () => {
   while (running.length) await running.pop()!.destroy();
 });
 
+const PROFILES = { claude: { runner: "claude" as const }, codex: { runner: "codex" as const }, pi: { runner: "pi" as const } };
+
 const WORK = `# The work Pipeline. Keep this comment.
-runner: claude   # the default Runner
+profile: claude   # the default profile
 
 stages:
   - name: implement    # first
@@ -28,7 +30,7 @@ stages:
 `;
 
 async function lassoWith(pipelines: Record<string, string> = { work: WORK }) {
-  const started = await startLassoWithRepos({ app: { pipeline: "work" } }, {}, pipelines);
+  const started = await startLassoWithRepos({ app: { pipeline: "work" } }, { profiles: PROFILES }, pipelines);
   running.push(started.lasso);
   return started.lasso;
 }
@@ -51,8 +53,8 @@ describe("Pipeline files", () => {
     const file = await lasso.api<PipelineFile>("/api/pipelines/work");
     expect(file.text).toBe(WORK);
     expect(file.file).toBe(path.join(lasso.home, "pipelines", "work.yaml"));
-    // A Stage without a runner of its own shows null, so the editor can offer the Pipeline's as the default.
-    expect(file.pipeline).toMatchObject({ runner: "claude", budget: {}, stages: [{ name: "implement", prompt: "Do the work.", artifact: "commits-on-branch", runner: null, budget: { attempts: 1 } }, { name: "notes", runner: null }] });
+    // A Stage without a profile of its own shows null, so the editor can offer the Pipeline's as the default.
+    expect(file.pipeline).toMatchObject({ profile: "claude", budget: {}, stages: [{ name: "implement", prompt: "Do the work.", artifact: "commits-on-branch", profile: null, budget: { attempts: 1 } }, { name: "notes", profile: null }] });
 
     const missing = await lasso.api<Response>("/api/pipelines/ghost", { raw: true });
     expect(missing.status).toBe(404);
@@ -67,14 +69,14 @@ describe("Pipeline files", () => {
     const lasso = await lassoWith();
     const after = await lasso.api<PipelineFile>("/api/pipelines/work", {
       method: "PATCH",
-      body: json({ runner: "codex", budget: { spend: 10 }, stages: { implement: { prompt: "Do it well.\nThen stop.\n", budget: { attempts: null, wallTime: "5m" }, human: true }, notes: { artifact: null, runner: "pi" } } }),
+      body: json({ profile: "codex", budget: { spend: 10 }, stages: { implement: { prompt: "Do it well.\nThen stop.\n", budget: { attempts: null, wallTime: "5m" }, human: true }, notes: { artifact: null, profile: "pi" } } }),
     });
-    expect(after.pipeline).toMatchObject({ runner: "codex", budget: { spend: 10 }, stages: [{ name: "implement", prompt: "Do it well.\nThen stop.\n", human: true, budget: { wallTime: "5m" }, runner: null }, { name: "notes", artifact: null, runner: "pi" }] });
+    expect(after.pipeline).toMatchObject({ profile: "codex", budget: { spend: 10 }, stages: [{ name: "implement", prompt: "Do it well.\nThen stop.\n", human: true, budget: { wallTime: "5m" }, profile: null }, { name: "notes", artifact: null, profile: "pi" }] });
     expect(after.pipeline!.stages[0]).toMatchObject({ kind: "runner", budget: expect.not.objectContaining({ attempts: expect.anything() }) });
 
     const text = await pipelineText(lasso, "work");
     expect(text).toContain("# The work Pipeline. Keep this comment.");
-    expect(text).toContain("runner: codex # the default Runner");
+    expect(text).toContain("profile: codex # the default profile");
     expect(text).toContain("- name: implement # first");
     expect(text).not.toContain("attempts");
     expect(text).not.toContain("file NOTES.md");
@@ -96,7 +98,7 @@ describe("Pipeline files", () => {
     });
     expect(after.pipeline!.stages.map((s) => s.name)).toEqual(["build", "ship"]);
     expect(after.text).toBe(`# The work Pipeline. Keep this comment.
-runner: claude # the default Runner
+profile: claude # the default profile
 
 stages:
   - name: build # first
@@ -121,7 +123,7 @@ stages:
     const after = await lasso.api<PipelineFile>("/api/pipelines/work", { method: "PATCH", body: json({ order: ["notes", "implement"], stages: { notes: { prompt: "Notes first." } } }) });
     expect(after.pipeline!.stages.map((s) => s.name)).toEqual(["notes", "implement"]);
     expect(after.text).toBe(`# The work Pipeline. Keep this comment.
-runner: claude # the default Runner
+profile: claude # the default profile
 
 stages:
   - name: notes
@@ -161,7 +163,7 @@ stages:
     const after = await lasso.api<PipelineFile>("/api/pipelines/work", { method: "PATCH", body: json({ order: ["implement", review, "notes"], stages: { implement: { name: "build" } } }) });
     expect(after.pipeline!.stages.map((s) => s.name)).toEqual(["build", "review", "notes"]);
     expect(after.text).toBe(`# The work Pipeline. Keep this comment.
-runner: claude # the default Runner
+profile: claude # the default profile
 
 stages:
   - name: build # first
@@ -225,15 +227,18 @@ stages:
     await expect(lasso.api("/api/pipelines/work", { method: "PATCH", body: json({ stages: { ghost: { prompt: "x" } } }) })).rejects.toThrow(/Pipeline work has no Stage named ghost/);
     await expect(lasso.api("/api/pipelines/work", { method: "PATCH", body: json({ stages: { implement: { name: "notes" } } }) })).rejects.toThrow(/has two Stages named notes/);
     await expect(lasso.api("/api/pipelines/work", { method: "PATCH", body: json({ colour: "red" }) })).rejects.toThrow(/unknown field colour/);
-    await expect(lasso.api("/api/pipelines/work", { method: "PATCH", body: json("runner: pi") })).rejects.toThrow(/patch must be a mapping/);
+    await expect(lasso.api("/api/pipelines/work", { method: "PATCH", body: json("profile: pi") })).rejects.toThrow(/patch must be a mapping/);
+    await expect(lasso.api("/api/pipelines/work", { method: "PATCH", body: json({ stages: { notes: { profile: "opus" } } }) })).rejects.toThrow(/Pipeline work Stage notes: no profile named opus in config\.yaml/);
+    await expect(lasso.api("/api/pipelines/work", { method: "PATCH", body: json({ runner: "codex" }) })).rejects.toThrow(/runner is now an Agent Profile in config\.yaml; write profile: codex/);
+    await expect(lasso.api("/api/pipelines/work", { method: "PUT", body: json({ text: "profile: opus\nstages:\n  - name: x\n    prompt: p\n" }) })).rejects.toThrow(/Pipeline work: no profile named opus in config\.yaml/);
     expect(await pipelineText(lasso, "work")).toBe(WORK);
   });
 
   it("creates a Pipeline from text, replaces it, refuses bad text or a bad name, and deletes it", async () => {
     const lasso = await lassoWith();
-    const text = "runner: pi\nstages:\n  - name: only\n    prompt: One.\n";
+    const text = "profile: pi\nstages:\n  - name: only\n    prompt: One.\n";
     const created = await lasso.api<PipelineFile>("/api/pipelines/spike", { method: "PUT", body: json({ text }) });
-    expect(created).toMatchObject({ name: "spike", text, pipeline: { runner: "pi", stages: [{ name: "only" }] } });
+    expect(created).toMatchObject({ name: "spike", text, pipeline: { profile: "pi", stages: [{ name: "only" }] } });
     expect(await pipelineText(lasso, "spike")).toBe(text);
     expect((await lasso.api<PipelineListing[]>("/api/pipelines")).map((p) => p.name)).toEqual(["default", "spike", "work"]);
 
@@ -265,7 +270,7 @@ stages:
   });
 
   it("lists a Pipeline whose file is broken with the problem, and intake refuses it", async () => {
-    const lasso = await lassoWith({ work: WORK, broken: "runner: claude\nstages:\n  - name: x\n    artifact: pr-exists\n" });
+    const lasso = await lassoWith({ work: WORK, broken: "stages:\n  - name: x\n    artifact: pr-exists\n" });
     const listing = await lasso.api<PipelineListing[]>("/api/pipelines");
     expect(listing.find((p) => p.name === "broken")).toMatchObject({ stages: [], problem: expect.stringMatching(/needs a prompt, skills, or an action/) });
     await expect(lasso.api("/api/tickets", { method: "POST", body: json({ input: "x", repo: "app", pipeline: "broken" }) })).rejects.toThrow(/needs a prompt, skills, or an action/);
@@ -391,7 +396,7 @@ describe("Version drift and read-only Versions", () => {
 
     await lasso.api("/api/pipelines/work", { method: "DELETE" });
     const v1 = await lasso.api<PipelineVersionView>("/api/pipelines/work/versions/1");
-    expect(v1).toMatchObject({ name: "work", version: 1, deleted: true, pipeline: { runner: "claude", stages: [{ name: "implement", prompt: "Do the work.", runner: null, budget: { attempts: 1 } }, { name: "notes" }] } });
+    expect(v1).toMatchObject({ name: "work", version: 1, deleted: true, pipeline: { profile: "claude", stages: [{ name: "implement", prompt: "Do the work.", profile: null, budget: { attempts: 1 } }, { name: "notes" }] } });
     expect((await lasso.api<PipelineVersionView>("/api/pipelines/work/versions/2")).pipeline.stages[0]).toMatchObject({ prompt: "Do it again." });
     expect((await lasso.api<Response>("/api/pipelines/work/versions/3", { raw: true })).status).toBe(404);
     expect((await lasso.api<Response>("/api/pipelines/work/versions/x", { raw: true })).status).toBe(404);
@@ -448,8 +453,7 @@ describe("config.yaml", () => {
 });
 
 describe("config Actions in the Pipeline editor", () => {
-  const NOTIFY = `runner: claude
-stages:
+  const NOTIFY = `stages:
   - name: implement
     prompt: Do the work.
   - name: tell

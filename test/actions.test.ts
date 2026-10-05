@@ -13,8 +13,7 @@ afterEach(async () => {
 });
 
 // A command Stage, then a human Stage the Ticket rests at once the Action succeeds.
-const NOTIFY = `runner: claude
-stages:
+const NOTIFY = `stages:
   - action: notify
     name: notify
     with: { channel: ops }

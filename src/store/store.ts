@@ -154,4 +154,8 @@ const MIGRATIONS: Array<(db: DatabaseSync) => void> = [
       ALTER TABLE tickets ADD COLUMN pipeline_version INTEGER;
     `);
   },
+  // Agent Profiles (LASSO-66, ADR 0011): the profile a Session ran under and its resolved settings, as JSON.
+  (db) => {
+    db.exec(`ALTER TABLE sessions ADD COLUMN profile TEXT;`);
+  },
 ];

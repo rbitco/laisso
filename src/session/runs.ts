@@ -2,12 +2,12 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { closeSync, mkdirSync, openSync, readFileSync, readSync, statSync, writeSync } from "node:fs";
 import path from "node:path";
-import type { Config } from "../server/config.ts";
+import { currentConfig, resolveProfile, type Config, type ResolvedProfile } from "../server/config.ts";
 import type { LassoHome } from "../server/home.ts";
 import type { Logger } from "../server/log.ts";
 import type { TickChange } from "../server/tick.ts";
 import type { Tickets, TicketRow } from "../store/tickets.ts";
-import type { Sessions, SessionRow, SessionEnd, EndedReason } from "../store/sessions.ts";
+import { sessionProfile, type Sessions, type SessionRow, type SessionEnd, type EndedReason } from "../store/sessions.ts";
 import type { Pipeline, RunnerStage } from "../pipeline/load.ts";
 import type { Progress } from "./progress.ts";
 import { adapterFor } from "../runner/adapters.ts";
@@ -111,8 +111,14 @@ export class Runs {
       await this.deps.progress.flag(ticket.id, refusal.reason, refusal.detail);
       return `Flagged: ${refusal.detail}`;
     }
+    // Profiles are live config (ADR 0011): read now, so an edit reaches this Session; a deleted one Flags rather than falls back.
+    const profile = resolveProfile(currentConfig(this.deps.home, this.deps.config), pipeline, stage);
+    if ("problem" in profile) {
+      await this.deps.progress.flag(ticket.id, "profile.missing", profile.problem);
+      return `Flagged: ${profile.problem}`;
+    }
     try {
-      this.start(ticket, pipeline, stage, startedBy, resumeFrom, plan);
+      this.start(ticket, pipeline, stage, profile, startedBy, resumeFrom, plan);
       return plan ? `started ${stage.name} Round ${plan.round}` : `started ${stage.name}`;
     } catch (error) {
       // The Runner never started, so there is no Session to blame: runner.unavailable, not outcome.*.
@@ -127,14 +133,14 @@ export class Runs {
    * earlier Session where the Runner allows (the Resume exit). Synchronous on
    * purpose: the row and the process both exist when it returns.
    */
-  start(ticket: TicketRow, pipeline: Pipeline, stage: RunnerStage, startedBy: "auto" | "human", resumeFrom: SessionRow | null = null, plan: RoundPlan | null = null): SessionRow {
+  start(ticket: TicketRow, pipeline: Pipeline, stage: RunnerStage, profile: ResolvedProfile, startedBy: "auto" | "human", resumeFrom: SessionRow | null = null, plan: RoundPlan | null = null): SessionRow {
     const { home, sessions, log, budgets, review } = this.deps;
     const running = sessions.running(ticket.id).find((r) => r.mode === "headless");
     if (running) throw new RunError(`${running.stage} is already running on Ticket ${ticket.reference ?? ticket.id}`);
     if (stage.repeat && !plan) plan = review.plan(ticket, stage);
     if (stage.repeat && !plan) throw new RunError(`${stage.name} has no Feedback to address`);
     this.deps.tickets.setRunnableSince(ticket.id, null);
-    const adapter = adapterFor(stage.runner);
+    const adapter = adapterFor(profile.profile.runner);
     const sessionId = randomUUID();
     const sessionsDir = path.join(home.ticketsDir, ticket.id, "sessions");
     mkdirSync(sessionsDir, { recursive: true });
@@ -147,7 +153,7 @@ export class Runs {
     const resumed = resumeFrom ? (resumeFrom.runner_session_id ?? resumeFrom.id) : null;
     const resume = resumed ? { resume: true, runnerSessionId: resumed } : {};
     const feedback = plan ? { feedback: { round: plan.round, pr: plan.pr, items: plan.items, marker: plan.marker } } : {};
-    const request: RunRequest = { ...requestFor(ticket, stage), mode: "headless", sessionId, ...resume, limits: { wallTimeMs, remainingSpendUsd }, ...feedback };
+    const request: RunRequest = { ...requestFor(ticket, stage, profile.profile), mode: "headless", sessionId, ...resume, limits: { wallTimeMs, remainingSpendUsd }, ...feedback };
     const command = adapter.command(request);
 
     // The stdout file is opened before the row exists, so a row never outlives a process that was never spawned.
@@ -162,6 +168,7 @@ export class Runs {
       stdout_path: stdoutPath,
       limits_honoured: JSON.stringify(adapter.honours.filter((limit) => request.limits[limit] !== undefined)),
       round: plan?.round ?? null,
+      profile: sessionProfile(profile.name, profile.profile),
     });
     if (plan) review.opened(ticket, sessionId, plan);
     if (resumed && adapter.sessionIds === "lasso") sessions.setRunnerSession(sessionId, resumed);
@@ -198,7 +205,7 @@ export class Runs {
     live.wallTimer = setTimeout(() => void this.kill(sessionId, "wall_time"), wallTimeMs);
     live.wallTimer.unref();
 
-    log.info("session.started", { session: sessionId, ticket: ticket.id, stage: stage.name, round: plan?.round ?? null, pid: child.pid, argv0: command.argv[0], resumed: resumeFrom?.id ?? null });
+    log.info("session.started", { session: sessionId, ticket: ticket.id, stage: stage.name, round: plan?.round ?? null, pid: child.pid, argv0: command.argv[0], resumed: resumeFrom?.id ?? null, profile: profile.name });
     return row;
   }
 
@@ -290,7 +297,7 @@ export class Runs {
   }
 
   private async end(sessionId: string, live: Live): Promise<void> {
-    const adapter = adapterFor(live.stage.runner);
+    const adapter = adapterFor(live.request.profile.runner);
     const stdout = live.spawnError ? "" : readFileSync(live.stdoutPath, "utf8");
     const parsed = adapter.parse(stdout, live.request);
     // A signal death, whoever sent it (exit 143 is SIGTERM under a shell), is an interruption whatever stdout says.

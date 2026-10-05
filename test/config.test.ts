@@ -3,7 +3,7 @@ import { parse } from "yaml";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { DEFAULT_CONFIG, DEFAULT_CONFIG_YAML, loadConfig, ConfigError, actionsFor, actionSets } from "../src/server/config.ts";
+import { DEFAULT_CONFIG, DEFAULT_CONFIG_YAML, loadConfig, ConfigError, actionsFor, actionSets, resolveProfile } from "../src/server/config.ts";
 import { resolveHome } from "../src/server/home.ts";
 
 describe("the default config.yaml", () => {
@@ -53,5 +53,42 @@ describe("loadConfig", () => {
     expect(actionsFor(config, "web")).toEqual(config.actions);
     expect(actionSets(config)).toEqual([config.actions, actionsFor(config, "app"), actionsFor(config, "web")]);
     expect(() => loadConfig(homeWith("repos:\n  app:\n    actions:\n      notify: {}\n"))).toThrow(/repos\.app\.actions\.notify: run must be a command/);
+  });
+
+  it("reads Agent Profiles and default_profile, defaulting to a runner-only claude, and refuses a malformed one", () => {
+    expect(loadConfig(homeWith(""))).toMatchObject({ profiles: { claude: { runner: "claude" } }, default_profile: "claude" });
+    expect(loadConfig(homeWith("profiles:\n  codex-fast: { runner: codex, model: gpt-5-codex, args: [-c, 1], skills_dir: /opt/skills }\ndefault_profile: codex-fast\n"))).toMatchObject({
+      profiles: { "codex-fast": { runner: "codex", model: "gpt-5-codex", args: ["-c", "1"], skills_dir: "/opt/skills" } },
+      default_profile: "codex-fast",
+    });
+    expect(loadConfig(homeWith("default_profile: null\n")).default_profile).toBeNull();
+    const bad = (yaml: string) => () => loadConfig(homeWith(`profiles:\n${yaml}`));
+    expect(bad("  fast: { model: x }\n")).toThrow(/profiles\.fast: runner must be one of claude, codex, pi, not unset/);
+    expect(bad("  fast: { runner: gemini }\n")).toThrow(/runner must be one of claude, codex, pi, not gemini/);
+    expect(bad("  Fast: { runner: pi }\n")).toThrow(/profiles\.Fast: a profile name is lowercase/);
+    expect(bad("  fast: { runner: pi, model: \"\" }\n")).toThrow(/profiles\.fast\.model must be a model name/);
+    expect(bad("  fast: { runner: pi, args: --verbose }\n")).toThrow(/profiles\.fast\.args must be a list of arguments/);
+    expect(bad("  fast: { runner: codex, skills_dir: 3 }\n")).toThrow(/profiles\.fast\.skills_dir must be a directory/);
+    expect(bad("  fast: { runner: claude, effort: high }\n")).toThrow(/profiles\.fast: unknown field effort/);
+    expect(() => loadConfig(homeWith("default_profile: Big\n"))).toThrow(/default_profile: a profile name is lowercase/);
+  });
+});
+
+describe("resolveProfile", () => {
+  const config = { profiles: { claude: { runner: "claude" as const }, fast: { runner: "pi" as const, model: "m" } }, default_profile: "claude" };
+  const pipeline = (profile: string | null) => ({ name: "p", profile });
+  const stage = (profile: string | null) => ({ name: "s", profile });
+
+  it("takes the Stage's profile, else the Pipeline's, else default_profile, saying which", () => {
+    expect(resolveProfile(config, pipeline("claude"), stage("fast"))).toEqual({ name: "fast", from: "stage", profile: { runner: "pi", model: "m" } });
+    expect(resolveProfile(config, pipeline("fast"), stage(null))).toEqual({ name: "fast", from: "pipeline", profile: { runner: "pi", model: "m" } });
+    expect(resolveProfile(config, pipeline(null), stage(null))).toEqual({ name: "claude", from: "default", profile: { runner: "claude" } });
+  });
+
+  it("names a missing profile and where it was named, and never falls back", () => {
+    expect(resolveProfile(config, pipeline("fast"), stage("gone"))).toEqual({ problem: "no profile named gone in config.yaml, which Stage s names" });
+    expect(resolveProfile(config, pipeline("gone"), stage(null))).toEqual({ problem: "no profile named gone in config.yaml, which Pipeline p names" });
+    expect(resolveProfile({ ...config, default_profile: "gone" }, pipeline(null), stage(null))).toEqual({ problem: "no profile named gone in config.yaml, which default_profile names" });
+    expect(resolveProfile({ ...config, default_profile: null }, pipeline(null), stage(null))).toEqual({ problem: "Stage s names no profile, nor does Pipeline p, and config.yaml has no default_profile" });
   });
 });

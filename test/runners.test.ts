@@ -4,7 +4,9 @@ import { readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
-import { startLassoWithRepos, waitFor, claudeFixture, runnerFixture, type Lasso } from "./harness.ts";
+import { readFile, writeFile } from "node:fs/promises";
+import { startLassoWithRepos, waitFor, claudeFixture, runnerFixture, type Lasso, type LassoConfig } from "./harness.ts";
+import type { ProfileConfig } from "../src/server/config.ts";
 import type { TicketDetail, IntakeResult } from "../src/api/views.ts";
 import type { TickChange } from "../src/server/tick.ts";
 
@@ -18,7 +20,7 @@ afterEach(async () => {
   while (dirs.length) await rm(dirs.pop()!, { recursive: true, force: true });
 });
 
-const HEADLESS = (runner: string) => `runner: ${runner}
+const HEADLESS = (profile: string) => `profile: ${profile}
 stages:
   - name: implement
     prompt: Do the work.
@@ -26,7 +28,7 @@ stages:
     artifact: commits-on-branch
 `;
 
-const HUMAN = (runner: string) => `runner: ${runner}
+const HUMAN = (profile: string) => `profile: ${profile}
 stages:
   - name: grill
     prompt: Interview me about the Ticket.
@@ -46,9 +48,12 @@ const settled = (lasso: Lasso, id: string) => waitFor(async () => {
 const finished = (lasso: Lasso, id: string) => waitFor(async () => { const d = await detailOf(lasso, id); return d.state === "done" ? d : null; }, "the Ticket to be done");
 const commit = [["git", "commit", "-q", "--allow-empty", "-m", "work"]];
 
-async function lassoWith(pipelines: Record<string, string>, env?: Record<string, string>) {
+/** A runner-only profile named for each Runner, as the startup migration would write. */
+const PROFILES: Record<string, ProfileConfig> = { claude: { runner: "claude" }, codex: { runner: "codex" }, pi: { runner: "pi" } };
+
+async function lassoWith(pipelines: Record<string, string>, env?: Record<string, string>, extra: LassoConfig = { profiles: PROFILES }) {
   const repos = Object.fromEntries(Object.keys(pipelines).map((name) => [name, { pipeline: name }]));
-  const started = await startLassoWithRepos(repos, {}, pipelines, env);
+  const started = await startLassoWithRepos(repos, extra, pipelines, env);
   running.push(started.lasso);
   return started.lasso;
 }
@@ -57,14 +62,14 @@ const intake = (lasso: Lasso, repo: string) =>
   lasso.api<IntakeResult>("/api/tickets", { method: "POST", body: JSON.stringify({ input: "Add dark mode", repo, pipeline: repo }) });
 
 describe("Runner selection", () => {
-  it("runs a Stage through the Runner it names, and the rest through the Pipeline default", async () => {
+  it("runs a Stage through its profile's Runner, and the rest through the Pipeline's profile", async () => {
     const lasso = await lassoWith({
-      mixed: `runner: claude
+      mixed: `profile: claude
 stages:
   - name: implement
     prompt: Do the work.
     skills: [implement]
-    runner: pi
+    profile: pi
     artifact: commits-on-branch
   - name: notes
     prompt: Write NOTES.md.
@@ -178,5 +183,105 @@ describe("a human Stage on another Runner", () => {
     await openTerminal(lasso, ticket.id);
     calls = await lasso.terminals();
     expect(readFileSync(calls[3]!.launcher!, "utf8")).toContain(`exec 'codex' 'resume' '01a0e17d-746e-7123-93ce-e3f3b05e8375'`);
+  });
+});
+
+describe("Agent Profiles", () => {
+  const profiles: Record<string, ProfileConfig> = {
+    claude: { runner: "claude" },
+    "claude-opus": { runner: "claude", model: "opus", args: ["--verbose"] },
+    "codex-fast": { runner: "codex", model: "gpt-5-codex", skills_dir: "/opt/skills" },
+    "pi-gpt": { runner: "pi", model: "openai/gpt-5", args: ["--thinking", "high"] },
+  };
+  const TWO = (pipelineProfile: string | null, stageProfile: string | null) => `${pipelineProfile ? `profile: ${pipelineProfile}\n` : ""}stages:
+  - name: implement
+    prompt: Do the work.
+    skills: [implement]
+${stageProfile ? `    profile: ${stageProfile}\n` : ""}    artifact: commits-on-branch
+  - name: notes
+    prompt: Write NOTES.md.
+    artifact: file NOTES.md
+`;
+  const everyRunner = { stdoutByRunner: { claude: claudeFixture("success.json"), codex: runnerFixture("codex", "success.jsonl"), pi: runnerFixture("pi", "success.jsonl") }, commands: commit, files: { "NOTES.md": "notes\n" } };
+  /** Rewrite config.yaml by hand, as a person editing it would. */
+  const editConfig = async (lasso: Lasso, edit: (text: string) => string) => {
+    const file = path.join(lasso.home, "config.yaml");
+    await writeFile(file, edit(await readFile(file, "utf8")));
+  };
+
+  it("launches a Stage's profile with its model and args, else the Pipeline's, else default_profile, and the Session shows which", async () => {
+    const lasso = await lassoWith({ staged: TWO("codex-fast", "pi-gpt"), plain: TWO(null, null) }, undefined, { profiles, default_profile: "claude-opus" });
+    const staged = await intake(lasso, "staged");
+    await lasso.runner.script(everyRunner);
+    await checkNow(lasso);
+    const s = await finished(lasso, staged.id);
+
+    const [pi, codex] = await lasso.runner.calls();
+    expect(pi!.argv.slice(0, 11)).toEqual(["pi", "-p", "--mode", "json", "--session-id", s.sessions.find((x) => x.stage === "implement")!.id, "-a", "--model", "openai/gpt-5", "--thinking", "high"]);
+    expect(codex!.argv.slice(0, 11)).toEqual(["codex", "-a", "never", "exec", "--json", "-C", staged.worktree, "-s", "workspace-write", "-m", "gpt-5-codex"]);
+    expect(s.sessions.find((x) => x.stage === "implement")!.profile).toEqual({ name: "pi-gpt", runner: "pi", model: "openai/gpt-5", args: ["--thinking", "high"] });
+    expect(s.sessions.find((x) => x.stage === "notes")!.profile).toEqual({ name: "codex-fast", runner: "codex", model: "gpt-5-codex", args: [] });
+
+    const plain = await intake(lasso, "plain");
+    await checkNow(lasso);
+    const p = await finished(lasso, plain.id);
+    const claude = (await lasso.runner.calls()).slice(2);
+    expect(claude.map((c) => c.argv[0])).toEqual(["claude", "claude"]);
+    for (const call of claude) expect(call.argv.slice(-3)).toEqual(["--model", "opus", "--verbose"]);
+    expect(p.session!.profile).toEqual({ name: "claude-opus", runner: "claude", model: "opus", args: ["--verbose"] });
+  });
+
+  it("gives Codex its skills from skills_dir as link-form mentions", async () => {
+    const lasso = await lassoWith({ codex: HEADLESS("codex-fast") }, undefined, { profiles });
+    const ticket = await intake(lasso, "codex");
+    await lasso.runner.script({ stdout: runnerFixture("codex", "success.jsonl"), commands: commit });
+    await checkNow(lasso);
+    await finished(lasso, ticket.id);
+    const [call] = await lasso.runner.calls();
+    expect(call!.argv.at(-1)!.startsWith("[$implement](/opt/skills/implement/SKILL.md)\n")).toBe(true);
+  });
+
+  it("reads a profile edit in config.yaml at the next Session, with no restart or new Version", async () => {
+    const lasso = await lassoWith({ work: HEADLESS("claude-opus") }, undefined, { profiles });
+    const first = await intake(lasso, "work");
+    await lasso.runner.script({ stdout: claudeFixture("success.json"), commands: commit });
+    await checkNow(lasso);
+    await finished(lasso, first.id);
+
+    await editConfig(lasso, (text) => text.replace("model: opus", "model: sonnet").replace("- --verbose", "- --debug"));
+    const second = await intake(lasso, "work");
+    await checkNow(lasso);
+    const d = await finished(lasso, second.id);
+    const [before, after] = await lasso.runner.calls();
+    expect(before!.argv.slice(-3)).toEqual(["--model", "opus", "--verbose"]);
+    expect(after!.argv.slice(-3)).toEqual(["--model", "sonnet", "--debug"]);
+    expect(d.session!.profile).toEqual({ name: "claude-opus", runner: "claude", model: "sonnet", args: ["--debug"] });
+    // The Pipeline file never changed, so both Tickets run Version 1.
+    expect([(await detailOf(lasso, first.id)).pipelineVersion, d.pipelineVersion]).toEqual([1, 1]);
+  });
+
+  it("refuses Intake into a Pipeline whose profile config.yaml lacks, or when there is no profile at all", async () => {
+    const lasso = await lassoWith({ ghost: HEADLESS("ghost"), bare: TWO(null, null) }, undefined, { profiles, default_profile: null });
+    await expect(intake(lasso, "ghost")).rejects.toThrow(/Pipeline ghost: no profile named ghost in config\.yaml, which Pipeline ghost names/);
+    await expect(intake(lasso, "bare")).rejects.toThrow(/Pipeline bare: Stage implement names no profile, nor does Pipeline bare, and config\.yaml has no default_profile/);
+    expect(await lasso.runner.calls()).toEqual([]);
+  });
+
+  it("Flags a live Ticket whose profile was deleted when its Stage next runs, naming the profile and where", async () => {
+    const lasso = await lassoWith({ work: TWO(null, "claude-opus"), talk: HUMAN("claude-opus") }, undefined, { profiles });
+    const ticket = await intake(lasso, "work");
+    const talk = await intake(lasso, "talk");
+    await editConfig(lasso, (text) => text.replace(/ {2}claude-opus:\n(?: {4}.*\n)+/, ""));
+    expect(await readFile(path.join(lasso.home, "config.yaml"), "utf8")).not.toContain("claude-opus");
+
+    await checkNow(lasso);
+    const d = await waitFor(async () => { const t = await detailOf(lasso, ticket.id); return t.flag ? t : null; }, "the Ticket to be Flagged");
+    expect(d.flag).toMatchObject({ reason: "profile.missing", detail: "no profile named claude-opus in config.yaml, which Stage implement names" });
+    expect(d.sessions).toEqual([]);
+
+    await expect(openTerminal(lasso, talk.id)).rejects.toThrow(/no profile named claude-opus in config\.yaml, which Pipeline talk names/);
+    expect((await detailOf(lasso, talk.id)).flag).toMatchObject({ reason: "profile.missing" });
+    expect(await lasso.runner.calls()).toEqual([]);
+    expect(await lasso.terminals()).toEqual([]);
   });
 });

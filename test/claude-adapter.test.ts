@@ -16,7 +16,7 @@ const request: RunRequest = {
   mode: "headless",
   sessionId: "3e728ae2-8d99-42f3-a7ba-6066de05d169",
   limits: { wallTimeMs: 60_000, remainingSpendUsd: 4.5 },
-  runnerOptions: {},
+  profile: { runner: "claude" },
 };
 
 describe("claude adapter command", () => {
@@ -56,10 +56,11 @@ describe("claude adapter command", () => {
     expect(claudeAdapter.honours).toEqual(["remainingSpendUsd"]);
   });
 
-  it("omits the spend flag without a limit, passes runnerOptions.args through, and leaves an empty reference blank", () => {
-    const cmd = claudeAdapter.command({ ...request, limits: {}, runnerOptions: { args: ["--model", "claude-sonnet-5"] }, context: { ...request.context, reference: null, body: null } });
+  it("omits the spend flag without a limit, passes the profile's model and args through, and leaves an empty reference blank", () => {
+    const cmd = claudeAdapter.command({ ...request, limits: {}, profile: { runner: "claude", model: "sonnet", args: ["--model", "claude-sonnet-5"] }, context: { ...request.context, reference: null, body: null } });
     expect(cmd.argv).not.toContain("--max-budget-usd");
-    expect(cmd.argv.slice(-2)).toEqual(["--model", "claude-sonnet-5"]);
+    // The model flag comes first and the args after it, so an arg repeating it wins.
+    expect(cmd.argv.slice(-4)).toEqual(["--model", "sonnet", "--model", "claude-sonnet-5"]);
     expect(cmd.argv[2]!.split("\n")[3]).toBe("You are working Lasso Ticket 01J8ZK3M9Q4R5S6T7V8W9X0Y1Z in repo app on branch APP-12-add-dark-mode, Stage implement.");
     expect(cmd.argv[2]).not.toContain("A toggle");
     expect(cmd.env.LASSO_REFERENCE).toBe("");
@@ -68,8 +69,18 @@ describe("claude adapter command", () => {
   it("builds an interactive terminal command on the same session id with a display name", () => {
     const cmd = claudeAdapter.command({ ...request, mode: "terminal", name: "Lasso: APP-12 Grill", skills: ["grilling"], prompt: null });
     expect(cmd.argv.slice(0, 7)).toEqual(["claude", "--session-id", request.sessionId, "--permission-mode", "acceptEdits", "--name", "Lasso: APP-12 Grill"]);
+    expect(cmd.argv).toHaveLength(8);
     expect(cmd.argv.at(-1)!.startsWith("/grilling\n")).toBe(true);
     expect(cmd.argv).not.toContain("-p");
+  });
+
+  it("puts the profile's model under --model before its args, ahead of the prompt in a terminal and after the flags on resume", () => {
+    const profile = { runner: "claude" as const, model: "opus", args: ["--verbose"] };
+    const opened = claudeAdapter.command({ ...request, mode: "terminal", name: "Lasso: APP-12 Grill", profile });
+    expect(opened.argv.slice(7, 10)).toEqual(["--model", "opus", "--verbose"]);
+    expect(opened.argv).toHaveLength(11);
+    const resumed = claudeAdapter.command({ ...request, mode: "terminal", resume: true, profile });
+    expect(resumed.argv).toEqual(["claude", "--resume", request.sessionId, "--permission-mode", "acceptEdits", "--model", "opus", "--verbose"]);
   });
 
   it("names the transcript it will keep for a request", () => {

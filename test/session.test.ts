@@ -11,8 +11,7 @@ afterEach(async () => {
   while (running.length) await running.pop()!.destroy();
 });
 
-const PIPELINE = `runner: claude
-stages:
+const PIPELINE = `stages:
   - name: implement
     prompt: Do the work.
     skills: [implement]

@@ -13,8 +13,7 @@ afterEach(async () => {
   while (running.length) await running.pop()!.destroy();
 });
 
-const PIPELINE = `runner: claude
-stages:
+const PIPELINE = `stages:
   - name: grill
     prompt: Interview me about the Ticket.
     skills: [grilling]
@@ -174,8 +173,7 @@ describe("a human Stage", () => {
   });
 
   it("holds after a headless Stage with advance: false and Start resumes the run", async () => {
-    const pipeline = `runner: claude
-stages:
+    const pipeline = `stages:
   - name: implement
     prompt: Do the work.
     artifact: commits-on-branch

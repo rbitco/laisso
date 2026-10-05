@@ -3,11 +3,12 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
+import { currentConfig, resolveProfile, type Config } from "../server/config.ts";
 import type { LassoHome } from "../server/home.ts";
 import type { Logger } from "../server/log.ts";
 import { shortId, type TicketRow } from "../store/tickets.ts";
-import type { Sessions, SessionRow } from "../store/sessions.ts";
-import type { RunnerStage } from "../pipeline/load.ts";
+import { sessionProfile, type Sessions, type SessionRow } from "../store/sessions.ts";
+import type { Pipeline, RunnerStage } from "../pipeline/load.ts";
 import { requestFor, type Command, type RunRequest, type RunnerAdapter } from "../runner/adapter.ts";
 import { adapterFor } from "../runner/adapters.ts";
 import { appleString, shellQuote } from "../macos.ts";
@@ -17,9 +18,12 @@ const run = promisify(execFile);
 export class TerminalError extends Error {}
 
 export interface TerminalDeps {
+  config: Config;
   home: LassoHome;
   sessions: Sessions;
   log: Logger;
+  /** Flags the Ticket; a Stage whose profile is gone from config cannot open. */
+  flag: (ticket: string, reason: string, detail: string) => Promise<void>;
   /** How a command gets a window; defaults to the platform's. */
   opener?: WindowOpener;
 }
@@ -45,9 +49,15 @@ export class Terminal {
     this.opener = deps.opener ?? macosTerminal();
   }
 
-  async open(ticket: TicketRow, stage: RunnerStage): Promise<SessionRow> {
+  async open(ticket: TicketRow, pipeline: Pipeline, stage: RunnerStage): Promise<SessionRow> {
     const { sessions, home, log } = this.deps;
-    const adapter = adapterFor(stage.runner);
+    // Read at each open, as for headless Sessions (ADR 0011): an edit to the profile reaches the next window.
+    const profile = resolveProfile(currentConfig(home, this.deps.config), pipeline, stage);
+    if ("problem" in profile) {
+      await this.deps.flag(ticket.id, "profile.missing", profile.problem);
+      throw new TerminalError(profile.problem);
+    }
+    const adapter = adapterFor(profile.profile.runner);
     const held = sessions.running(ticket.id).find((s) => s.mode === "terminal" && s.stage === stage.name) ?? null;
     const sessionId = held?.id ?? randomUUID();
     // Resume only a session the Runner has been launched on; a row whose window never opened starts afresh.
@@ -57,7 +67,7 @@ export class Terminal {
     const lost = launched !== null && adapter.sessionIds === "runner" && runnerSessionId === null;
     if (lost) log.warn("session.resume_lost", { session: sessionId, ticket: ticket.id, stage: stage.name, runner: adapter.name });
     const request: RunRequest = {
-      ...requestFor(ticket, stage),
+      ...requestFor(ticket, stage, profile.profile),
       mode: "terminal",
       sessionId,
       resume: launched !== null && !lost,
@@ -80,6 +90,7 @@ export class Terminal {
           stdout_path: null,
           limits_honoured: "[]",
           transcript_path: adapter.transcriptPath(request),
+          profile: sessionProfile(profile.name, profile.profile),
         },
         now,
       );

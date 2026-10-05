@@ -11,8 +11,7 @@ afterEach(async () => {
 });
 
 // grill (human) → In Progress (action) → implement (headless) → Done (action)
-const PIPELINE = `runner: claude
-stages:
+const PIPELINE = `stages:
   - name: grill
     prompt: Interview me.
     human: true
@@ -133,8 +132,7 @@ describe("the tracker mirror", () => {
   });
 
   it("creates a GitHub label on first use, closes the issue, and toggles lasso:flagged", async () => {
-    const pipeline = `runner: claude
-stages:
+    const pipeline = `stages:
   - name: implement
     prompt: Do the work.
   - action: tracker.transition

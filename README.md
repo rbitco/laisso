@@ -21,12 +21,16 @@ Everything Lasso owns lives under `~/.lasso` (`LASSO_HOME` overrides it):
 The first run writes a commented `config.yaml` and the default Pipeline and
 never touches either again.
 
-A Pipeline names a Runner per Stage (`runner: claude | codex | pi`); a
-Stage may also carry `runnerOptions`, which Lasso does not model beyond
-passing through: `args` (extra argv before the prompt) and, for Codex,
-`skillsDir` (where its skill catalog lives, default `~/.agents/skills`).
-Codex ignores a skill mention whose path is outside its catalog without
-a word, so set `skillsDir` when the skills live elsewhere.
+Stages run under Agent Profiles defined in `config.yaml` (`profiles:`):
+each names a `runner` (`claude | codex | pi`) and may set a `model`,
+extra `args` (argv before the prompt) and, for Codex, `skills_dir`
+(where its skill catalog lives, default `~/.agents/skills`). A Stage
+runs its own `profile:`, else its Pipeline's, else `default_profile`.
+Profiles are read when each Session starts, so an edit applies to the
+next Session without a restart. Codex ignores a skill mention whose path
+is outside its catalog without a word, so set `skills_dir` when the
+skills live elsewhere. A Pipeline still using `runner:` or
+`runnerOptions` is rewritten to profiles when Lasso starts.
 
 Every Ticket runs under a Budget: `rounds` (per repeating Stage),
 `attempts` (per Stage), `wallTime` (per headless Session) and `spend`

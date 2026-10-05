@@ -11,8 +11,7 @@ import { setScene, sceneFile, swapTo, type Scene } from "./scenes.ts";
 const running: Lasso[] = [];
 afterEach(async () => { while (running.length) await running.pop()!.destroy(); });
 
-const PIPELINE = `runner: claude
-stages:
+const PIPELINE = `stages:
   - name: implement
     prompt: Do the work.
     artifact: commits-on-branch
@@ -26,8 +25,7 @@ stages:
 `;
 
 // implement, then a tracker transition (an action Stage), then review on PR feedback.
-const FLOW = `runner: claude
-stages:
+const FLOW = `stages:
   - name: implement
     prompt: Do the work.
     artifact: commits-on-branch

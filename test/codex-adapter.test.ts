@@ -20,7 +20,7 @@ const request: RunRequest = {
   mode: "headless",
   sessionId: "3e728ae2-8d99-42f3-a7ba-6066de05d169",
   limits: { wallTimeMs: 60_000, remainingSpendUsd: 4.5 },
-  runnerOptions: {},
+  profile: { runner: "codex" },
 };
 
 describe("codex adapter command", () => {
@@ -50,10 +50,24 @@ describe("codex adapter command", () => {
     expect(codexAdapter.sessionIds).toBe("runner");
   });
 
-  it("takes the skills directory from runnerOptions.skillsDir and passes runnerOptions.args through", () => {
-    const cmd = codexAdapter.command({ ...request, runnerOptions: { skillsDir: "/repo/.agents/skills", args: ["-m", "gpt-5-codex"] } });
-    expect(cmd.argv.slice(9, 11)).toEqual(["-m", "gpt-5-codex"]);
+  it("takes the skills directory from the profile's skills_dir, its model under -m, and its args after", () => {
+    const cmd = codexAdapter.command({ ...request, profile: { runner: "codex", skills_dir: "/repo/.agents/skills", model: "gpt-5-codex", args: ["-c", "x=1"] } });
+    expect(cmd.argv.slice(9, 13)).toEqual(["-m", "gpt-5-codex", "-c", "x=1"]);
+    expect(cmd.argv).toHaveLength(14);
     expect(cmd.argv.at(-1)!.startsWith("[$implement](/repo/.agents/skills/implement/SKILL.md)\n[$tdd](/repo/.agents/skills/tdd/SKILL.md)\n\n")).toBe(true);
+  });
+
+  it("gives the model once under -m in every form, and none without one", () => {
+    const profile = { runner: "codex" as const, model: "gpt-5-codex" };
+    const forms = [
+      codexAdapter.command({ ...request, profile }),
+      codexAdapter.command({ ...request, profile, resume: true, runnerSessionId: "t" }),
+      codexAdapter.command({ ...request, profile, mode: "terminal" }),
+      codexAdapter.command({ ...request, profile, mode: "terminal", resume: true, runnerSessionId: "t" }),
+    ];
+    for (const cmd of forms) expect(cmd.argv.filter((a) => a === "-m")).toHaveLength(1);
+    expect(forms[3]!.argv).toEqual(["codex", "resume", "t", "-s", "workspace-write", "-m", "gpt-5-codex"]);
+    expect(codexAdapter.command(request).argv).not.toContain("-m");
   });
 
   it("resumes a headless run through exec resume on the thread id Codex assigned, with the sandbox set top-level", () => {
