@@ -12,6 +12,10 @@ export interface RepoConfig {
   pipeline: string;
   /** Actions this repo defines; one with a global Action's name replaces it for this repo's Tickets (ADR 0010). */
   actions: Record<string, ActionConfig>;
+  /** Agent Profiles this repo defines; one with a global profile's name replaces it whole for this repo's Tickets (ADR 0011). */
+  profiles: Record<string, ProfileConfig>;
+  /** The profile this repo's Stages run under when neither they nor their Pipeline names one; null leaves config's default_profile. */
+  default_profile: string | null;
 }
 
 export interface BudgetDefaults {
@@ -114,6 +118,8 @@ repos: {}
 #    path: ~/code/my-app      # local checkout; worktrees are made from its origin
 #    pipeline: default        # the repo's default Pipeline
 #    actions: {}              # this repo's own Actions; one named like a global Action replaces it here
+#    profiles: {}             # this repo's own Agent Profiles; one named like a global profile replaces it whole here
+#    default_profile: claude  # this repo's default, in place of the global default_profile below
 
 # Actions: shell commands an action Stage runs by name, in the Ticket's
 # worktree, with the Ticket's details as LASSO_* environment variables.
@@ -188,6 +194,16 @@ export function currentConfig(home: LassoHome, running: Config): Config {
 /** The Actions a repo's Tickets run: the global ones, with the repo's own replacing any of the same name. */
 export function actionsFor(config: Config, repo: string): Record<string, ActionConfig> {
   return { ...config.actions, ...config.repos[repo]?.actions };
+}
+
+/** The Agent Profiles a repo's Tickets run under: the global ones, with the repo's own replacing any of the same name whole. */
+export function profilesFor(config: ProfileScope, repo: string): Record<string, ProfileConfig> {
+  return { ...config.profiles, ...config.repos[repo]?.profiles };
+}
+
+/** Every profile name some repo can reach: a Pipeline naming any of them may be saved, since Pipelines are not bound to a repo. */
+export function anyRepoProfiles(config: Config): Record<string, ProfileConfig> {
+  return Object.assign({}, config.profiles, ...Object.values(config.repos).map((repo) => repo.profiles));
 }
 
 /** Every set of Actions some repo sees, the global set first: a Pipeline that fits any of them may be saved. */
@@ -295,6 +311,8 @@ function normaliseRepos(value: Record<string, unknown>, where: string): Record<s
       path: String(repo.path ?? ""),
       pipeline: typeof repo.pipeline === "string" ? repo.pipeline : "default",
       actions: parseActions(mapping(repo.actions, `${where}.${name}.actions`, fail), `${where}.${name}.actions`),
+      profiles: parseProfiles(mapping(repo.profiles, `${where}.${name}.profiles`, fail), `${where}.${name}.profiles`),
+      default_profile: repo.default_profile === undefined || repo.default_profile === null ? null : profileName(repo.default_profile, `${where}.${name}.default_profile`),
     };
   }
   return repos;
@@ -378,8 +396,8 @@ function oneOf<T extends string>(choices: readonly T[], value: unknown, at: stri
   return value as T;
 }
 
-/** Where a Session's profile was named: the Stage, its Pipeline, or config's default_profile. */
-export type ProfileSource = "stage" | "pipeline" | "default";
+/** Where a Session's profile was named: the Stage, its Pipeline, the repo's default_profile, or config's. */
+export type ProfileSource = "stage" | "pipeline" | "repo" | "default";
 
 /** The Agent Profile a Stage runs under, as config has it when the Session starts, with the Stage's mode merged in. */
 export interface ResolvedProfile {
@@ -388,19 +406,24 @@ export interface ResolvedProfile {
   profile: ProfileSettings;
 }
 
+/** What resolving a profile reads from config: the global profiles and default, and each repo's own. */
+export type ProfileScope = Pick<Config, "profiles" | "default_profile"> & { repos: Record<string, Pick<RepoConfig, "profiles" | "default_profile">> };
+
 /**
- * A Stage's profile: its own, else its Pipeline's, else default_profile
- * (ADR 0011). Profiles are live config, so this is asked at each Session
- * start; a name config no longer has is a problem, never a fallback. The
- * Stage's `human` flag picks the block merged in, so a Session gets one flat
- * set of settings.
+ * A Stage's profile: its own, else its Pipeline's, else the repo's
+ * default_profile, else config's (ADR 0011). The name is looked up among the
+ * repo's profiles first, then the global ones. Profiles are live config, so
+ * this is asked at each Session start; a name config no longer has is a
+ * problem, never a fallback. The Stage's `human` flag picks the block merged
+ * in, so a Session gets one flat set of settings.
  */
-export function resolveProfile(config: Pick<Config, "profiles" | "default_profile">, pipeline: Pick<Pipeline, "name" | "profile">, stage: Pick<RunnerStage, "name" | "profile" | "human">): ResolvedProfile | { problem: string } {
-  const [name, from] = stage.profile ? [stage.profile, "stage" as const] : pipeline.profile ? [pipeline.profile, "pipeline" as const] : [config.default_profile, "default" as const];
+export function resolveProfile(config: ProfileScope, repo: string, pipeline: Pick<Pipeline, "name" | "profile">, stage: Pick<RunnerStage, "name" | "profile" | "human">): ResolvedProfile | { problem: string } {
+  const repoDefault = config.repos[repo]?.default_profile ?? null;
+  const [name, from] = stage.profile ? [stage.profile, "stage" as const] : pipeline.profile ? [pipeline.profile, "pipeline" as const] : repoDefault ? [repoDefault, "repo" as const] : [config.default_profile, "default" as const];
   if (name === null) return { problem: `Stage ${stage.name} names no profile, nor does Pipeline ${pipeline.name}, and config.yaml has no default_profile` };
-  const profile = config.profiles[name];
+  const profile = profilesFor(config, repo)[name];
   if (profile) return { name, from, profile: settingsFor(profile, stage.human ? "human" : "headless") };
-  const by = from === "stage" ? `Stage ${stage.name}` : from === "pipeline" ? `Pipeline ${pipeline.name}` : "default_profile";
+  const by = { stage: `Stage ${stage.name}`, pipeline: `Pipeline ${pipeline.name}`, repo: `repo ${repo}'s default_profile`, default: "default_profile" }[from];
   return { problem: `no profile named ${name} in config.yaml, which ${by} names` };
 }
 

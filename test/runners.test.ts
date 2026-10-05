@@ -359,3 +359,92 @@ ${stageProfile ? `    profile: ${stageProfile}\n` : ""}    artifact: commits-on-
     expect(await lasso.terminals()).toEqual([]);
   });
 });
+
+describe("A repo's own Agent Profiles", () => {
+  // app overrides claude-opus, defaults to its own solo and alone defines it; web has only the global profiles.
+  const globals: Record<string, ProfileConfig> = {
+    "claude-opus": { runner: "claude", model: "opus", effort: "high", args: ["--global-only"] },
+    "claude-sonnet": { runner: "claude", model: "sonnet" },
+  };
+  const appProfiles: Record<string, ProfileConfig> = {
+    "claude-opus": { runner: "claude", model: "fable" },
+    solo: { runner: "claude", model: "haiku", args: ["--solo"] },
+  };
+  const ONE = (profile: string | null) => `${profile ? `profile: ${profile}\n` : ""}stages:
+  - name: implement
+    prompt: Do the work.
+    artifact: commits-on-branch
+`;
+  async function twoRepos(pipelines: Record<string, string>, app: { default_profile?: string } = {}) {
+    const started = await startLassoWithRepos(
+      { app: { pipeline: "work", profiles: appProfiles, ...app }, web: { pipeline: "work" } },
+      { profiles: globals, default_profile: "claude-sonnet" },
+      pipelines,
+    );
+    running.push(started.lasso);
+    await started.lasso.runner.script({ stdout: claudeFixture("success.json"), commands: commit });
+    return started.lasso;
+  }
+  const intakeInto = (lasso: Lasso, repo: string, pipeline: string) =>
+    lasso.api<IntakeResult>("/api/tickets", { method: "POST", body: JSON.stringify({ input: "Add dark mode", repo, pipeline }) });
+  /** Intake into each repo in turn, run each Ticket to done, and hand back each one's Session profile and argv. */
+  async function runEach(lasso: Lasso, pipeline: string, repos: string[]) {
+    const out = [];
+    for (const repo of repos) {
+      const ticket = await intakeInto(lasso, repo, pipeline);
+      await checkNow(lasso);
+      const d = await finished(lasso, ticket.id);
+      out.push({ profile: d.session!.profile, argv: (await lasso.runner.calls()).at(-1)!.argv });
+    }
+    return out;
+  }
+
+  it("replaces the global profile of the same name whole, for that repo's Sessions only", async () => {
+    const lasso = await twoRepos({ work: ONE("claude-opus") });
+    const [app, web] = await runEach(lasso, "work", ["app", "web"]);
+    // The global effort and args do not leak into app's override.
+    expect(app!.argv.slice(-2)).toEqual(["--model", "fable"]);
+    expect(app!.argv).not.toContain("--effort");
+    expect(app!.argv).not.toContain("--global-only");
+    expect(app!.profile).toEqual({ name: "claude-opus", runner: "claude", model: "fable", effort: null, permission: null, args: [] });
+    expect(web!.argv.slice(-5)).toEqual(["--model", "opus", "--effort", "high", "--global-only"]);
+    expect(web!.profile).toEqual({ name: "claude-opus", runner: "claude", model: "opus", effort: "high", permission: null, args: ["--global-only"] });
+  });
+
+  it("takes the repo's default_profile ahead of the global one for that repo's Tickets", async () => {
+    const lasso = await twoRepos({ work: ONE(null) }, { default_profile: "solo" });
+    const [app, web] = await runEach(lasso, "work", ["app", "web"]);
+    expect(app!.argv.slice(-3)).toEqual(["--model", "haiku", "--solo"]);
+    expect(app!.profile).toMatchObject({ name: "solo", model: "haiku" });
+    expect(web!.argv.slice(-2)).toEqual(["--model", "sonnet"]);
+    expect(web!.profile).toMatchObject({ name: "claude-sonnet", model: "sonnet" });
+  });
+
+  it("may exist only in the repo: saving accepts it, Intake takes it for that repo and refuses it for another", async () => {
+    const lasso = await twoRepos({ work: ONE(null) });
+    const save = (text: string) => lasso.api<Response>("/api/pipelines/solo", { method: "PUT", raw: true, body: JSON.stringify({ text }) });
+    expect((await save(ONE("solo"))).status).toBe(200);
+    const ghost = await save(ONE("ghost"));
+    expect((await ghost.json()).error).toMatch(/Pipeline solo: no profile named ghost in config\.yaml/);
+
+    const [app] = await runEach(lasso, "solo", ["app"]);
+    expect(app!.argv.slice(-3)).toEqual(["--model", "haiku", "--solo"]);
+    await expect(intakeInto(lasso, "web", "solo")).rejects.toThrow(/Pipeline solo: no profile named solo in config\.yaml, which Pipeline solo names/);
+  });
+
+  it("reads a repo profile edit at the next Session, and Flags when the repo's default_profile names one gone", async () => {
+    const lasso = await twoRepos({ work: ONE(null) }, { default_profile: "solo" });
+    const file = path.join(lasso.home, "config.yaml");
+    const edit = async (change: (text: string) => string) => writeFile(file, change(await readFile(file, "utf8")));
+    await edit((text) => text.replace("model: haiku", "model: opus"));
+    const [first] = await runEach(lasso, "work", ["app"]);
+    expect(first!.argv.slice(-3)).toEqual(["--model", "opus", "--solo"]);
+
+    const ticket = await intakeInto(lasso, "app", "work");
+    await edit((text) => text.replace(/ {6}solo:\n(?: {8}.*\n)+/, ""));
+    expect(await readFile(file, "utf8")).not.toMatch(/^ {6}solo:/m);
+    await checkNow(lasso);
+    const d = await waitFor(async () => { const t = await detailOf(lasso, ticket.id); return t.flag ? t : null; }, "the Ticket to be Flagged");
+    expect(d.flag).toMatchObject({ reason: "profile.missing", detail: "no profile named solo in config.yaml, which repo app's default_profile names" });
+  });
+});

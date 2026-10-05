@@ -91,9 +91,9 @@ export class Intake {
       pipeline = loadPipeline(home.pipelinesDir, pipelineName);
       const now = currentConfig(home, config);
       checkActions(pipeline, actionsFor(now, repoName));
-      // Every Runner Stage must reach a profile config defines, the inherited default included.
+      // Every Runner Stage must reach a profile config defines for this repo, the inherited defaults included.
       for (const stage of pipeline.stages) {
-        const profile = stage.kind === "runner" ? resolveProfile(now, pipeline, stage) : null;
+        const profile = stage.kind === "runner" ? resolveProfile(now, repoName, pipeline, stage) : null;
         if (profile && "problem" in profile) throw new PipelineError(`Pipeline ${pipeline.name}: ${profile.problem}`);
       }
     } catch (error) {

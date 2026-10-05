@@ -5,7 +5,7 @@ import { parseDocument, isMap, isScalar, isSeq, type Document } from "yaml";
 import { applyPatch } from "../yaml-edit.ts";
 import { isPlainObject } from "../fields.ts";
 import { checkActionsAny, checkProfiles, parsePipeline, pipelineFile, listPipelines, PipelineError, NAME, type Pipeline } from "./load.ts";
-import { actionSets, type Config } from "../server/config.ts";
+import { actionSets, anyRepoProfiles, type Config } from "../server/config.ts";
 
 /** A Pipeline file as read: the text as written, and what it parses to or why it does not. */
 export interface PipelineSource {
@@ -91,11 +91,11 @@ export class PipelineFiles {
     return sourceOf(name, current.file, text);
   }
 
-  /** What parsing cannot see: each action Stage fits the Actions some repo has (see actionSets), and each profile named exists. */
+  /** What parsing cannot see: each action Stage fits the Actions some repo has (see actionSets), and each profile named exists globally or in some repo. */
   private check(pipeline: Pipeline): void {
     const config = this.config();
     checkActionsAny(pipeline, actionSets(config));
-    checkProfiles(pipeline, config.profiles);
+    checkProfiles(pipeline, anyRepoProfiles(config));
   }
 
   remove(name: string): boolean {

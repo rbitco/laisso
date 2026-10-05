@@ -52,7 +52,7 @@ export class Terminal {
   async open(ticket: TicketRow, pipeline: Pipeline, stage: RunnerStage): Promise<SessionRow> {
     const { sessions, home, log } = this.deps;
     // Read at each open, as for headless Sessions (ADR 0011): an edit to the profile reaches the next window.
-    const profile = resolveProfile(currentConfig(home, this.deps.config), pipeline, stage);
+    const profile = resolveProfile(currentConfig(home, this.deps.config), ticket.repo, pipeline, stage);
     if ("problem" in profile) {
       await this.deps.flag(ticket.id, "profile.missing", profile.problem);
       throw new TerminalError(profile.problem);

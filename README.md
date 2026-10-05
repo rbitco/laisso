@@ -33,7 +33,12 @@ with prompts off, `acceptEdits` in a terminal; Codex workspace-write). Optional
 `args` for one mode only: a human Stage's Sessions take `human:`, the rest
 `headless:`. A block's fields replace the shared ones and its args follow
 the shared args; each Session records the merged result. A Stage
-runs its own `profile:`, else its Pipeline's, else `default_profile`.
+runs its own `profile:`, else its Pipeline's, else its repo's
+`default_profile`, else the global one. A repo entry may carry its own
+`profiles:`; one named like a global profile replaces it whole for that
+repo's Tickets, with no field merge, and one may exist only for that
+repo. Intake checks profiles against the chosen repo; saving a Pipeline
+accepts a profile any repo has.
 Profiles are read when each Session starts, so an edit applies to the
 next Session without a restart. Codex ignores a skill mention whose path
 is outside its catalog without a word, so set `skills_dir` when the

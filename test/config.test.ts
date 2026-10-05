@@ -3,7 +3,7 @@ import { parse } from "yaml";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { DEFAULT_CONFIG, DEFAULT_CONFIG_YAML, loadConfig, ConfigError, actionsFor, actionSets, resolveProfile } from "../src/server/config.ts";
+import { DEFAULT_CONFIG, DEFAULT_CONFIG_YAML, loadConfig, ConfigError, actionsFor, actionSets, profilesFor, resolveProfile } from "../src/server/config.ts";
 import { resolveHome } from "../src/server/home.ts";
 
 describe("the default config.yaml", () => {
@@ -89,30 +89,56 @@ describe("loadConfig", () => {
     expect(bad("  fast: { runner: claude, human: auto }\n")).toThrow(/profiles\.fast\.human must be a mapping, not auto/);
     expect(() => loadConfig(homeWith("default_profile: Big\n"))).toThrow(/default_profile: a profile name is lowercase/);
   });
+
+  it("reads a repo's own Agent Profiles and default_profile, checked as the global ones are", () => {
+    const config = loadConfig(homeWith("profiles:\n  claude-opus: { runner: claude, model: opus, args: [-v] }\nrepos:\n  app:\n    default_profile: solo\n    profiles:\n      claude-opus: { runner: claude, model: sonnet, human: { permission: auto } }\n      solo: { runner: pi }\n  web: {}\n"));
+    expect(config.repos.app).toMatchObject({ default_profile: "solo", profiles: { "claude-opus": { runner: "claude", model: "sonnet", human: { permission: "auto" } }, solo: { runner: "pi" } } });
+    expect(config.repos.web).toMatchObject({ default_profile: null, profiles: {} });
+    // The repo's claude-opus replaces the global one whole: the global args do not come along.
+    expect(profilesFor(config, "app")["claude-opus"]).toEqual({ runner: "claude", model: "sonnet", human: { permission: "auto" } });
+    expect(profilesFor(config, "web")).toEqual(config.profiles);
+    const bad = (yaml: string) => () => loadConfig(homeWith(`repos:\n  app:\n${yaml}`));
+    expect(bad("    profiles:\n      fast: { runner: gemini }\n")).toThrow(/repos\.app\.profiles\.fast: runner must be one of claude, codex, pi, not gemini/);
+    expect(bad("    profiles:\n      fast: { runner: claude, effort: extreme }\n")).toThrow(/repos\.app\.profiles\.fast\.effort must be one of/);
+    expect(bad("    profiles:\n      fast: { runner: claude, human: { runner: pi } }\n")).toThrow(/repos\.app\.profiles\.fast\.human: unknown field runner/);
+    expect(bad("    profiles: [fast]\n")).toThrow(/repos\.app\.profiles must be a mapping/);
+    expect(bad("    default_profile: Big\n")).toThrow(/repos\.app\.default_profile: a profile name is lowercase/);
+  });
 });
 
 describe("resolveProfile", () => {
-  const config = { profiles: { claude: { runner: "claude" as const }, fast: { runner: "pi" as const, model: "m" } }, default_profile: "claude" };
+  const config = { profiles: { claude: { runner: "claude" as const }, fast: { runner: "pi" as const, model: "m" } }, default_profile: "claude", repos: {} };
   const pipeline = (profile: string | null) => ({ name: "p", profile });
   const stage = (profile: string | null) => ({ name: "s", profile, human: false });
 
   it("takes the Stage's profile, else the Pipeline's, else default_profile, saying which", () => {
-    expect(resolveProfile(config, pipeline("claude"), stage("fast"))).toEqual({ name: "fast", from: "stage", profile: { runner: "pi", model: "m" } });
-    expect(resolveProfile(config, pipeline("fast"), stage(null))).toEqual({ name: "fast", from: "pipeline", profile: { runner: "pi", model: "m" } });
-    expect(resolveProfile(config, pipeline(null), stage(null))).toEqual({ name: "claude", from: "default", profile: { runner: "claude" } });
+    expect(resolveProfile(config, "app", pipeline("claude"), stage("fast"))).toEqual({ name: "fast", from: "stage", profile: { runner: "pi", model: "m" } });
+    expect(resolveProfile(config, "app", pipeline("fast"), stage(null))).toEqual({ name: "fast", from: "pipeline", profile: { runner: "pi", model: "m" } });
+    expect(resolveProfile(config, "app", pipeline(null), stage(null))).toEqual({ name: "claude", from: "default", profile: { runner: "claude" } });
   });
 
   it("merges the block for the Stage's mode: its fields replace the shared ones and its args follow", () => {
     const split = { runner: "claude" as const, model: "opus", effort: "high" as const, args: ["-a"], human: { permission: "auto" as const, args: ["-b", "-c"] }, headless: { model: "sonnet" } };
     const both = { ...config, profiles: { split } };
-    expect(resolveProfile(both, pipeline("split"), { ...stage(null), human: true })).toMatchObject({ profile: { runner: "claude", model: "opus", effort: "high", permission: "auto", args: ["-a", "-b", "-c"] } });
-    expect(resolveProfile(both, pipeline("split"), stage(null))).toEqual({ name: "split", from: "pipeline", profile: { runner: "claude", model: "sonnet", effort: "high", args: ["-a"] } });
+    expect(resolveProfile(both, "app", pipeline("split"), { ...stage(null), human: true })).toMatchObject({ profile: { runner: "claude", model: "opus", effort: "high", permission: "auto", args: ["-a", "-b", "-c"] } });
+    expect(resolveProfile(both, "app", pipeline("split"), stage(null))).toEqual({ name: "split", from: "pipeline", profile: { runner: "claude", model: "sonnet", effort: "high", args: ["-a"] } });
   });
 
   it("names a missing profile and where it was named, and never falls back", () => {
-    expect(resolveProfile(config, pipeline("fast"), stage("gone"))).toEqual({ problem: "no profile named gone in config.yaml, which Stage s names" });
-    expect(resolveProfile(config, pipeline("gone"), stage(null))).toEqual({ problem: "no profile named gone in config.yaml, which Pipeline p names" });
-    expect(resolveProfile({ ...config, default_profile: "gone" }, pipeline(null), stage(null))).toEqual({ problem: "no profile named gone in config.yaml, which default_profile names" });
-    expect(resolveProfile({ ...config, default_profile: null }, pipeline(null), stage(null))).toEqual({ problem: "Stage s names no profile, nor does Pipeline p, and config.yaml has no default_profile" });
+    expect(resolveProfile(config, "app", pipeline("fast"), stage("gone"))).toEqual({ problem: "no profile named gone in config.yaml, which Stage s names" });
+    expect(resolveProfile(config, "app", pipeline("gone"), stage(null))).toEqual({ problem: "no profile named gone in config.yaml, which Pipeline p names" });
+    expect(resolveProfile({ ...config, default_profile: "gone" }, "app", pipeline(null), stage(null))).toEqual({ problem: "no profile named gone in config.yaml, which default_profile names" });
+    expect(resolveProfile({ ...config, default_profile: null }, "app", pipeline(null), stage(null))).toEqual({ problem: "Stage s names no profile, nor does Pipeline p, and config.yaml has no default_profile" });
+    expect(resolveProfile({ ...config, repos: { app: { profiles: {}, default_profile: "gone" } } }, "app", pipeline(null), stage(null))).toEqual({ problem: "no profile named gone in config.yaml, which repo app's default_profile names" });
+  });
+
+  it("takes the repo's default_profile ahead of config's, and the repo's own profile of a name over the global one", () => {
+    const repos = { app: { profiles: { fast: { runner: "codex" as const }, solo: { runner: "claude" as const, model: "x" } }, default_profile: "solo" }, web: { profiles: {}, default_profile: null } };
+    const scoped = { ...config, repos };
+    expect(resolveProfile(scoped, "app", pipeline(null), stage(null))).toEqual({ name: "solo", from: "repo", profile: { runner: "claude", model: "x" } });
+    expect(resolveProfile(scoped, "app", pipeline("fast"), stage(null))).toEqual({ name: "fast", from: "pipeline", profile: { runner: "codex" } });
+    expect(resolveProfile(scoped, "web", pipeline(null), stage(null))).toEqual({ name: "claude", from: "default", profile: { runner: "claude" } });
+    expect(resolveProfile(scoped, "web", pipeline("fast"), stage(null))).toEqual({ name: "fast", from: "pipeline", profile: { runner: "pi", model: "m" } });
+    expect(resolveProfile(scoped, "web", pipeline("solo"), stage(null))).toEqual({ problem: "no profile named solo in config.yaml, which Pipeline p names" });
   });
 });

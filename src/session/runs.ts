@@ -112,7 +112,7 @@ export class Runs {
       return `Flagged: ${refusal.detail}`;
     }
     // Profiles are live config (ADR 0011): read now, so an edit reaches this Session; a deleted one Flags rather than falls back.
-    const profile = resolveProfile(currentConfig(this.deps.home, this.deps.config), pipeline, stage);
+    const profile = resolveProfile(currentConfig(this.deps.home, this.deps.config), ticket.repo, pipeline, stage);
     if ("problem" in profile) {
       await this.deps.progress.flag(ticket.id, "profile.missing", profile.problem);
       return `Flagged: ${profile.problem}`;

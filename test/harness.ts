@@ -284,6 +284,8 @@ export interface RepoSpec {
   project?: string;
   pipeline?: string;
   actions?: Record<string, ActionSpec>;
+  profiles?: RepoConfig["profiles"];
+  default_profile?: string;
 }
 
 export interface LassoWithRepos {
@@ -304,7 +306,7 @@ export async function startLassoWithRepos(specs: Record<string, RepoSpec>, extra
   for (const [name, spec] of Object.entries(specs)) {
     repos[name] = await makeRepo(path.join(home, "..", "repos"), name);
     const tracker = spec.tracker ?? "jira";
-    config[name] = { tracker, project: spec.project ?? (tracker === "jira" ? name.toUpperCase() : `owner/${name}`), path: repos[name].path, pipeline: spec.pipeline ?? "default", ...(spec.actions ? { actions: spec.actions } : {}) };
+    config[name] = { tracker, project: spec.project ?? (tracker === "jira" ? name.toUpperCase() : `owner/${name}`), path: repos[name].path, pipeline: spec.pipeline ?? "default", ...(spec.actions ? { actions: spec.actions } : {}), ...(spec.profiles ? { profiles: spec.profiles } : {}), ...(spec.default_profile ? { default_profile: spec.default_profile } : {}) };
   }
   await writeConfig(home, { tick: 3600, repos: config, ...extra });
   for (const [name, yaml] of Object.entries(pipelines)) {
