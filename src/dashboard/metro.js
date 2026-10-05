@@ -366,3 +366,73 @@ export function stageProfileView(stageProfile, pipelineProfile, config) {
   const missing = name ? 'no profile named ' + name + ' in config.yaml' : 'no profile: config.yaml sets no default_profile';
   return { name, inherited, label, headless: p ? profileLine(p, 'headless') : missing, human: p ? profileLine(p, 'human') : missing };
 }
+
+// Repo overrides (LASSO-74): a repo may define its own profile of a global's name, which replaces it whole for that
+// repo's Tickets, or one no global has. The Config list and the drawer show both, and the drawer has a tab per scope.
+
+/** @typedef {{ profiles: Record<string, ProfileConfig>, default_profile: string | null, repos: Record<string, { profiles: Record<string, ProfileConfig>, default_profile: string | null }> }} ProfilesConfig */
+/** @typedef {{ name: string, global: boolean, repos: string[] }} ProfileEntry */
+
+/**
+ * Every profile config defines, once each: the global ones in config's order, then those only some repo has,
+ * each with the repos that define their own of that name.
+ * @param {ProfilesConfig} config
+ * @returns {ProfileEntry[]}
+ */
+export function profileIndex(config) {
+  const repos = Object.entries(config.repos || {});
+  const reposWith = (name) => repos.filter(([, r]) => r.profiles && r.profiles[name]).map(([repo]) => repo);
+  const global = Object.keys(config.profiles).map((name) => ({ name, global: true, repos: reposWith(name) }));
+  const only = [...new Set(repos.flatMap(([, r]) => Object.keys(r.profiles || {})))].filter((name) => !config.profiles[name]);
+  return [...global, ...only.map((name) => ({ name, global: false, repos: reposWith(name) }))];
+}
+
+/**
+ * What a profile's line says about its scopes: "overridden in app, web" for a global with repo overrides,
+ * "only in app" for one no global has, and nothing for a plain global profile.
+ * @param {ProfileEntry} entry
+ */
+export function scopeNote(entry) {
+  if (!entry.repos.length) return '';
+  return (entry.global ? 'overridden in ' : 'only in ') + entry.repos.join(', ');
+}
+
+/**
+ * The drawer's scope tabs for a profile: "global" when config.yaml defines it there, then each repo with its own.
+ * @param {ProfileEntry} entry
+ * @returns {Array<{ repo: string | null, label: string }>}
+ */
+export function profileScopes(entry) {
+  return [...(entry.global ? [{ repo: null, label: 'global' }] : []), ...entry.repos.map((repo) => ({ repo, label: repo }))];
+}
+
+/**
+ * The repos "Override for repo…" offers: those configured without their own profile of this name. Only a global
+ * profile can be copied into a repo, so a repo-only one offers none.
+ * @param {ProfileEntry} entry
+ * @param {ProfilesConfig} config
+ */
+export function overridableRepos(entry, config) {
+  return entry.global ? Object.keys(config.repos || {}).filter((repo) => !entry.repos.includes(repo)) : [];
+}
+
+/**
+ * The profile one scope defines: the global one, or a repo's own.
+ * @param {ProfilesConfig} config
+ * @param {string} name
+ * @param {string | null} repo
+ * @returns {ProfileConfig | undefined}
+ */
+export function scopedProfile(config, name, repo) {
+  return repo === null ? config.profiles[name] : config.repos[repo]?.profiles?.[name];
+}
+
+/**
+ * The route that saves or deletes a profile in one scope.
+ * @param {string} name
+ * @param {string | null} repo
+ */
+export function profileRoute(name, repo) {
+  const scope = repo === null ? '/api' : '/api/repos/' + encodeURIComponent(repo);
+  return scope + '/profiles/' + encodeURIComponent(name);
+}

@@ -165,3 +165,110 @@ describe("saving Agent Profiles", () => {
     expect(left.config.profiles["codex-high"]).toEqual({ runner: "codex", model: "gpt-6-sol", effort: "high", skills_dir: "/opt/skills" });
   });
 });
+
+describe("saving a repo's own Agent Profiles", () => {
+  // implement names claude-opus; app and web both run it, and neither has profiles of its own yet.
+  const ONE = `stages:
+  - name: implement
+    prompt: Do the work.
+    profile: claude-opus
+    artifact: commits-on-branch
+`;
+  async function twoRepos(app: { profiles?: Record<string, ProfileConfig>; default_profile?: string } = {}) {
+    const started = await startLassoWithRepos({ app: { pipeline: "one", ...app }, web: { pipeline: "one" } }, { profiles: PROFILES, default_profile: "claude-opus" }, { one: ONE });
+    running.push(started.lasso);
+    await started.lasso.runner.script({ stdout: claudeFixture("success.json"), commands: [["git", "commit", "-q", "--allow-empty", "-m", "work"]] });
+    return started.lasso;
+  }
+  const putRepoProfile = (lasso: Lasso, repo: string, name: string, profile: unknown, create = false) =>
+    lasso.api<ConfigFile>(`/api/repos/${repo}/profiles/${name}`, { method: "PUT", body: json({ profile, create }) });
+  /** Run one Ticket of Pipeline one in a repo to done, and hand back its Session's argv. */
+  async function argvIn(lasso: Lasso, repo: string, pipeline = "one") {
+    const ticket = await lasso.api<IntakeResult>("/api/tickets", { method: "POST", body: json({ input: "Add dark mode", repo, pipeline }) });
+    await lasso.api("/api/check-now", { method: "POST" });
+    await waitFor(async () => ((await detailOf(lasso, ticket.id)).state === "done" ? true : null), "the Ticket to be done");
+    return (await lasso.runner.calls()).at(-1)!.argv;
+  }
+
+  it("overrides a profile for one repo by copying the global, runs edits there only, and removing it returns the repo to the global", async () => {
+    const lasso = await twoRepos();
+    await annotate(lasso);
+    const file = configPath(lasso);
+    await writeFile(file, (await readFile(file, "utf8")).replace(/^ {2}app:$/m, "  # the main checkout\n  app:"));
+
+    // "Override for repo…": the global profile, copied into app's profiles:, comments kept.
+    const global = (await lasso.api<ConfigFile>("/api/config")).config.profiles["claude-opus"];
+    const created = await lasso.api<Response>("/api/repos/app/profiles/claude-opus", { method: "PUT", raw: true, body: json({ profile: global, create: true }) });
+    expect(created.status).toBe(201);
+    const made = (await created.json()) as ConfigFile;
+    expect(made.config.repos.app!.profiles).toEqual({ "claude-opus": PROFILES["claude-opus"] });
+    expect(made.config.repos.web!.profiles).toEqual({});
+    expect(made.text).toMatch(/^ {2}# the main checkout\n {2}app:\n(?: {4}.*\n)* {4}profiles:\n {6}claude-opus:\n {8}runner: claude\n {8}model: opus\n {8}args: \[ ?--verbose ?\]\n/m);
+    for (const kept of ["# my config", "model: opus # the strong one"]) expect(made.text).toContain(kept);
+
+    // Editing app's tab changes app's Sessions only; the global and web are as they were.
+    const edited = await putRepoProfile(lasso, "app", "claude-opus", { runner: "claude", model: "sonnet", effort: "high" });
+    expect(edited.config.repos.app!.profiles["claude-opus"]).toEqual({ runner: "claude", model: "sonnet", effort: "high" });
+    expect(edited.config.profiles["claude-opus"]).toEqual(PROFILES["claude-opus"]);
+    for (const kept of ["# my config", "model: opus # the strong one", "# the main checkout\n  app:"]) expect(edited.text).toContain(kept);
+    expect((await argvIn(lasso, "app")).slice(-4)).toEqual(["--model", "sonnet", "--effort", "high"]);
+    expect((await argvIn(lasso, "web")).slice(-3)).toEqual(["--model", "opus", "--verbose"]);
+
+    // Removing the override returns app to the global profile at its next Session.
+    const removed = await lasso.api<ConfigFile>("/api/repos/app/profiles/claude-opus", { method: "DELETE" });
+    expect(removed.config.repos.app!.profiles).toEqual({});
+    expect(removed.config.profiles["claude-opus"]).toEqual(PROFILES["claude-opus"]);
+    expect(removed.text).not.toContain("model: sonnet");
+    for (const kept of ["# my config", "model: opus # the strong one", "# the main checkout\n  app:"]) expect(removed.text).toContain(kept);
+    expect(await readFile(file, "utf8")).toBe(removed.text);
+    expect((await argvIn(lasso, "app")).slice(-3)).toEqual(["--model", "opus", "--verbose"]);
+  });
+
+  it("refuses bad values with the config-load message, unknown repos and missing profiles, and leaves the file alone", async () => {
+    const lasso = await twoRepos({ profiles: { solo: { runner: "claude", model: "haiku" } }, default_profile: "solo" });
+    const text = await readFile(configPath(lasso), "utf8");
+    const refused = async (route: string, init: RequestInit, status: number, message: RegExp) => {
+      const res = await raw(lasso, route, init);
+      expect(res.status).toBe(status);
+      expect(((await res.json()) as { error: string }).error).toMatch(message);
+    };
+    const put = (profile: unknown, create = false) => ({ method: "PUT", body: json({ profile, create }) });
+    await refused("/api/repos/app/profiles/claude-opus", put({ runner: "claude", effort: "huge" }, true), 400, /repos\.app\.profiles\.claude-opus\.effort must be one of low, medium, high, xhigh, max, not huge/);
+    await refused("/api/repos/app/profiles/solo", put({ runner: "gemini" }), 400, /repos\.app\.profiles\.solo: runner must be one of claude, codex, pi, not gemini/);
+    await refused("/api/repos/app/profiles/solo", put({ runner: "claude", colour: "red" }), 400, /repos\.app\.profiles\.solo: unknown field colour/);
+    await refused("/api/repos/app/profiles/solo", put({ runner: "claude" }, true), 400, /profile solo already exists in repo app/);
+    await refused("/api/repos/web/profiles/claude-opus", put({ runner: "claude" }), 400, /no profile named claude-opus in repo web/);
+    await refused("/api/repos/nowhere/profiles/claude-opus", put({ runner: "claude" }, true), 404, /no repo named nowhere in config\.yaml/);
+    await refused("/api/repos/web/profiles/claude-opus", { method: "DELETE" }, 404, /no profile named claude-opus in repo web/);
+    await refused("/api/repos/nowhere/profiles/solo", { method: "DELETE" }, 404, /no repo named nowhere/);
+    // A repo's default_profile with no global to fall back on stays until another is its default.
+    await refused("/api/repos/app/profiles/solo", { method: "DELETE" }, 400, /solo is repo app's default_profile; make another profile its default first/);
+    await refused("/api/repos/app", { method: "PATCH", body: json({ default_profile: "nobody" }) }, 400, /no profile named nobody in config\.yaml for repo app/);
+    await refused("/api/repos/web", { method: "PATCH", body: json({ default_profile: "solo" }) }, 400, /no profile named solo in config\.yaml for repo web/);
+    await refused("/api/repos/app", { method: "PATCH", body: json({ path: "/elsewhere" }) }, 400, /only a repo's default_profile is set here/);
+    await refused("/api/repos/nowhere", { method: "PATCH", body: json({ default_profile: "claude-opus" }) }, 404, /no repo named nowhere/);
+    expect(await readFile(configPath(lasso), "utf8")).toBe(text);
+  });
+
+  it("sets and clears a repo's default_profile in place, and deletes a repo-only profile a Pipeline names only once confirmed", async () => {
+    const lasso = await twoRepos({ profiles: { solo: { runner: "claude", model: "haiku" } }, default_profile: "solo" });
+    await annotate(lasso);
+    // Any profile app can reach: a global one, then none (config's default_profile again).
+    const set = await lasso.api<ConfigFile>("/api/repos/app", { method: "PATCH", body: json({ default_profile: "claude-fable" }) });
+    expect(set.config.repos.app!.default_profile).toBe("claude-fable");
+    expect(set.text).toContain("# my config");
+    const cleared = await lasso.api<ConfigFile>("/api/repos/app", { method: "PATCH", body: json({ default_profile: null }) });
+    expect(cleared.config.repos.app!.default_profile).toBeNull();
+    expect(parse(cleared.text).repos.app).not.toHaveProperty("default_profile");
+
+    // A Pipeline naming solo would be Flagged in app with it gone, so the delete waits for confirmation.
+    await lasso.api("/api/pipelines/solo", { method: "PUT", body: json({ text: ONE.replace("claude-opus", "solo"), create: true }) });
+    const named = await raw(lasso, "/api/repos/app/profiles/solo", { method: "DELETE" });
+    expect(named.status).toBe(409);
+    expect(await named.json()).toEqual({ error: "solo is named by solo/implement; their next Sessions in repo app are Flagged once it is gone", usedBy: ["solo/implement"], confirm: true });
+    const gone = await lasso.api<ConfigFile>("/api/repos/app/profiles/solo?confirm=1", { method: "DELETE" });
+    expect(gone.config.repos.app!.profiles).toEqual({});
+    expect(gone.text).toContain("profiles: {}");
+    expect(gone.text).toContain("# my config");
+  });
+});

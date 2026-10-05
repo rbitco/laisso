@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { startLassoWithRepos, waitFor, claudeFixture, type Lasso, type LassoConfig, type TrackerReply } from "./harness.ts";
 import { sortForLedger, type TicketView, type TicketDetail, type IntakeResult, type DisplayState } from "../src/api/views.ts";
-import { metroDiagram, metroTrack, sessionsForStage, quickAction, relative, tickIndicator, sessionProfile, profileApplies, profileLine, profileSummary, profileUsers, usedByLine, profileWarnings, MODEL_SUGGESTIONS, stageProfileView } from "../src/dashboard/metro.js";
+import { metroDiagram, metroTrack, sessionsForStage, quickAction, relative, tickIndicator, sessionProfile, profileApplies, profileLine, profileSummary, profileUsers, usedByLine, profileWarnings, MODEL_SUGGESTIONS, stageProfileView, profileIndex, scopeNote, profileScopes, overridableRepos, scopedProfile, profileRoute } from "../src/dashboard/metro.js";
 import type { ConfigFile, PipelineListing, PipelineFile } from "../src/api/views.ts";
 import type { ProfileConfig } from "../src/server/config.ts";
 import type { TickChange, TickStatus } from "../src/server/tick.ts";
@@ -400,8 +400,8 @@ stages:
     expect(html).toContain("na('permission', 'permission-na', 'n/a on Pi')");
     expect(html).toContain("na('skills_dir', 'skills-dir-na', 'n/a: Codex only')");
     expect(html).toContain("function openProfileDrawer(name, opts = {})");
-    // Saves go through the profile routes and the config patch.
-    expect(html).toContain("'/api/profiles/' + encodeURIComponent(name)");
+    // Saves go through the profile routes (profileRoute, per scope) and the config patch.
+    expect(html).toContain("api(profileRoute(name, scope)");
     expect(html).toContain("JSON.stringify({ default_profile: name })");
   });
 });
@@ -457,6 +457,73 @@ stages:
     expect(html).toContain("'config default (' + (profiles.config.default_profile || 'none') + ')'");
     expect(html).toContain("if (profile.chosen() !== s.profile) patch.profile = profile.chosen();");
     expect(html).toContain("if (profile.value !== (pipeline.profile || '')) patch.profile = profile.value || null;");
+  });
+});
+
+describe("repo overrides in the profile drawer", () => {
+  const GLOBALS: Record<string, ProfileConfig> = {
+    "claude-opus": { runner: "claude", model: "opus" },
+    "claude-sonnet": { runner: "claude", model: "sonnet" },
+  };
+
+  it("index each profile with the repos defining their own, offer the rest for an override, and route saves per scope, from real config", async () => {
+    // app overrides claude-opus and alone has solo; web overrides claude-opus too; docs has nothing of its own.
+    const started = await startLassoWithRepos(
+      { app: { profiles: { "claude-opus": { runner: "claude", model: "fable" }, solo: { runner: "pi", model: "openai/gpt-5" } } }, web: {}, docs: {} },
+      { profiles: GLOBALS, default_profile: "claude-opus" },
+    );
+    running.push(started.lasso);
+    const lasso = started.lasso;
+    await lasso.api("/api/repos/web/profiles/claude-opus", { method: "PUT", body: JSON.stringify({ profile: GLOBALS["claude-opus"], create: true }) });
+    const { config } = await lasso.api<ConfigFile>("/api/config");
+
+    const index = profileIndex(config);
+    expect(index).toEqual([
+      { name: "claude-opus", global: true, repos: ["app", "web"] },
+      { name: "claude-sonnet", global: true, repos: [] },
+      { name: "solo", global: false, repos: ["app"] },
+    ]);
+    const [opus, sonnet, solo] = index;
+    // The Config list's line: overrides on a global profile, the repos of a repo-only one, nothing for a plain one.
+    expect(index.map(scopeNote)).toEqual(["overridden in app, web", "", "only in app"]);
+    // The tabs: global, then each repo with its own; a repo-only profile has only its repos' tabs.
+    expect(profileScopes(opus!)).toEqual([{ repo: null, label: "global" }, { repo: "app", label: "app" }, { repo: "web", label: "web" }]);
+    expect(profileScopes(sonnet!)).toEqual([{ repo: null, label: "global" }]);
+    expect(profileScopes(solo!)).toEqual([{ repo: "app", label: "app" }]);
+    // "Override for repo…" offers repos without their own; a repo-only profile has no global to copy.
+    expect(overridableRepos(opus!, config)).toEqual(["docs"]);
+    expect(overridableRepos(sonnet!, config)).toEqual(["app", "web", "docs"]);
+    expect(overridableRepos(solo!, config)).toEqual([]);
+    // Each tab edits its own definition.
+    expect(scopedProfile(config, "claude-opus", null)).toEqual({ runner: "claude", model: "opus" });
+    expect(scopedProfile(config, "claude-opus", "app")).toEqual({ runner: "claude", model: "fable" });
+    expect(scopedProfile(config, "claude-opus", "docs")).toBeUndefined();
+    expect(profileRoute("claude-opus", null)).toBe("/api/profiles/claude-opus");
+    expect(profileRoute("claude-opus", "my app")).toBe("/api/repos/my%20app/profiles/claude-opus");
+    // The route the drawer saves a repo tab through is the one the API serves.
+    const saved = await lasso.api<ConfigFile>(profileRoute("claude-opus", "app"), { method: "PUT", body: JSON.stringify({ profile: { runner: "claude", model: "haiku" } }) });
+    expect(scopedProfile(saved.config, "claude-opus", "app")).toEqual({ runner: "claude", model: "haiku" });
+    expect(scopedProfile(saved.config, "claude-opus", null)).toEqual({ runner: "claude", model: "opus" });
+  });
+
+  it("are on the page: scope tabs, Override for repo…, repo-only markers, and the repo routes", async () => {
+    const { lasso } = await lassoWithTicket();
+    const html = await (await lasso.page("/")).text();
+    for (const name of ["profileIndex", "scopeNote", "profileScopes", "overridableRepos", "scopedProfile", "profileRoute"]) expect(html).toMatch(new RegExp(`import \\{[^}]*\\b${name}\\b[^}]*\\} from '/metro\\.js'`));
+    for (const role of ["profile-scopes", "profile-scope-tab", "profile-override", "profile-scope-line", "profile-scope"]) expect(html).toContain(`'data-role': '${role}'`);
+    expect(html).toContain("text: 'Override for repo…'");
+    expect(html).toContain("role: 'tab'");
+    expect(html).toContain("text: override ? 'Remove override' : 'Delete'");
+    // The override copies the saved global profile; saves and deletes go to the open tab's scope; a repo's default through its own route.
+    expect(html).toContain("api(profileRoute(name, repo), { method: 'PUT', body: JSON.stringify({ profile: config.profiles[name], create: true }) })");
+    expect(html).toContain("api(profileRoute(name, scope), { method: 'PUT', body: JSON.stringify({ profile: cleanProfile(d.draft) }) })");
+    expect(html).toContain("api('/api/repos/' + encodeURIComponent(scope), { method: 'PATCH', body: JSON.stringify({ default_profile: name }) })");
+    // Opened with no scope, as from a Stage, the drawer starts on the global tab.
+    expect(html).toContain("pickProfile(d, name, opts.scope ?? null);");
+    expect(html).toContain("d.scope = scopes.some((s) => s.repo === scope) ? scope : scopes.length ? scopes[0].repo : null;");
+    const fromStage = html.slice(html.indexOf("openProfileDrawer(stageProfileView("), html.indexOf("onChange: (config) => profiles.changed(config)"));
+    expect(fromStage).toContain("context: 'Stage '");
+    expect(fromStage).not.toContain("scope:");
   });
 });
 

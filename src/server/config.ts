@@ -315,30 +315,48 @@ function knownProfile(config: Config, name: string): void {
   if (!config.profiles[name]) throw new ConfigError(`no profile named ${name} in config.yaml`);
 }
 
+/** Where a profile edit lands: config.yaml's global profiles:, or one repo's own (ADR 0011). */
+export interface ProfileWhere {
+  /** The repo whose profiles: to edit; absent edits the global ones. */
+  repo?: string;
+}
+
+/** The profiles an edit reads and the path to them in config.yaml, refusing a repo config.yaml lacks. */
+function profileScope(config: Config, where: ProfileWhere): { profiles: Record<string, ProfileConfig>; path: string[]; of: string } {
+  if (where.repo === undefined) return { profiles: config.profiles, path: ["profiles"], of: "config.yaml" };
+  const repo = config.repos[where.repo];
+  if (!repo) throw new ConfigError(`no repo named ${where.repo} in config.yaml`);
+  return { profiles: repo.profiles, path: ["repos", where.repo, "profiles"], of: `repo ${where.repo}` };
+}
+
 /**
- * Create or replace one global Agent Profile in config.yaml text, comments
- * kept: fields the new profile leaves out are removed, unchanged ones are not
- * touched, and the result is checked by the same parser as config load.
- * `profile` is the profile as config.yaml would hold it. With `create`, an
- * existing profile of that name is refused; without, a missing one is.
+ * Create or replace one Agent Profile in config.yaml text, comments kept:
+ * a global one, or with `repo` that repo's own, which replaces a global of
+ * the same name whole for its Tickets. Fields the new profile leaves out are
+ * removed, unchanged ones are not touched, and the result is checked by the
+ * same parser as config load. `profile` is the profile as config.yaml would
+ * hold it. With `create`, an existing profile of that name in that scope is
+ * refused; without, a missing one is.
  */
-export function writeProfileText(text: string, file: string, name: string, profile: unknown, opts: { create?: boolean } = {}): { text: string; config: Config } {
+export function writeProfileText(text: string, file: string, name: string, profile: unknown, opts: { create?: boolean } & ProfileWhere = {}): { text: string; config: Config } {
   profileName(name, `profiles.${name}`);
   if (!isPlainObject(profile)) throw new ConfigError("profile must be a mapping of its fields");
   const before = parseConfig(text, file);
-  if (opts.create && before.profiles[name]) throw new ConfigError(`profile ${name} already exists`);
-  if (!opts.create && !before.profiles[name]) throw new ConfigError(`no profile named ${name} in config.yaml`);
+  const scope = profileScope(before, opts);
+  if (opts.create && scope.profiles[name]) throw new ConfigError(`profile ${name} already exists${opts.repo === undefined ? "" : ` in repo ${opts.repo}`}`);
+  if (!opts.create && !scope.profiles[name]) throw new ConfigError(`no profile named ${name} in ${scope.of}`);
   // An empty mode block says nothing, so it is left out rather than written.
   const now = Object.fromEntries(Object.entries(profile).filter(([key, value]) => !(MODES.includes(key as Mode) && isPlainObject(value) && !Object.keys(value).length)));
-  const doc = profilesDocument(text, before);
-  const node = doc.getIn(["profiles", name], true);
+  const doc = profilesDocument(text, before, scope.path);
+  const at = [...scope.path, name];
+  const node = doc.getIn(at, true);
   const was = isMap(node) ? (node.toJSON() as Record<string, unknown>) : null;
-  if (was) applyPatch(doc, { profiles: { [name]: replacing(was, now) } });
-  else doc.setIn(["profiles", name], doc.createNode(now));
+  if (was) applyPatch(doc, replacing(was, now), at);
+  else doc.setIn(at, doc.createNode(now));
   // New args read best on one line, as the shipped examples write them.
   const argsAt = (p: Record<string, unknown> | null, mode?: Mode) => JSON.stringify((mode ? (p?.[mode] as Record<string, unknown> | undefined) : p)?.args);
   for (const mode of [undefined, ...MODES]) {
-    const args = doc.getIn(["profiles", name, ...(mode ? [mode] : []), "args"], true);
+    const args = doc.getIn([...at, ...(mode ? [mode] : []), "args"], true);
     if (isSeq(args) && argsAt(was, mode) !== argsAt(now, mode)) args.flow = true;
   }
   const out = doc.toString(writeLike(text));
@@ -346,19 +364,39 @@ export function writeProfileText(text: string, file: string, name: string, profi
 }
 
 /**
- * Remove one global Agent Profile from config.yaml text, comments kept. The
- * global default_profile cannot be removed; name another first. Whatever
- * else names it is the caller's to weigh (see profileUsers).
+ * Remove one Agent Profile from config.yaml text, comments kept: a global
+ * one, or with `repo` that repo's own, which returns the repo to the global
+ * profile of that name if there is one. A default_profile cannot be removed
+ * from under itself; name another first. Whatever else names it is the
+ * caller's to weigh (see profileNamers).
  */
-export function deleteProfileText(text: string, file: string, name: string): { text: string; config: Config } {
+export function deleteProfileText(text: string, file: string, name: string, where: ProfileWhere = {}): { text: string; config: Config } {
   const before = parseConfig(text, file);
-  if (!before.profiles[name]) throw new ConfigError(`no profile named ${name} in config.yaml`);
-  if (before.default_profile === name) throw new ConfigError(`${name} is the default_profile; make another profile the default first`);
-  const doc = profilesDocument(text, before);
-  doc.deleteIn(["profiles", name]);
-  // An empty profiles: stays, written {}, since a missing one would bring the shipped profiles back.
-  const left = doc.get("profiles", true);
+  const scope = profileScope(before, where);
+  if (!scope.profiles[name]) throw new ConfigError(`no profile named ${name} in ${scope.of}`);
+  if (where.repo === undefined && before.default_profile === name) throw new ConfigError(`${name} is the default_profile; make another profile the default first`);
+  if (where.repo !== undefined && before.repos[where.repo]!.default_profile === name && !before.profiles[name]) throw new ConfigError(`${name} is repo ${where.repo}'s default_profile; make another profile its default first`);
+  const doc = profilesDocument(text, before, scope.path);
+  doc.deleteIn([...scope.path, name]);
+  // An empty profiles: stays, written {}: the global one since a missing one would bring the shipped profiles back, and a repo's so its line and comments stay put.
+  const left = doc.getIn(scope.path, true);
   if (isMap(left) && left.items.length === 0) left.flow = true;
+  const out = doc.toString(writeLike(text));
+  return { text: out, config: parseConfig(out, file) };
+}
+
+/**
+ * Set or clear a repo's default_profile in config.yaml text, comments kept.
+ * It must name a profile the repo's Tickets can reach: its own or a global
+ * one. null clears it, leaving the repo to config's default_profile.
+ */
+export function repoDefaultText(text: string, file: string, repo: string, name: unknown): { text: string; config: Config } {
+  const before = parseConfig(text, file);
+  if (!before.repos[repo]) throw new ConfigError(`no repo named ${repo} in config.yaml`);
+  if (name !== null && typeof name !== "string") throw new ConfigError("default_profile must name a profile, or be null to clear it");
+  if (name !== null && !profilesFor(before, repo)[name]) throw new ConfigError(`no profile named ${name} in config.yaml for repo ${repo}`);
+  const doc = parseDocument(text);
+  applyPatch(doc, { default_profile: name }, ["repos", repo]);
   const out = doc.toString(writeLike(text));
   return { text: out, config: parseConfig(out, file) };
 }
@@ -374,11 +412,15 @@ export function profileNamers(config: Config, name: string): string[] {
   return namers;
 }
 
-/** config.yaml's document with its profiles: written out, so an edit to one never drops the shipped ones a file without profiles: runs on. */
-function profilesDocument(text: string, config: Config): Document {
+/**
+ * config.yaml's document with the profiles: an edit touches written out as
+ * a block: the global ones in full, so an edit to one never drops the shipped
+ * ones a file without profiles: runs on, and a repo's made if it has none.
+ */
+function profilesDocument(text: string, config: Config, path: string[]): Document {
   const doc = parseDocument(text);
-  if (!doc.has("profiles")) doc.set("profiles", doc.createNode(config.profiles));
-  const profiles = doc.get("profiles", true);
+  if (!doc.hasIn(path)) doc.setIn(path, doc.createNode(path.length === 1 ? config.profiles : {}));
+  const profiles = doc.getIn(path, true);
   if (isMap(profiles)) profiles.flow = false;
   return doc;
 }

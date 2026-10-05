@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { Changes, Change } from "../server/changes.ts";
-import { ConfigError, patchConfigText, writeProfileText, deleteProfileText, profileNamers, applyLive, RESTART_KEYS, parseConfig, currentConfig, type Config } from "../server/config.ts";
+import { ConfigError, patchConfigText, writeProfileText, deleteProfileText, repoDefaultText, profileNamers, applyLive, RESTART_KEYS, parseConfig, currentConfig, type Config } from "../server/config.ts";
 import type { LassoHome } from "../server/home.ts";
 import type { Tick } from "../server/tick.ts";
 import type { Tickets, TicketRow } from "../store/tickets.ts";
@@ -21,6 +21,7 @@ import { PipelineFiles } from "../pipeline/files.ts";
 import { dashboardHtml, metroScript } from "../dashboard/page.ts";
 import { ticketView, ticketDetail, sessionView, sortForLedger, pipelineListing, pipelineFileView, pipelineVersionView, actionListings, type ViewContext, type IntakeResult, type ConfigFile } from "./views.ts";
 import { readFileSync } from "node:fs";
+import { isPlainObject } from "../fields.ts";
 import { replaceFile } from "../atomic-write.ts";
 
 export interface AppDeps {
@@ -273,6 +274,43 @@ export function createApp(deps: AppDeps): Hono {
     if (namers.length && c.req.query("confirm") !== "1") {
       return c.json({ error: `${name} is named by ${namers.join(", ")}; their next Sessions are Flagged once it is gone`, usedBy: namers, confirm: true }, 409);
     }
+    return c.json(writeConfig(text, config));
+  });
+  // A repo's own profiles (LASSO-74): one replaces the global of its name whole for that repo's Tickets, so
+  // creating one from a copy of the global and deleting it again are how the drawer overrides and restores.
+  const knownRepo = (repo: string) => (parseConfig(configText(), deps.home.configFile).repos[repo] ? null : { error: `no repo named ${repo} in config.yaml` });
+  app.put("/api/repos/:repo/profiles/:name", async (c) => {
+    const repo = c.req.param("repo");
+    const missing = knownRepo(repo);
+    if (missing) return c.json(missing, 404);
+    const body = ((await c.req.json().catch(() => null)) ?? {}) as { profile?: unknown; create?: unknown };
+    const create = body.create === true;
+    const { text, config } = writeProfileText(configText(), deps.home.configFile, c.req.param("name"), body.profile, { create, repo });
+    return c.json(writeConfig(text, config), create ? 201 : 200);
+  });
+  // Removing an override returns the repo to the global profile at once. A repo-only profile has no global to
+  // fall back on, so a Pipeline still naming it is listed first and the delete waits for ?confirm=1.
+  app.delete("/api/repos/:repo/profiles/:name", (c) => {
+    const [repo, name] = [c.req.param("repo"), c.req.param("name")];
+    const before = configText();
+    const current = parseConfig(before, deps.home.configFile);
+    if (!current.repos[repo]) return c.json({ error: `no repo named ${repo} in config.yaml` }, 404);
+    if (!current.repos[repo].profiles[name]) return c.json({ error: `no profile named ${name} in repo ${repo}` }, 404);
+    const { text, config } = deleteProfileText(before, deps.home.configFile, name, { repo });
+    const namers = current.profiles[name] ? [] : pipelineNamers(name);
+    if (namers.length && c.req.query("confirm") !== "1") {
+      return c.json({ error: `${name} is named by ${namers.join(", ")}; their next Sessions in repo ${repo} are Flagged once it is gone`, usedBy: namers, confirm: true }, 409);
+    }
+    return c.json(writeConfig(text, config));
+  });
+  // A repo's default_profile: a profile its Tickets can reach, or null to fall back on config's.
+  app.patch("/api/repos/:repo", async (c) => {
+    const repo = c.req.param("repo");
+    const missing = knownRepo(repo);
+    if (missing) return c.json(missing, 404);
+    const patch = await c.req.json().catch(() => null);
+    if (!isPlainObject(patch) || Object.keys(patch).join() !== "default_profile") return c.json({ error: "only a repo's default_profile is set here; the rest of a repo is edited in config.yaml by hand" }, 400);
+    const { text, config } = repoDefaultText(configText(), deps.home.configFile, repo, patch.default_profile);
     return c.json(writeConfig(text, config));
   });
   /** Each Pipeline and Stage that names a profile in its file. */
