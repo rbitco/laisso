@@ -286,6 +286,54 @@ ${stageProfile ? `    profile: ${stageProfile}\n` : ""}    artifact: commits-on-
     expect(readFileSync(terminal!.launcher!, "utf8")).toContain(`exec 'claude' '--session-id' '${opened.session!.id}' '--permission-mode' 'acceptEdits' '--name' 'Lasso: ${talk.id.slice(-8)} grill' '--effort' 'low' '/grilling`);
   });
 
+  it("merges the human: block into a human Session and the headless: block into a headless one, on open and on resume", async () => {
+    const split: Record<string, ProfileConfig> = {
+      split: { runner: "claude", model: "opus", args: ["--verbose"], human: { permission: "auto", model: "sonnet", args: ["--debug", "--chrome"] }, headless: { effort: "high", args: ["--strict"] } },
+    };
+    const lasso = await lassoWith({ work: HEADLESS("split"), talk: HUMAN("split") }, undefined, { profiles: split });
+    const work = await intake(lasso, "work");
+    await lasso.runner.script({ stdout: claudeFixture("success.json"), commands: commit });
+    await checkNow(lasso);
+    const w = await finished(lasso, work.id);
+    const [headless] = await lasso.runner.calls();
+    // The human block's auto does not reach headless Sessions: they keep the shared model and the headless baseline.
+    expect(headless!.argv.slice(6, 10)).toEqual(["--permission-mode", "auto", "--permission-prompts", "none"]);
+    expect(headless!.argv.slice(-6)).toEqual(["--model", "opus", "--effort", "high", "--verbose", "--strict"]);
+    expect(w.session!.profile).toEqual({ name: "split", runner: "claude", model: "opus", effort: "high", permission: null, args: ["--verbose", "--strict"] });
+
+    const talk = await intake(lasso, "talk");
+    const opened = await openTerminal(lasso, talk.id);
+    const id = opened.session!.id;
+    expect(opened.session!.profile).toEqual({ name: "split", runner: "claude", model: "sonnet", effort: null, permission: "auto", args: ["--verbose", "--debug", "--chrome"] });
+    const [first] = await lasso.terminals();
+    expect(readFileSync(first!.launcher!, "utf8")).toContain(`exec 'claude' '--session-id' '${id}' '--permission-mode' 'auto' '--name' 'Lasso: ${talk.id.slice(-8)} grill' '--model' 'sonnet' '--verbose' '--debug' '--chrome' '/grilling`);
+
+    // Opening again re-enters the held Session, still under the human block.
+    const again = await openTerminal(lasso, talk.id);
+    expect(again.session!.id).toBe(id);
+    const calls = await lasso.terminals();
+    expect(readFileSync(calls[1]!.launcher!, "utf8")).toContain(`exec 'claude' '--resume' '${id}' '--permission-mode' 'auto' '--model' 'sonnet' '--verbose' '--debug' '--chrome'\n`);
+  });
+
+  it("keeps each mode's baseline for a field neither the profile nor its block sets", async () => {
+    const blank: Record<string, ProfileConfig> = { blank: { runner: "claude", headless: { model: "haiku" }, human: { model: "haiku" } } };
+    const lasso = await lassoWith({ work: HEADLESS("blank"), talk: HUMAN("blank") }, undefined, { profiles: blank });
+    const work = await intake(lasso, "work");
+    await lasso.runner.script({ stdout: claudeFixture("success.json"), commands: commit });
+    await checkNow(lasso);
+    const w = await finished(lasso, work.id);
+    const [headless] = await lasso.runner.calls();
+    expect(headless!.argv.slice(6, 10)).toEqual(["--permission-mode", "auto", "--permission-prompts", "none"]);
+    expect(headless!.argv).not.toContain("--effort");
+    expect(headless!.argv.slice(-2)).toEqual(["--model", "haiku"]);
+    expect(w.session!.profile).toEqual({ name: "blank", runner: "claude", model: "haiku", effort: null, permission: null, args: [] });
+
+    const talk = await intake(lasso, "talk");
+    const opened = await openTerminal(lasso, talk.id);
+    const [terminal] = await lasso.terminals();
+    expect(readFileSync(terminal!.launcher!, "utf8")).toContain(`exec 'claude' '--session-id' '${opened.session!.id}' '--permission-mode' 'acceptEdits' '--name' 'Lasso: ${talk.id.slice(-8)} grill' '--model' 'haiku' '/grilling`);
+  });
+
   it("refuses Intake into a Pipeline whose profile config.yaml lacks, or when there is no profile at all", async () => {
     const lasso = await lassoWith({ ghost: HEADLESS("ghost"), bare: TWO(null, null) }, undefined, { profiles, default_profile: null });
     await expect(intake(lasso, "ghost")).rejects.toThrow(/Pipeline ghost: no profile named ghost in config\.yaml, which Pipeline ghost names/);

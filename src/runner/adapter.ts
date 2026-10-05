@@ -1,5 +1,5 @@
 import type { RunnerName } from "../pipeline/load.ts";
-import type { Effort, ProfileConfig } from "../server/config.ts";
+import type { Effort, ProfileSettings } from "../server/config.ts";
 import { renderFeedback, type FeedbackItem } from "../review/feedback.ts";
 
 export type OutcomeStatus = "succeeded" | "failed" | "exhausted" | "interrupted";
@@ -37,7 +37,7 @@ export interface RunRequest {
   name?: string;
   limits: RunLimits;
   /** The Agent Profile the Session runs under, resolved from config as it starts (ADR 0011). */
-  profile: ProfileConfig;
+  profile: ProfileSettings;
   /** A Round of a repeating Stage: the Feedback snapshot it addresses and the marker its comments carry. */
   feedback?: RoundContext;
 }
@@ -87,7 +87,7 @@ export interface RunnerAdapter {
 }
 
 /** The part of a RunRequest that comes from the Ticket and the Stage; the caller adds mode, session id, and limits. */
-export function requestFor(ticket: TicketLike, stage: StageLike, profile: ProfileConfig): Pick<RunRequest, "stage" | "prompt" | "skills" | "context" | "cwd" | "profile"> {
+export function requestFor(ticket: TicketLike, stage: StageLike, profile: ProfileSettings): Pick<RunRequest, "stage" | "prompt" | "skills" | "context" | "cwd" | "profile"> {
   return {
     stage: stage.name,
     prompt: stage.prompt,
@@ -150,7 +150,7 @@ export function ticketEnv(request: RunRequest): Record<string, string> {
  * Runner's own flag, its effort as the Runner spells it, then its extra args.
  * Permission is not here: it replaces a baseline flag, so each adapter places it.
  */
-export function profileArgs(profile: ProfileConfig, modelFlag: string, effort: (level: Effort) => string[]): string[] {
+export function profileArgs(profile: ProfileSettings, modelFlag: string, effort: (level: Effort) => string[]): string[] {
   return [...(profile.model ? [modelFlag, profile.model] : []), ...(profile.effort ? effort(profile.effort) : []), ...(profile.args ?? [])];
 }
 

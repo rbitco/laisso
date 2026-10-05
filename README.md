@@ -28,7 +28,11 @@ an `effort` (`low | medium | high | xhigh | max`), a `permission`
 before the prompt) and, for Codex, `skills_dir` (where its skill catalog
 lives, default `~/.agents/skills`). Unset effort keeps the Runner's
 default; unset permission keeps Lasso's per mode (Claude `auto` headless
-with prompts off, `acceptEdits` in a terminal; Codex workspace-write). A Stage
+with prompts off, `acceptEdits` in a terminal; Codex workspace-write). Optional
+`headless:` and `human:` blocks set `model`, `effort`, `permission` and
+`args` for one mode only: a human Stage's Sessions take `human:`, the rest
+`headless:`. A block's fields replace the shared ones and its args follow
+the shared args; each Session records the merged result. A Stage
 runs its own `profile:`, else its Pipeline's, else `default_profile`.
 Profiles are read when each Session starts, so an edit applies to the
 next Session without a restart. Codex ignores a skill mention whose path

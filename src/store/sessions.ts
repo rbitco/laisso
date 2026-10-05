@@ -1,7 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { OutcomeStatus } from "../runner/adapter.ts";
 import type { RunnerName } from "../pipeline/load.ts";
-import type { Effort, Permission, ProfileConfig } from "../server/config.ts";
+import type { Effort, Permission, ProfileSettings } from "../server/config.ts";
 
 export type SessionMode = "headless" | "terminal" | "action";
 
@@ -145,7 +145,7 @@ export class Sessions {
 }
 
 /** The record of what a Session runs under, for its row. */
-export function sessionProfile(name: string, profile: ProfileConfig): string {
+export function sessionProfile(name: string, profile: ProfileSettings): string {
   const record: SessionProfile = { name, runner: profile.runner, model: profile.model ?? null, effort: profile.effort ?? null, permission: profile.permission ?? null, args: profile.args ?? [] };
   return JSON.stringify(record);
 }

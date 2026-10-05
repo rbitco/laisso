@@ -62,6 +62,12 @@ describe("loadConfig", () => {
       default_profile: "codex-fast",
     });
     expect(loadConfig(homeWith("profiles:\n  deep: { runner: claude, effort: xhigh, permission: full }\n")).profiles.deep).toEqual({ runner: "claude", effort: "xhigh", permission: "full" });
+    expect(loadConfig(homeWith("profiles:\n  split: { runner: claude, args: [-a], human: { permission: auto, args: [-b] }, headless: { model: opus } }\n")).profiles.split).toEqual({
+      runner: "claude",
+      args: ["-a"],
+      human: { permission: "auto", args: ["-b"] },
+      headless: { model: "opus" },
+    });
     expect(loadConfig(homeWith("default_profile: null\n")).default_profile).toBeNull();
     const bad = (yaml: string) => () => loadConfig(homeWith(`profiles:\n${yaml}`));
     expect(bad("  fast: { model: x }\n")).toThrow(/profiles\.fast: runner must be one of claude, codex, pi, not unset/);
@@ -74,6 +80,13 @@ describe("loadConfig", () => {
     expect(bad("  fast: { runner: codex, permission: yolo }\n")).toThrow(/profiles\.fast\.permission must be one of auto, edits, full, not yolo/);
     expect(bad("  fast: { runner: pi, permission: true }\n")).toThrow(/profiles\.fast\.permission must be one of auto, edits, full, not true/);
     expect(bad("  fast: { runner: claude, reasoning: high }\n")).toThrow(/profiles\.fast: unknown field reasoning/);
+    expect(bad("  fast: { runner: claude, human: { runner: pi } }\n")).toThrow(/profiles\.fast\.human: unknown field runner/);
+    expect(bad("  fast: { runner: codex, headless: { skills_dir: /opt } }\n")).toThrow(/profiles\.fast\.headless: unknown field skills_dir/);
+    expect(bad("  fast: { runner: claude, human: { permission: yolo } }\n")).toThrow(/profiles\.fast\.human\.permission must be one of auto, edits, full, not yolo/);
+    expect(bad("  fast: { runner: claude, headless: { effort: extreme } }\n")).toThrow(/profiles\.fast\.headless\.effort must be one of low, medium, high, xhigh, max, not extreme/);
+    expect(bad("  fast: { runner: claude, human: { model: \"\" } }\n")).toThrow(/profiles\.fast\.human\.model must be a model name/);
+    expect(bad("  fast: { runner: claude, human: { args: --verbose } }\n")).toThrow(/profiles\.fast\.human\.args must be a list of arguments/);
+    expect(bad("  fast: { runner: claude, human: auto }\n")).toThrow(/profiles\.fast\.human must be a mapping, not auto/);
     expect(() => loadConfig(homeWith("default_profile: Big\n"))).toThrow(/default_profile: a profile name is lowercase/);
   });
 });
@@ -81,12 +94,19 @@ describe("loadConfig", () => {
 describe("resolveProfile", () => {
   const config = { profiles: { claude: { runner: "claude" as const }, fast: { runner: "pi" as const, model: "m" } }, default_profile: "claude" };
   const pipeline = (profile: string | null) => ({ name: "p", profile });
-  const stage = (profile: string | null) => ({ name: "s", profile });
+  const stage = (profile: string | null) => ({ name: "s", profile, human: false });
 
   it("takes the Stage's profile, else the Pipeline's, else default_profile, saying which", () => {
     expect(resolveProfile(config, pipeline("claude"), stage("fast"))).toEqual({ name: "fast", from: "stage", profile: { runner: "pi", model: "m" } });
     expect(resolveProfile(config, pipeline("fast"), stage(null))).toEqual({ name: "fast", from: "pipeline", profile: { runner: "pi", model: "m" } });
     expect(resolveProfile(config, pipeline(null), stage(null))).toEqual({ name: "claude", from: "default", profile: { runner: "claude" } });
+  });
+
+  it("merges the block for the Stage's mode: its fields replace the shared ones and its args follow", () => {
+    const split = { runner: "claude" as const, model: "opus", effort: "high" as const, args: ["-a"], human: { permission: "auto" as const, args: ["-b", "-c"] }, headless: { model: "sonnet" } };
+    const both = { ...config, profiles: { split } };
+    expect(resolveProfile(both, pipeline("split"), { ...stage(null), human: true })).toMatchObject({ profile: { runner: "claude", model: "opus", effort: "high", permission: "auto", args: ["-a", "-b", "-c"] } });
+    expect(resolveProfile(both, pipeline("split"), stage(null))).toEqual({ name: "split", from: "pipeline", profile: { runner: "claude", model: "sonnet", effort: "high", args: ["-a"] } });
   });
 
   it("names a missing profile and where it was named, and never falls back", () => {

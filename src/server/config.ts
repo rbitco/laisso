@@ -44,22 +44,36 @@ export type Effort = (typeof EFFORTS)[number];
 export const PERMISSIONS = ["auto", "edits", "full"] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
-/**
- * An Agent Profile (ADR 0011): the Runner a Stage runs under, with the model,
- * effort, permission and extra args it is given. Fields left out keep the
- * Runner's own default, or the adapter's baseline for that mode.
- */
-export interface ProfileConfig {
-  runner: RunnerName;
+/** What a profile's `headless:` or `human:` block may set for Sessions of that mode. */
+export interface ProfileBlock {
   /** Free text, passed to the Runner's model flag as written. */
   model?: string;
   effort?: Effort;
   /** In place of the adapter's baseline permission flag for the mode; Pi ignores it. */
   permission?: Permission;
-  /** Appended after every flag Lasso writes, so a repeated flag wins where the Runner lets the last one win. */
+  /** Appended after every flag Lasso writes, so a repeated flag wins where the Runner lets the last one win; a block's follow the shared ones. */
   args?: string[];
+}
+
+/**
+ * The settings one Session runs with: a profile with its mode's block merged
+ * in. This is all an adapter sees. Fields left out keep the Runner's own
+ * default, or the adapter's baseline for that mode.
+ */
+export interface ProfileSettings extends ProfileBlock {
+  runner: RunnerName;
   /** Codex only: where the Stage's skills live; ~/.agents/skills when unset. */
   skills_dir?: string;
+}
+
+/**
+ * An Agent Profile (ADR 0011): the Runner a Stage runs under, with the model,
+ * effort, permission and extra args it is given, and optional blocks that
+ * differ for headless and human Sessions.
+ */
+export interface ProfileConfig extends ProfileSettings {
+  headless?: ProfileBlock;
+  human?: ProfileBlock;
 }
 
 export interface Config {
@@ -121,6 +135,9 @@ profiles:
 #    permission: auto         # auto | edits | full; unset keeps Lasso's default per mode; Pi has none
 #    args: [-c, foo=bar]      # extra flags, after the ones Lasso writes
 #    skills_dir: /opt/skills  # Codex only: where skills live; default ~/.agents/skills
+#    human:                   # only for human Stages; headless: is the same for the rest
+#      permission: edits      # model, effort and permission here replace the ones above
+#      args: [--search]       # args here follow the ones above
 default_profile: claude
 
 # Global Budget defaults; a Pipeline or a Ticket may override each one.
@@ -307,7 +324,9 @@ function parseActions(value: Record<string, unknown>, where: string): Record<str
 
 /** What an Agent Profile may be called. */
 export const PROFILE_NAME = /^[a-z0-9][a-z0-9._-]*$/;
-const PROFILE_FIELDS = new Set(["runner", "model", "effort", "permission", "args", "skills_dir"]);
+const PROFILE_FIELDS = new Set(["runner", "model", "effort", "permission", "args", "skills_dir", "headless", "human"]);
+const BLOCK_FIELDS = new Set(["model", "effort", "permission", "args"]);
+const MODES = ["headless", "human"] as const;
 
 function profileName(value: unknown, at: string): string {
   if (typeof value !== "string" || !PROFILE_NAME.test(value)) throw new ConfigError(`${at}: a profile name is lowercase letters, digits, dots, hyphens, and underscores, not ${String(value)}`);
@@ -322,24 +341,36 @@ function parseProfiles(value: Record<string, unknown>, where: string): Record<st
     const profile = mapping(entry, at, fail);
     for (const key of Object.keys(profile)) if (!PROFILE_FIELDS.has(key)) throw new ConfigError(`${at}: unknown field ${key}`);
     if (!(RUNNERS as readonly unknown[]).includes(profile.runner)) throw new ConfigError(`${at}: runner must be one of ${RUNNERS.join(", ")}, not ${String(profile.runner ?? "unset")}`);
-    const parsed: ProfileConfig = { runner: profile.runner as RunnerName };
-    if (profile.model !== undefined) {
-      if (typeof profile.model !== "string" || !profile.model.trim()) throw new ConfigError(`${at}.model must be a model name`);
-      parsed.model = profile.model;
-    }
-    if (profile.effort !== undefined) parsed.effort = oneOf(EFFORTS, profile.effort, `${at}.effort`);
-    if (profile.permission !== undefined) parsed.permission = oneOf(PERMISSIONS, profile.permission, `${at}.permission`);
-    if (profile.args !== undefined) {
-      if (!Array.isArray(profile.args) || !profile.args.every((a) => typeof a === "string" || typeof a === "number")) throw new ConfigError(`${at}.args must be a list of arguments`);
-      parsed.args = profile.args.map(String);
-    }
+    const parsed: ProfileConfig = { runner: profile.runner as RunnerName, ...parseBlock(profile, at) };
     if (profile.skills_dir !== undefined) {
       if (typeof profile.skills_dir !== "string" || !profile.skills_dir.trim()) throw new ConfigError(`${at}.skills_dir must be a directory`);
       parsed.skills_dir = profile.skills_dir;
     }
+    for (const mode of MODES) {
+      if (profile[mode] === undefined) continue;
+      const block = mapping(profile[mode], `${at}.${mode}`, fail);
+      for (const key of Object.keys(block)) if (!BLOCK_FIELDS.has(key)) throw new ConfigError(`${at}.${mode}: unknown field ${key}`);
+      parsed[mode] = parseBlock(block, `${at}.${mode}`);
+    }
     profiles[name] = parsed;
   }
   return profiles;
+}
+
+/** The fields a profile and its mode blocks share, checked alike in both. */
+function parseBlock(value: Record<string, unknown>, at: string): ProfileBlock {
+  const parsed: ProfileBlock = {};
+  if (value.model !== undefined) {
+    if (typeof value.model !== "string" || !value.model.trim()) throw new ConfigError(`${at}.model must be a model name`);
+    parsed.model = value.model;
+  }
+  if (value.effort !== undefined) parsed.effort = oneOf(EFFORTS, value.effort, `${at}.effort`);
+  if (value.permission !== undefined) parsed.permission = oneOf(PERMISSIONS, value.permission, `${at}.permission`);
+  if (value.args !== undefined) {
+    if (!Array.isArray(value.args) || !value.args.every((a) => typeof a === "string" || typeof a === "number")) throw new ConfigError(`${at}.args must be a list of arguments`);
+    parsed.args = value.args.map(String);
+  }
+  return parsed;
 }
 
 function oneOf<T extends string>(choices: readonly T[], value: unknown, at: string): T {
@@ -350,23 +381,36 @@ function oneOf<T extends string>(choices: readonly T[], value: unknown, at: stri
 /** Where a Session's profile was named: the Stage, its Pipeline, or config's default_profile. */
 export type ProfileSource = "stage" | "pipeline" | "default";
 
-/** The Agent Profile a Stage runs under, as config has it when the Session starts. */
+/** The Agent Profile a Stage runs under, as config has it when the Session starts, with the Stage's mode merged in. */
 export interface ResolvedProfile {
   name: string;
   from: ProfileSource;
-  profile: ProfileConfig;
+  profile: ProfileSettings;
 }
 
 /**
  * A Stage's profile: its own, else its Pipeline's, else default_profile
  * (ADR 0011). Profiles are live config, so this is asked at each Session
- * start; a name config no longer has is a problem, never a fallback.
+ * start; a name config no longer has is a problem, never a fallback. The
+ * Stage's `human` flag picks the block merged in, so a Session gets one flat
+ * set of settings.
  */
-export function resolveProfile(config: Pick<Config, "profiles" | "default_profile">, pipeline: Pick<Pipeline, "name" | "profile">, stage: Pick<RunnerStage, "name" | "profile">): ResolvedProfile | { problem: string } {
+export function resolveProfile(config: Pick<Config, "profiles" | "default_profile">, pipeline: Pick<Pipeline, "name" | "profile">, stage: Pick<RunnerStage, "name" | "profile" | "human">): ResolvedProfile | { problem: string } {
   const [name, from] = stage.profile ? [stage.profile, "stage" as const] : pipeline.profile ? [pipeline.profile, "pipeline" as const] : [config.default_profile, "default" as const];
   if (name === null) return { problem: `Stage ${stage.name} names no profile, nor does Pipeline ${pipeline.name}, and config.yaml has no default_profile` };
   const profile = config.profiles[name];
-  if (profile) return { name, from, profile };
+  if (profile) return { name, from, profile: settingsFor(profile, stage.human ? "human" : "headless") };
   const by = from === "stage" ? `Stage ${stage.name}` : from === "pipeline" ? `Pipeline ${pipeline.name}` : "default_profile";
   return { problem: `no profile named ${name} in config.yaml, which ${by} names` };
+}
+
+/** A profile with one mode's block merged in: the block's model, effort and permission replace the shared ones, and its args follow. */
+export function settingsFor(profile: ProfileConfig, mode: (typeof MODES)[number]): ProfileSettings {
+  const { headless: _headless, human: _human, ...shared } = profile;
+  const block = profile[mode];
+  if (!block) return shared;
+  const { args, ...fields } = block;
+  const merged: ProfileSettings = { ...shared, ...fields };
+  if (args) merged.args = [...(shared.args ?? []), ...args];
+  return merged;
 }
