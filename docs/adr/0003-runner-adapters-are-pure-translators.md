@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: accepted, amended by ADR 0011
 ---
 
 # Runner adapters are pure translators; Lasso owns the process

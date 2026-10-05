@@ -90,8 +90,16 @@ _Avoid_: output, deliverable, result, check
 
 **Runner**:
 The CLI agent that executes one Stage for one Ticket: Claude Code, Codex, or
-Pi. A Pipeline names a Runner per Stage.
-_Avoid_: LLM, model, agent, executor
+Pi. A Stage reaches its Runner through an Agent Profile.
+_Avoid_: LLM, model, agent, executor, harness
+
+**Agent Profile**:
+A named choice of Runner, model, effort, and permission, with extra
+arguments, that a Stage runs under. It may set different values for
+headless and human-in-the-loop Sessions. Defined in Lasso's config
+globally or per repo; a Stage names one, or inherits its Pipeline's or the
+config's default, and a human may override it for one Stage of a Ticket.
+_Avoid_: preset, rig, agent, model config
 
 **Session**:
 One Runner process working one Stage of one Ticket, identified by the
