@@ -18,6 +18,7 @@ import { createNotifier } from "../notify/notifier.ts";
 import { Mirror } from "../tracker/mirror.ts";
 import { Actions } from "../session/actions.ts";
 import { Exits } from "../session/exits.ts";
+import { Overrides } from "../session/overrides.ts";
 import { Budgets } from "../budget/budgets.ts";
 import { Queue } from "../session/queue.ts";
 import { Teardown } from "../session/teardown.ts";
@@ -101,8 +102,9 @@ export async function serve(opts: ServeOptions): Promise<number> {
   });
   // One tick: owed mirror pushes, then action Stages, then the PR poll (a Round it makes due starts below), then headless starts, then the retention sweep.
   const tick = new Tick(config.tick, log, async () => [...(await mirror.retryPending()), ...(await actions.runDue()), ...(await review.poll()), ...(await runs.startRunnable()), ...(await teardown.sweep())], () => changes.emit({ kind: "tick" }));
-  const exits = new Exits({ tickets, sessions, log, progress, runs, terminal, budgets, tick, teardown });
-  const app = createApp({ config, home, tick, tickets, versions, sessions, feedback, runs, progress, terminal, exits, budgets, queue, changes, version: VERSION });
+  const overrides = new Overrides({ config, home, tickets, progress, log });
+  const exits = new Exits({ tickets, sessions, log, progress, runs, terminal, budgets, tick, teardown, overrides });
+  const app = createApp({ config, home, tick, tickets, versions, sessions, feedback, runs, progress, terminal, exits, overrides, budgets, queue, changes, version: VERSION });
 
   if (defaults.wroteConfig) log.info("config.written", { file: home.configFile });
   if (defaults.wrotePipeline) log.info("pipeline.written", { name: "default" });

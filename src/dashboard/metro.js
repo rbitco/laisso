@@ -320,15 +320,16 @@ export function profileUsers(name, pipelines, defaultProfile) {
 }
 
 /**
- * The used-by line: Stages naming the profile, then those that inherit it.
+ * The used-by line, a phrase that reads alone: "used by" the Stages naming the profile, then "inherited by" those
+ * that inherit it, or "used by no Stages".
  * @param {Array<{ pipeline: string, stage: string, inherited: boolean }>} users
  */
 export function usedByLine(users) {
-  if (!users.length) return 'no Stages';
+  if (!users.length) return 'used by no Stages';
   const list = (xs) => xs.map((u) => u.pipeline + '/' + u.stage).join(', ');
   const named = users.filter((u) => !u.inherited);
   const inherited = users.filter((u) => u.inherited);
-  return [named.length ? list(named) : '', inherited.length ? 'inherited by ' + list(inherited) : ''].filter(Boolean).join(' · ');
+  return [named.length ? 'used by ' + list(named) : '', inherited.length ? 'inherited by ' + list(inherited) : ''].filter(Boolean).join(' · ');
 }
 
 /** Pairs a Runner accepts but does not honour, checked per mode (ADR 0011 keeps a short list, no capability table). */
@@ -365,6 +366,34 @@ export function stageProfileView(stageProfile, pipelineProfile, config) {
   const p = name ? config.profiles[name] : undefined;
   const missing = name ? 'no profile named ' + name + ' in config.yaml' : 'no profile: config.yaml sets no default_profile';
   return { name, inherited, label, headless: p ? profileLine(p, 'headless') : missing, human: p ? profileLine(p, 'human') : missing };
+}
+
+/** @typedef {import('../api/views.ts').StageProfileView} StageProfileView */
+
+/**
+ * What a Runner Stage's profile button says on the Ticket page (LASSO-75): the profile its next Session runs, marked
+ * "overridden" while a human's override stands, and each mode's resolved line; a profile that does not resolve says why.
+ * @param {StageProfileView} v from the Ticket detail
+ * @returns {{ name: string | null, overridden: boolean, label: string, headless: string, human: string }}
+ */
+export function ticketProfileView(v) {
+  return {
+    name: v.profile,
+    overridden: v.overridden,
+    label: v.profile || 'none',
+    headless: v.headless ? profileLine(v.headless, 'headless') : v.problem || '',
+    human: v.human ? profileLine(v.human, 'human') : v.problem || '',
+  };
+}
+
+/**
+ * A Ledger row's stage text: the Stage and its place, then the profile with a star only when a human overrode the
+ * current Stage's profile, e.g. "plan · 3/8 · claude-fable*". Nothing extra otherwise (LASSO-63).
+ * @param {TicketView} t
+ */
+export function ledgerStageText(t) {
+  const place = t.stage.index < 0 ? '' : ' · ' + (t.stage.index + 1) + '/' + t.stages.length;
+  return t.stage.label + place + (t.stage.override ? ' · ' + t.stage.override + '*' : '');
 }
 
 // Repo overrides (LASSO-74): a repo may define its own profile of a global's name, which replaces it whole for that

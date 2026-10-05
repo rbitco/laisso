@@ -1,8 +1,8 @@
 import type { Logger } from "../server/log.ts";
 import type { Tick } from "../server/tick.ts";
 import type { Tickets, TicketRow } from "../store/tickets.ts";
-import { runnerOf, type Sessions } from "../store/sessions.ts";
-import type { Pipeline, Stage } from "../pipeline/load.ts";
+import { runnerOf, type Sessions, type SessionRow } from "../store/sessions.ts";
+import type { Pipeline, RunnerStage, Stage } from "../pipeline/load.ts";
 import type { Budgets } from "../budget/budgets.ts";
 import { adapterFor } from "../runner/adapters.ts";
 import { parseDuration, DurationError } from "../duration.ts";
@@ -10,6 +10,7 @@ import { TriggerError, type Progress } from "./progress.ts";
 import type { Runs } from "./runs.ts";
 import type { Terminal } from "./terminal.ts";
 import type { Teardown } from "./teardown.ts";
+import { resumeRefusal, type Overrides } from "./overrides.ts";
 
 export interface ExitsDeps {
   tickets: Tickets;
@@ -21,6 +22,7 @@ export interface ExitsDeps {
   budgets: Budgets;
   tick: Tick;
   teardown: Teardown;
+  overrides: Overrides;
 }
 
 /** What Extend may set on the Ticket layer; a null clears that dimension back to the Pipeline and global default. */
@@ -44,11 +46,16 @@ export class Exits {
     this.deps = deps;
   }
 
-  /** Retry: a fresh Session of the Stage the Ticket stopped at. */
-  async retry(ticket: TicketRow): Promise<TicketRow> {
-    const { progress, terminal, tick, runs } = this.deps;
+  /**
+   * Retry: a fresh Session of the Stage the Ticket stopped at. With a profile
+   * ("retry with…") it first sets the Stage's override to it, so this Session
+   * and every later one of the Stage run under it until cleared.
+   */
+  async retry(ticket: TicketRow, profile?: unknown): Promise<TicketRow> {
+    const { progress, terminal, tick, runs, overrides } = this.deps;
     const { pipeline, stage } = progress.flaggedStage(ticket);
     if (stage.kind === "runner") this.affordable(ticket, pipeline, stage);
+    if (profile !== undefined && profile !== null) ticket = overrides.set(ticket, stage.name, profile);
     return this.cleared(ticket, "retry", async (cleared) => {
       if (stage.kind === "action") await tick.run("start");
       else if (stage.human) {
@@ -66,6 +73,7 @@ export class Exits {
     if (stage.human) {
       const held = sessions.running(ticket.id).find((s) => s.mode === "terminal" && s.stage === stage.name && s.opened_at !== null);
       if (!held) throw new TriggerError(`no terminal Session of ${stage.name} to resume; Retry opens a fresh one`);
+      this.resumable(ticket, pipeline, stage, held);
       this.affordable(ticket, pipeline, stage);
       return this.cleared(ticket, "resume", (cleared) => terminal.open(cleared, pipeline, stage));
     }
@@ -75,6 +83,7 @@ export class Exits {
     const runner = runnerOf(last);
     const adapter = runner ? adapterFor(runner) : null;
     if (adapter?.sessionIds === "runner" && !last.runner_session_id) throw new TriggerError(`${adapter.name} left no session id to resume on ${stage.name}; Retry starts afresh`);
+    this.resumable(ticket, pipeline, stage, last);
     this.affordable(ticket, pipeline, stage);
     return this.cleared(ticket, "resume", (cleared) => runs.launch(cleared, pipeline, stage, "human", last));
   }
@@ -107,6 +116,12 @@ export class Exits {
     await this.deps.runs.killFor(ticket.id, "abandon");
     await this.deps.teardown.abandon(abandoned);
     return this.deps.tickets.get(abandoned.id)!;
+  }
+
+  /** Resume re-enters a Session on its own Runner; a profile now on another one (override or config edit) needs a Retry. */
+  private resumable(ticket: TicketRow, pipeline: Pipeline, stage: RunnerStage, last: SessionRow): void {
+    const refusal = resumeRefusal(stage.name, last, this.deps.overrides.resolve(ticket, pipeline, stage));
+    if (refusal) throw new TriggerError(refusal);
   }
 
   private affordable(ticket: TicketRow, pipeline: Pipeline, stage: Stage): void {

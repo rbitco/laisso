@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { closeSync, mkdirSync, openSync, readFileSync, readSync, statSync, writeSync } from "node:fs";
 import path from "node:path";
-import { currentConfig, resolveProfile, type Config, type ResolvedProfile } from "../server/config.ts";
+import { currentConfig, type Config, type ResolvedProfile } from "../server/config.ts";
 import type { LassoHome } from "../server/home.ts";
 import type { Logger } from "../server/log.ts";
 import type { TickChange } from "../server/tick.ts";
@@ -18,6 +18,7 @@ import type { Budgets } from "../budget/budgets.ts";
 import type { Queue } from "./queue.ts";
 import { spendOf } from "../budget/budget.ts";
 import type { Review, RoundPlan } from "../review/review.ts";
+import { resumeRefusal, ticketProfile } from "./overrides.ts";
 
 export class RunError extends Error {}
 
@@ -112,7 +113,8 @@ export class Runs {
       return `Flagged: ${refusal.detail}`;
     }
     // Profiles are live config (ADR 0011): read now, so an edit reaches this Session; a deleted one Flags rather than falls back.
-    const profile = resolveProfile(currentConfig(this.deps.home, this.deps.config), ticket.repo, pipeline, stage);
+    // The Ticket is read afresh for its override, which a human may have set since the caller read it.
+    const profile = ticketProfile(currentConfig(this.deps.home, this.deps.config), this.deps.tickets.get(ticket.id) ?? ticket, pipeline, stage);
     if ("problem" in profile) {
       await this.deps.progress.flag(ticket.id, "profile.missing", profile.problem);
       return `Flagged: ${profile.problem}`;
@@ -139,6 +141,8 @@ export class Runs {
     if (running) throw new RunError(`${running.stage} is already running on Ticket ${ticket.reference ?? ticket.id}`);
     if (stage.repeat && !plan) plan = review.plan(ticket, stage);
     if (stage.repeat && !plan) throw new RunError(`${stage.name} has no Feedback to address`);
+    const switched = resumeFrom ? resumeRefusal(stage.name, resumeFrom, profile) : null;
+    if (switched) throw new RunError(switched);
     this.deps.tickets.setRunnableSince(ticket.id, null);
     const adapter = adapterFor(profile.profile.runner);
     const sessionId = randomUUID();

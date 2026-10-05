@@ -158,4 +158,8 @@ const MIGRATIONS: Array<(db: DatabaseSync) => void> = [
   (db) => {
     db.exec(`ALTER TABLE sessions ADD COLUMN profile TEXT;`);
   },
+  // Per-Ticket profile overrides (LASSO-75): a human's choice of profile for one Stage of one Ticket, as JSON keyed by Stage name.
+  (db) => {
+    db.exec(`ALTER TABLE tickets ADD COLUMN profile_overrides TEXT;`);
+  },
 ];

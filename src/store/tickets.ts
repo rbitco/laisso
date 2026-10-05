@@ -40,8 +40,20 @@ export interface TicketRow {
   runnable_since: string | null;
   /** When the Ticket became done or Abandoned; the retention sweep counts from it. */
   ended_at: string | null;
+  /** A human's profile per Stage name, as JSON; it wins over the Pipeline's choice until cleared (ADR 0011). Null when there are none. */
+  profile_overrides: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/** A Ticket's profile overrides, by Stage name. */
+export function overridesOf(ticket: Pick<TicketRow, "profile_overrides">): Record<string, string> {
+  return ticket.profile_overrides ? (JSON.parse(ticket.profile_overrides) as Record<string, string>) : {};
+}
+
+/** The profile a human chose for this Stage of the Ticket, or null when the Pipeline's choice stands. */
+export function overrideFor(ticket: Pick<TicketRow, "profile_overrides">, stage: string): string | null {
+  return overridesOf(ticket)[stage] ?? null;
 }
 
 /** The tail of the ULID humans quote when a Ticket has no tracker reference. */
@@ -115,6 +127,27 @@ export class Tickets {
   setRunnableSince(id: string, since: string | null): void {
     this.db.prepare(`UPDATE tickets SET runnable_since = ? WHERE id = ?`).run(since, id);
     this.changed(id);
+  }
+
+  /** Set or (with null) clear the override for one Stage; it applies from the Stage's next Session. */
+  setOverride(id: string, stage: string, profile: string | null): TicketRow {
+    const overrides = overridesOf(this.get(id)!);
+    if (profile === null) delete overrides[stage];
+    else overrides[stage] = profile;
+    return this.update(id, { profile_overrides: Object.keys(overrides).length ? JSON.stringify(overrides) : null });
+  }
+
+  /**
+   * Keep only the overrides for these Stages: what a Version upgrade calls with
+   * the new Version's Stage names, as overrides are kept by Stage name and one
+   * survives only if its Stage does (ADR 0011). Not activity on the Ticket.
+   */
+  keepOverrides(id: string, stages: string[]): TicketRow {
+    const overrides = overridesOf(this.get(id)!);
+    const kept = Object.fromEntries(Object.entries(overrides).filter(([stage]) => stages.includes(stage)));
+    this.db.prepare(`UPDATE tickets SET profile_overrides = ? WHERE id = ?`).run(Object.keys(kept).length ? JSON.stringify(kept) : null, id);
+    this.changed(id);
+    return this.get(id)!;
   }
 
   update(id: string, patch: Partial<Omit<TicketRow, "id" | "created_at">>, now: string = new Date().toISOString()): TicketRow {

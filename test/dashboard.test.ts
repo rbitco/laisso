@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { startLassoWithRepos, waitFor, claudeFixture, type Lasso, type LassoConfig, type TrackerReply } from "./harness.ts";
 import { sortForLedger, type TicketView, type TicketDetail, type IntakeResult, type DisplayState } from "../src/api/views.ts";
-import { metroDiagram, metroTrack, sessionsForStage, quickAction, relative, tickIndicator, sessionProfile, profileApplies, profileLine, profileSummary, profileUsers, usedByLine, profileWarnings, MODEL_SUGGESTIONS, stageProfileView, profileIndex, scopeNote, profileScopes, overridableRepos, scopedProfile, profileRoute } from "../src/dashboard/metro.js";
+import { metroDiagram, metroTrack, sessionsForStage, quickAction, relative, tickIndicator, sessionProfile, profileApplies, profileLine, profileSummary, profileUsers, usedByLine, profileWarnings, MODEL_SUGGESTIONS, stageProfileView, profileIndex, scopeNote, profileScopes, overridableRepos, scopedProfile, profileRoute, ticketProfileView, ledgerStageText } from "../src/dashboard/metro.js";
 import type { ConfigFile, PipelineListing, PipelineFile } from "../src/api/views.ts";
 import type { ProfileConfig } from "../src/server/config.ts";
 import type { TickChange, TickStatus } from "../src/server/tick.ts";
@@ -367,10 +367,10 @@ stages:
 
     // Used by: Stages naming the profile, then those inheriting it from their Pipeline or from default_profile.
     expect(usedByLine(profileUsers("codex-high", pipelines, config.default_profile))).toBe("inherited by named/implement, named/notes");
-    expect(usedByLine(profileUsers("claude-haiku", pipelines, config.default_profile))).toBe("named/review");
+    expect(usedByLine(profileUsers("claude-haiku", pipelines, config.default_profile))).toBe("used by named/review");
     expect(usedByLine(profileUsers("claude-opus", pipelines, config.default_profile))).toBe("inherited by default/implement, default/review, three/implement, three/notes, three/review");
-    expect(usedByLine(profileUsers("claude-fable", pipelines, config.default_profile))).toBe("default/grill, default/plan, default/code-review");
-    expect(usedByLine(profileUsers("pi-gpt", pipelines, config.default_profile))).toBe("no Stages");
+    expect(usedByLine(profileUsers("claude-fable", pipelines, config.default_profile))).toBe("used by default/grill, default/plan, default/code-review");
+    expect(usedByLine(profileUsers("pi-gpt", pipelines, config.default_profile))).toBe("used by no Stages");
 
     // The known bad pair, per mode: Haiku runs headless in auto by default, and the human block asks for auto too.
     expect(profileWarnings(p["claude-haiku"]!)).toEqual(["Claude runs Haiku in Manual mode, not auto (headless and human Sessions)"]);
@@ -551,5 +551,39 @@ describe("the dashboard page", () => {
     expect(html).toContain("[data-stage]");
     expect(html).toContain("All Stages");
     expect(html).toContain("Check PR now");
+  });
+});
+
+describe("a Ticket's profile override on the dashboard", () => {
+  it("stars the Ledger's profile only for an overridden current Stage, and the Ticket page shows each Stage's profile", async () => {
+    const { lasso, ticket } = await lassoWithTicket();
+    const row = async () => (await lasso.api<TicketView[]>("/api/tickets")).find((t) => t.id === ticket.id)!;
+    const before = await row();
+    expect(ledgerStageText(before)).toBe(`${before.stage.label} · ${before.stage.index + 1}/${before.stages.length}`);
+
+    const detail = await detailOf(lasso, ticket.id);
+    const first = detail.profiles[0]!;
+    expect(first.overridden).toBe(false);
+    expect(ticketProfileView(first)).toMatchObject({ name: first.profile, overridden: false, label: first.profile });
+    expect(ticketProfileView(first).headless).toBe(profileLine(first.headless!, "headless"));
+
+    const name = first.profile!;
+    const set = await lasso.api<TicketDetail>(`/api/tickets/${ticket.id}/stages/${first.stage}/profile`, { method: "PUT", body: JSON.stringify({ profile: name }) });
+    expect(set.profiles[0]).toMatchObject({ stage: first.stage, profile: name, from: "override", overridden: true });
+    const after = await row();
+    expect(ledgerStageText(after)).toBe(`${after.stage.label} · ${after.stage.index + 1}/${after.stages.length} · ${name}*`);
+    expect(ticketProfileView({ ...first, headless: null, human: null, problem: "gone" })).toMatchObject({ headless: "gone", human: "gone" });
+  });
+
+  it("is on the page: the Ticket's profile buttons, the drawer's override buttons, retry with… and an unavailable Resume", async () => {
+    const { lasso } = await lassoWithTicket();
+    const html = await (await lasso.page("/")).text();
+    for (const name of ["ticketProfileView", "ledgerStageText"]) expect(html).toMatch(new RegExp(`import \\{[^}]*\\b${name}\\b[^}]*\\} from '/metro\\.js'`));
+    for (const role of ["stage-profiles", "ticket-stage-profile", "overridden", "profile-use", "profile-clear", "retry-with", "profile-retry", "unavailable"]) expect(html).toContain(`'data-role': '${role}'`);
+    expect(html).toContain("'Use ' + name + ' for this Ticket\\'s ' + p.stage");
+    expect(html).toContain("text: 'Clear override'");
+    expect(html).toContain("text: 'retry with…'");
+    expect(html).toContain("context: 'Stage ' + p.stage + ' of Ticket '");
+    expect(html).toContain("' is unavailable: '");
   });
 });

@@ -275,6 +275,10 @@
   .pf-pickbtn { display: grid; gap: 2px; justify-items: start; text-align: left; width: 100%; padding: 6px 10px; }
   .pf-pickbtn .pf-pickname { font-weight: 600; }
   .pf-pickbtn .pf-summary { white-space: pre-wrap; }
+  .pf-pickbtn .pf-overridden { font-size: 11px; color: var(--amber); font-weight: normal; margin-left: 6px; }
+  .stage-profiles { display: grid; gap: 8px; }
+  .stage-profiles .stage-name { font-size: 12px; color: var(--muted); }
+  .triggers .why { flex-basis: 100%; }
 </style>
 </head>
 <body>
@@ -305,7 +309,7 @@
   </div>
 </main>
 <script type="module">
-import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, relative, tickIndicator, sessionProfile, MODEL_SUGGESTIONS, profileApplies, profileMode, profileLine, profileSummary, profileUsers, usedByLine, profileWarnings, stageProfileView, profileIndex, scopeNote, profileScopes, overridableRepos, scopedProfile, profileRoute } from '/metro.js';
+import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, relative, tickIndicator, sessionProfile, MODEL_SUGGESTIONS, profileApplies, profileMode, profileLine, profileSummary, profileUsers, usedByLine, profileWarnings, stageProfileView, ticketProfileView, ledgerStageText, profileIndex, scopeNote, profileScopes, overridableRepos, scopedProfile, profileRoute } from '/metro.js';
 (function () {
   const $ = (sel) => document.querySelector(sel);
   const layout = $('[data-role="layout"]');
@@ -416,7 +420,7 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
   function ticketRow(t) {
     const track = el('div', { class: 'track', 'data-role': 'track' });
     track.innerHTML = metroTrack(t);
-    track.appendChild(el('span', { class: 'stage', text: t.stage.label + (t.stage.index < 0 ? '' : ' · ' + (t.stage.index + 1) + '/' + t.stages.length) }));
+    track.appendChild(el('span', { class: 'stage', 'data-role': 'stage-text', text: ledgerStageText(t) }));
     const quick = el('div', { class: 'quick', 'data-role': 'quick' });
     const action = quickAction(t);
     if (action) {
@@ -676,6 +680,8 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
     const buttons = t.triggers.map((trigger) => {
       const primary = trigger.action === 'terminal' || trigger.action === 'start' || trigger.action === 'retry';
       const button = el('button', { type: 'button', text: trigger.label, class: 'sm' + (primary ? ' primary' : ''), 'data-action': trigger.action });
+      // A lever on show that cannot be pulled (Resume on another Runner) stays disabled and says why below.
+      if (trigger.unavailable) { button.disabled = true; button.dataset.unavailable = '1'; button.title = trigger.unavailable; return button; }
       if (trigger.action === 'extend') button.addEventListener('click', openEditor);
       else if (trigger.action === 'abandon') button.addEventListener('click', () => {
         if (button.dataset.armed) { pull('abandon', {}); return; }
@@ -691,18 +697,34 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
       check.addEventListener('click', () => pull('check', {}));
       buttons.push(check);
     }
-    bar.replaceChildren(...buttons);
+    // "retry with…" on a Flagged Runner Stage: pick a profile in the drawer, which sets the Stage's override and retries.
+    const stageProfile = (t.profiles || []).find((p) => p.stage === t.stage.name);
+    if (t.flag && stageProfile && t.triggers.some((x) => x.action === 'retry')) {
+      const retryWith = el('button', { type: 'button', class: 'sm', 'data-action': 'retry-with', 'data-role': 'retry-with', text: 'retry with…' });
+      retryWith.addEventListener('click', () => openProfileDrawer(stageProfile.profile, {
+        scope: t.repo,
+        context: 'Retry Stage ' + t.stage.name + ' of Ticket ' + (t.reference || t.shortId) + ' under another profile; it stays this Stage\'s override until cleared',
+        extra: (name) => {
+          const go = el('button', { type: 'button', class: 'primary', 'data-role': 'profile-retry', text: 'Retry ' + t.stage.name + ' with ' + name });
+          go.addEventListener('click', () => drawerAct(profileDrawer, go, () => pullTrigger(t, 'retry', { profile: name }), () => { closeProfileDrawer(); showDetail(t.id); }));
+          return [el('div', { class: 'bar', 'data-role': 'retry-with-choice' }, [go])];
+        },
+      }));
+      buttons.push(retryWith);
+    }
+    const why = t.triggers.filter((x) => x.unavailable).map((x) => el('div', { class: 'why', 'data-role': 'unavailable', text: x.label + ' is unavailable: ' + x.unavailable }));
+    bar.replaceChildren(...buttons, ...why);
     async function pull(action, body) {
       for (const b of buttons) b.disabled = true;
       const pressed = buttons.find((b) => b.dataset.action === action || (action === 'check' && b.dataset.role === 'check-pr'));
       if (pressed) pressed.classList.add('busy');
-      const idle = () => { for (const b of buttons) { b.disabled = false; b.classList.remove('busy'); } };
+      const idle = () => { for (const b of buttons) { b.disabled = !!b.dataset.unavailable; b.classList.remove('busy'); } };
       try {
         await pullTrigger(t, action, body, (problem) => {
           idle();
           const anyway = el('button', { type: 'button', class: 'sm', text: 'Advance anyway' });
           anyway.addEventListener('click', () => { anyway.disabled = true; pull(action, { override: true }); });
-          bar.replaceChildren(...buttons, el('div', { class: 'override', 'data-role': 'override' }, [
+          bar.replaceChildren(...buttons, ...why, el('div', { class: 'override', 'data-role': 'override' }, [
             el('span', { text: 'artifact ' + problem.artifact + ' is missing: ' + problem.detail }), anyway]));
         });
         await showDetail(t.id);
@@ -767,6 +789,8 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
     const left = el('div', { class: 'stack' });
     if (t.session) left.appendChild(sessionPane(t, t.session, gen));
     else left.appendChild(el('div', { class: 'panel muted', text: 'No Session yet.' }));
+    const profiles = stageProfilesPanel(t);
+    if (profiles) left.appendChild(profiles);
     left.appendChild(el('dl', {}, [
       el('dt', { text: 'worktree' }), el('dd', { text: worktreeGone(t) ? t.worktree + ' (removed)' : t.worktree }),
       el('dt', { text: 'pipeline' }), pipelineCell(t),
@@ -781,6 +805,44 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
     drawSide(list, t.id);
     ledger.hidden = true; ledgerTools.hidden = true; pipelinesPanel.hidden = true; configPanel.hidden = true; detail.hidden = false;
     side.hidden = false; layout.classList.add('open');
+  }
+
+  // Each Runner Stage of an active Ticket that isn't done, with the profile its next Session runs under (LASSO-75). The
+  // button opens the profile drawer on the Ticket's repo; "Use <profile> for this Ticket's <stage>" sets the Stage's
+  // override, which wins over the Pipeline's choice from the next Session until "Clear override". Null when none.
+  function stageProfilesPanel(t) {
+    if (t.state !== 'active') return null;
+    const rows = (t.profiles || []).filter((p) => t.stages.findIndex((s) => s.name === p.stage) >= t.stage.index);
+    if (!rows.length) return null;
+    return el('div', { class: 'panel', 'data-role': 'stage-profiles' }, [
+      el('h3', { text: 'Agent Profiles' }),
+      el('div', { class: 'stage-profiles' }, rows.map((p) => el('div', {}, [el('div', { class: 'stage-name', text: p.stage }), ticketStageProfileButton(t, p)]))),
+      el('div', { class: 'why', text: 'an override applies from the Stage\'s next Session, retries and Rounds included; a running Session keeps its own' }),
+    ]);
+  }
+  function ticketStageProfileButton(t, p) {
+    const v = ticketProfileView(p);
+    const button = el('button', { type: 'button', class: 'pf-pickbtn', 'data-role': 'ticket-stage-profile', 'data-stage': p.stage }, [
+      el('span', { class: 'pf-pickname' }, [v.label + '  ✎', ...(v.overridden ? [el('span', { class: 'pf-overridden', 'data-role': 'overridden', text: 'overridden' })] : [])]),
+      el('span', { class: 'pf-summary', 'data-role': 'stage-profile-headless', text: 'headless  ' + v.headless }),
+      el('span', { class: 'pf-summary', 'data-role': 'stage-profile-human', text: 'human     ' + v.human }),
+    ]);
+    const route = '/api/tickets/' + encodeURIComponent(t.id) + '/stages/' + encodeURIComponent(p.stage) + '/profile';
+    const chose = () => { closeProfileDrawer(); showDetail(t.id); };
+    button.addEventListener('click', () => openProfileDrawer(v.name, {
+      scope: t.repo,
+      context: 'Stage ' + p.stage + ' of Ticket ' + (t.reference || t.shortId),
+      extra: (name) => {
+        const use = el('button', { type: 'button', class: 'primary', 'data-role': 'profile-use', text: 'Use ' + name + ' for this Ticket\'s ' + p.stage });
+        use.addEventListener('click', () => drawerAct(profileDrawer, use, () => api(route, { method: 'PUT', body: JSON.stringify({ profile: name }) }), chose));
+        const clear = el('button', { type: 'button', 'data-role': 'profile-clear', text: 'Clear override' });
+        clear.hidden = !v.overridden;
+        clear.addEventListener('click', () => drawerAct(profileDrawer, clear, () => api(route, { method: 'DELETE' }), chose));
+        return [el('div', { class: 'bar', 'data-role': 'ticket-profile-choice' }, [use, clear, el('span', { class: 'why', text: 'this Ticket only; applies from the Stage\'s next Session' })])];
+      },
+      onChange: () => showDetail(t.id),
+    }));
+    return button;
   }
 
   // The Pipeline a Ticket runs: its Version, linked read-only, and a note when the file has moved on (ADR 0009).
@@ -1350,7 +1412,7 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
       ? (entry.repos.length ? scopeNote(entry) + ': ' + (entry.repos.length > 1 ? 'those repos run their own' : 'that repo runs its own') : 'every repo runs this definition')
       : entry.global ? 'repo ' + scope + '\'s own ' + name + ': it replaces the global one whole for ' + scope + '\'s Tickets' : 'only repo ' + scope + ' has ' + name;
     const users = profileUsers(name, d.pipelines, scope === null ? config.default_profile : repoCfg.default_profile || config.default_profile);
-    const usedBy = el('div', { class: 'why', 'data-role': 'used-by', text: (scope === null ? 'used by ' : 'in ' + scope + ', used by ') + usedByLine(users) });
+    const usedBy = el('div', { class: 'why', 'data-role': 'used-by', text: (scope === null ? '' : 'in ' + scope + ', ') + usedByLine(users) });
     const warnings = el('ul', { class: 'pf-warn', 'data-role': 'profile-warnings' });
     const fieldsBox = el('div', { 'data-role': 'profile-fields', style: 'display:grid;gap:12px' });
     const touched = () => {

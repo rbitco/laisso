@@ -550,8 +550,8 @@ function oneOf<T extends string>(choices: readonly T[], value: unknown, at: stri
   return value as T;
 }
 
-/** Where a Session's profile was named: the Stage, its Pipeline, the repo's default_profile, or config's. */
-export type ProfileSource = "stage" | "pipeline" | "repo" | "default";
+/** Where a Session's profile was named: a human's override on the Ticket, the Stage, its Pipeline, the repo's default_profile, or config's. */
+export type ProfileSource = "override" | "stage" | "pipeline" | "repo" | "default";
 
 /** The Agent Profile a Stage runs under, as config has it when the Session starts, with the Stage's mode merged in. */
 export interface ResolvedProfile {
@@ -564,20 +564,34 @@ export interface ResolvedProfile {
 export type ProfileScope = Pick<Config, "profiles" | "default_profile"> & { repos: Record<string, Pick<RepoConfig, "profiles" | "default_profile">> };
 
 /**
- * A Stage's profile: its own, else its Pipeline's, else the repo's
- * default_profile, else config's (ADR 0011). The name is looked up among the
- * repo's profiles first, then the global ones. Profiles are live config, so
- * this is asked at each Session start; a name config no longer has is a
- * problem, never a fallback. The Stage's `human` flag picks the block merged
- * in, so a Session gets one flat set of settings.
+ * A Stage's profile: the Ticket's override for it, else its own, else its
+ * Pipeline's, else the repo's default_profile, else config's (ADR 0011). The
+ * name is looked up among the repo's profiles first, then the global ones.
+ * Profiles are live config, so this is asked at each Session start; a name
+ * config no longer has is a problem, never a fallback. The Stage's `human`
+ * flag picks the block merged in, so a Session gets one flat set of settings.
  */
-export function resolveProfile(config: ProfileScope, repo: string, pipeline: Pick<Pipeline, "name" | "profile">, stage: Pick<RunnerStage, "name" | "profile" | "human">): ResolvedProfile | { problem: string } {
+export function resolveProfile(
+  config: ProfileScope,
+  repo: string,
+  pipeline: Pick<Pipeline, "name" | "profile">,
+  stage: Pick<RunnerStage, "name" | "profile" | "human">,
+  override: string | null = null,
+): ResolvedProfile | { problem: string } {
   const repoDefault = config.repos[repo]?.default_profile ?? null;
-  const [name, from] = stage.profile ? [stage.profile, "stage" as const] : pipeline.profile ? [pipeline.profile, "pipeline" as const] : repoDefault ? [repoDefault, "repo" as const] : [config.default_profile, "default" as const];
+  const [name, from] = override
+    ? [override, "override" as const]
+    : stage.profile
+      ? [stage.profile, "stage" as const]
+      : pipeline.profile
+        ? [pipeline.profile, "pipeline" as const]
+        : repoDefault
+          ? [repoDefault, "repo" as const]
+          : [config.default_profile, "default" as const];
   if (name === null) return { problem: `Stage ${stage.name} names no profile, nor does Pipeline ${pipeline.name}, and config.yaml has no default_profile` };
   const profile = profilesFor(config, repo)[name];
   if (profile) return { name, from, profile: settingsFor(profile, stage.human ? "human" : "headless") };
-  const by = { stage: `Stage ${stage.name}`, pipeline: `Pipeline ${pipeline.name}`, repo: `repo ${repo}'s default_profile`, default: "default_profile" }[from];
+  const by = { override: `the Ticket's override for Stage ${stage.name}`, stage: `Stage ${stage.name}`, pipeline: `Pipeline ${pipeline.name}`, repo: `repo ${repo}'s default_profile`, default: "default_profile" }[from];
   return { problem: `no profile named ${name} in config.yaml, which ${by} names` };
 }
 

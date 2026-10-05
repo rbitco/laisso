@@ -13,6 +13,7 @@ import { RunError } from "../session/runs.ts";
 import { ArtifactWarning, TriggerError, type Progress } from "../session/progress.ts";
 import { TerminalError, type Terminal } from "../session/terminal.ts";
 import type { Exits, ExtendRequest } from "../session/exits.ts";
+import type { Overrides } from "../session/overrides.ts";
 import type { Budgets } from "../budget/budgets.ts";
 import type { Queue } from "../session/queue.ts";
 import { Intake, IntakeError, type IntakeRequest } from "../intake/intake.ts";
@@ -36,6 +37,7 @@ export interface AppDeps {
   progress: Progress;
   terminal: Terminal;
   exits: Exits;
+  overrides: Overrides;
   budgets: Budgets;
   queue: Queue;
   changes: Changes;
@@ -52,7 +54,7 @@ export function createApp(deps: AppDeps): Hono {
   const app = new Hono();
   const intake = new Intake({ config: deps.config, home: deps.home, tickets: deps.tickets, versions: deps.versions });
   const baseUrl = `http://localhost:${deps.config.port}`;
-  const views: Omit<ViewContext, "queuePosition"> = {
+  const views: Omit<ViewContext, "queuePosition" | "profiles"> = {
     baseUrl,
     pipelineFor: (ticket: TicketRow): Pipeline | null => {
       try {
@@ -66,10 +68,10 @@ export function createApp(deps: AppDeps): Hono {
     feedbackFor: (session) => deps.feedback.forSession(session.id),
     budgetFor: (ticket, pipeline, stage, rows) => deps.budgets.view(ticket, pipeline, stage, rows),
   };
-  /** The view context for one request: queue positions are computed once for every Ticket it renders. */
+  /** The view context for one request: queue positions and config.yaml are read once for every Ticket it renders. */
   const viewContext = (): ViewContext => {
     const positions = deps.queue.positions();
-    return { ...views, queuePosition: (ticket) => positions.get(ticket.id) ?? null };
+    return { ...views, queuePosition: (ticket) => positions.get(ticket.id) ?? null, profiles: currentConfig(deps.home, deps.config) };
   };
 
   // Every response carries the version, so a client can tell Lasso from a stranger on the port.
@@ -171,10 +173,26 @@ export function createApp(deps: AppDeps): Hono {
     return deps.tickets.get(released.id)!;
   });
   // The six exits from a Flag; Mark done and Skip above accept a Flagged Ticket too, and Abandon any active one.
-  trigger("retry", (ticket) => deps.exits.retry(ticket));
+  // Retry with { profile } ("retry with…") sets the Stage's override to it first, then retries under it.
+  trigger("retry", (ticket, body) => deps.exits.retry(ticket, body.profile));
   trigger("resume", (ticket) => deps.exits.resume(ticket));
   trigger("extend", (ticket, body) => deps.exits.extend(ticket, body as ExtendRequest));
   trigger("abandon", (ticket) => deps.exits.abandon(ticket));
+
+  // A human's profile for one Runner Stage of one Ticket (LASSO-75): it wins over the Pipeline's choice from the
+  // Stage's next Session, retries and Rounds included, until cleared. A Session already running keeps its own.
+  const stageRoute = "/api/tickets/:id/stages/:stage/profile";
+  app.put(stageRoute, async (c) => {
+    const ticket = deps.tickets.find(c.req.param("id"));
+    if (!ticket) return c.json({ error: `no Ticket matches ${c.req.param("id")}` }, 404);
+    const body = ((await c.req.json().catch(() => null)) ?? {}) as { profile?: unknown };
+    return c.json(ticketDetail(deps.overrides.set(ticket, c.req.param("stage"), body.profile), viewContext()));
+  });
+  app.delete(stageRoute, (c) => {
+    const ticket = deps.tickets.find(c.req.param("id"));
+    if (!ticket) return c.json({ error: `no Ticket matches ${c.req.param("id")}` }, 404);
+    return c.json(ticketDetail(deps.overrides.clear(ticket, c.req.param("stage")), viewContext()));
+  });
 
   // A Session of a Ticket, or the 404 that says which is unknown.
   const sessionOf = (ticketKey: string, sessionId: string) => {

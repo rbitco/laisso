@@ -3,11 +3,12 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
-import { currentConfig, resolveProfile, type Config } from "../server/config.ts";
+import { currentConfig, type Config } from "../server/config.ts";
 import type { LassoHome } from "../server/home.ts";
 import type { Logger } from "../server/log.ts";
 import { shortId, type TicketRow } from "../store/tickets.ts";
-import { sessionProfile, type Sessions, type SessionRow } from "../store/sessions.ts";
+import { runnerOf, sessionProfile, type Sessions, type SessionRow } from "../store/sessions.ts";
+import { ticketProfile } from "./overrides.ts";
 import type { Pipeline, RunnerStage } from "../pipeline/load.ts";
 import { requestFor, type Command, type RunRequest, type RunnerAdapter } from "../runner/adapter.ts";
 import { adapterFor } from "../runner/adapters.ts";
@@ -52,13 +53,22 @@ export class Terminal {
   async open(ticket: TicketRow, pipeline: Pipeline, stage: RunnerStage): Promise<SessionRow> {
     const { sessions, home, log } = this.deps;
     // Read at each open, as for headless Sessions (ADR 0011): an edit to the profile reaches the next window.
-    const profile = resolveProfile(currentConfig(home, this.deps.config), ticket.repo, pipeline, stage);
+    const profile = ticketProfile(currentConfig(home, this.deps.config), ticket, pipeline, stage);
     if ("problem" in profile) {
       await this.deps.flag(ticket.id, "profile.missing", profile.problem);
       throw new TerminalError(profile.problem);
     }
     const adapter = adapterFor(profile.profile.runner);
-    const held = sessions.running(ticket.id).find((s) => s.mode === "terminal" && s.stage === stage.name) ?? null;
+    let held = sessions.running(ticket.id).find((s) => s.mode === "terminal" && s.stage === stage.name) ?? null;
+    // A held Session on another Runner (an override or a config edit moved the Stage) cannot be re-entered in this
+    // one: it ends, and a fresh Session opens, as a Retry would. The Resume exit refuses instead (Exits).
+    const was = held?.opened_at != null ? runnerOf(held) : null;
+    const switched = was !== null && was !== profile.profile.runner ? was : null;
+    if (switched) {
+      sessions.end(held!.id, { ended_by: "human", ended_reason: null, outcome: null, final_message: `${profile.name} runs ${profile.profile.runner}, not ${switched}`, usage: null, cost_usd: null, transcript_path: held!.transcript_path });
+      log.info("session.runner_switched", { session: held!.id, ticket: ticket.id, stage: stage.name, from: switched, to: profile.profile.runner });
+      held = null;
+    }
     const sessionId = held?.id ?? randomUUID();
     // Resume only a session the Runner has been launched on; a row whose window never opened starts afresh.
     const launched = held?.opened_at != null ? held : null;
@@ -98,7 +108,11 @@ export class Terminal {
     const dir = path.join(home.ticketsDir, ticket.id, "sessions");
     mkdirSync(dir, { recursive: true });
     const launcher = path.join(dir, `${sessionId}.command`);
-    const note = lost ? `Lasso found no ${adapter.name} session for ${stage.name} since the last window opened; starting afresh.` : null;
+    const note = lost
+      ? `Lasso found no ${adapter.name} session for ${stage.name} since the last window opened; starting afresh.`
+      : switched
+        ? `${stage.name} now runs ${profile.name} on ${adapter.name}, not ${switched}; starting afresh.`
+        : null;
     writeFileSync(launcher, launcherScript(command, note), { mode: 0o755 });
     await this.opener.open(launcher, request.name!);
     log.info(request.resume ? "session.resumed" : "session.opened", { session: sessionId, ticket: ticket.id, stage: stage.name, launcher });

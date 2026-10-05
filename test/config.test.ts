@@ -154,6 +154,12 @@ describe("resolveProfile", () => {
     expect(resolveProfile({ ...config, repos: { app: { profiles: {}, default_profile: "gone" } } }, "app", pipeline(null), stage(null))).toEqual({ problem: "no profile named gone in config.yaml, which repo app's default_profile names" });
   });
 
+  it("takes a Ticket's override ahead of everything, and names it when its profile is missing", () => {
+    expect(resolveProfile(config, "app", pipeline("claude"), stage("claude"), "fast")).toEqual({ name: "fast", from: "override", profile: { runner: "pi", model: "m" } });
+    expect(resolveProfile(config, "app", pipeline(null), stage(null), null)).toMatchObject({ name: "claude", from: "default" });
+    expect(resolveProfile(config, "app", pipeline("fast"), stage("fast"), "gone")).toEqual({ problem: "no profile named gone in config.yaml, which the Ticket's override for Stage s names" });
+  });
+
   it("takes the repo's default_profile ahead of config's, and the repo's own profile of a name over the global one", () => {
     const repos = { app: { profiles: { fast: { runner: "codex" as const }, solo: { runner: "claude" as const, model: "x" } }, default_profile: "solo" }, web: { profiles: {}, default_profile: null } };
     const scoped = { ...config, repos };

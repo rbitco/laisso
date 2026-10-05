@@ -1,9 +1,10 @@
-import { shortId, type TicketRow } from "../store/tickets.ts";
+import { overrideFor, shortId, type TicketRow } from "../store/tickets.ts";
 import { runnerOf, type SessionProfile, type SessionRow } from "../store/sessions.ts";
-import { type Pipeline, type RunnerName, type Stage } from "../pipeline/load.ts";
+import { type Pipeline, type RunnerName, type RunnerStage, type Stage } from "../pipeline/load.ts";
 import type { PipelineSource } from "../pipeline/files.ts";
 import type { Drift, VersionRow } from "../store/versions.ts";
-import type { ActionConfig, Config } from "../server/config.ts";
+import type { ActionConfig, Config, ProfileScope, ProfileSettings, ProfileSource } from "../server/config.ts";
+import { resumeRefusal, ticketProfile } from "../session/overrides.ts";
 import type { BudgetView } from "../budget/budget.ts";
 import { adapterFor } from "../runner/adapters.ts";
 import type { FeedbackRow } from "../store/feedback.ts";
@@ -15,6 +16,8 @@ export type DisplayState = "flagged" | "needs_you" | "holding" | "ready" | "runn
 export interface Trigger {
   action: "terminal" | "done" | "skip" | "start" | "retry" | "resume" | "extend" | "abandon";
   label: string;
+  /** Set when the lever is shown but cannot be pulled now, saying why: Resume when the Stage's profile is on another Runner. */
+  unavailable?: string;
 }
 
 /** Human wording for each display state, served so every client shows the same words. */
@@ -40,6 +43,23 @@ export interface StageView {
   total: number;
   /** Whether the Stage repeats on PR feedback: Rounds, the orbit, and Check PR now belong to it. */
   repeat: boolean;
+  /** The profile a human set for this Stage of the Ticket, or null when the Pipeline's choice stands; the Ledger stars it. */
+  override: string | null;
+}
+
+/** What one Runner Stage of a Ticket runs under now, for the Ticket page's profile buttons. */
+export interface StageProfileView {
+  stage: string;
+  /** The profile its next Session starts under: the override when set, else the Pipeline's choice; null when nothing names one. */
+  profile: string | null;
+  from: ProfileSource | null;
+  /** True while a human's override for this Stage stands. */
+  overridden: boolean;
+  /** Each mode's settings with its block merged in; null when the profile does not resolve. */
+  headless: ProfileSettings | null;
+  human: ProfileSettings | null;
+  /** Why the profile does not resolve (the Flag its next Session would raise), else null. */
+  problem: string | null;
 }
 
 export interface TicketView {
@@ -130,6 +150,8 @@ export interface TicketDetail extends TicketView {
   sessions: SessionView[];
   /** How the Pipeline file stands against the Ticket's Version (ADR 0009); null for a Ticket that runs the file itself. */
   pipelineDrift: Drift | null;
+  /** Each Runner Stage of the Ticket's Version and the profile it runs under now, override included. */
+  profiles: StageProfileView[];
 }
 
 /** What intake returns: the new Ticket's view plus whether its branch was found rather than made. */
@@ -148,6 +170,8 @@ export interface ViewContext {
   driftFor(ticket: TicketRow): Drift | null;
   /** The Ticket's place in the line for a headless slot, 1 first, or null when it is not in line. */
   queuePosition(ticket: TicketRow): number | null;
+  /** config.yaml's profiles as they stand for this request: what each Stage would start under now. */
+  profiles: ProfileScope;
 }
 
 /** The order the Ledger shows display states in: attention first. */
@@ -263,7 +287,8 @@ export function ticketView(ticket: TicketRow, ctx: ViewContext): TicketView {
   const queue = ctx.queuePosition(ticket);
   const budget = ctx.budgetFor(ticket, pipeline, stage, rows);
   const display = displayState(ticket, stage, rows[0] ?? null, queue, budget.rounds.limit);
-  const triggers = ticketTriggers(ticket, stage, rows);
+  const resume = stage?.kind === "runner" ? (last: SessionRow) => resumeRefusal(stage.name, last, ticketProfile(ctx.profiles, ticket, pipeline!, stage)) : () => null;
+  const triggers = ticketTriggers(ticket, stage, rows, resume);
   return {
     id: ticket.id,
     shortId: shortId(ticket.id),
@@ -284,6 +309,7 @@ export function ticketView(ticket: TicketRow, ctx: ViewContext): TicketView {
       index,
       total: pipeline?.stages.length ?? 0,
       repeat: stage?.kind === "runner" && stage.repeat === "feedback",
+      override: stage?.kind === "runner" ? overrideFor(ticket, stage.name) : null,
     },
     state: ticket.state,
     flag: ticket.flagged_at ? { at: ticket.flagged_at, reason: ticket.flag_reason ?? "", detail: ticket.flag_detail } : null,
@@ -302,7 +328,21 @@ export function ticketView(ticket: TicketRow, ctx: ViewContext): TicketView {
 
 export function ticketDetail(ticket: TicketRow, ctx: ViewContext): TicketDetail {
   const sessions = ctx.sessionsFor(ticket).map((row) => sessionView(row, Date.now(), ctx.feedbackFor(row)));
-  return { ...ticketView(ticket, ctx), session: sessions[0] ?? null, sessions, pipelineDrift: ctx.driftFor(ticket) };
+  const pipeline = ctx.pipelineFor(ticket);
+  const profiles = (pipeline?.stages ?? []).flatMap((stage) => (stage.kind === "runner" ? [stageProfileView(ctx.profiles, ticket, pipeline!, stage)] : []));
+  return { ...ticketView(ticket, ctx), session: sessions[0] ?? null, sessions, pipelineDrift: ctx.driftFor(ticket), profiles };
+}
+
+/** A Runner Stage's profile as its next Session would resolve it, with both modes' settings for the summary lines. */
+export function stageProfileView(config: ProfileScope, ticket: TicketRow, pipeline: Pipeline, stage: RunnerStage): StageProfileView {
+  const override = overrideFor(ticket, stage.name);
+  const headless = ticketProfile(config, ticket, pipeline, { ...stage, human: false });
+  const human = ticketProfile(config, ticket, pipeline, { ...stage, human: true });
+  if ("problem" in headless || "problem" in human) {
+    const problem = "problem" in headless ? headless.problem : (human as { problem: string }).problem;
+    return { stage: stage.name, profile: override, from: override ? "override" : null, overridden: override !== null, headless: null, human: null, problem };
+  }
+  return { stage: stage.name, profile: headless.name, from: headless.from, overridden: override !== null, headless: headless.profile, human: human.profile, problem: null };
 }
 
 export function sessionView(row: SessionRow, now: number = Date.now(), feedback: FeedbackRow[] = []): SessionView {
@@ -356,24 +396,28 @@ function displayState(ticket: TicketRow, stage: Stage | null, latest: SessionRow
   return { state: "ready", why: `${name} starts on the next tick` };
 }
 
-function resumableHeadless(rows: SessionRow[], stage: string): boolean {
+/** The last headless Session of the Stage, when there is one Resume could re-enter. */
+function resumableHeadless(rows: SessionRow[], stage: string): SessionRow | null {
   const last = rows.find((r) => r.stage === stage && r.mode === "headless");
-  if (!last) return false;
+  if (!last) return null;
   const runner = runnerOf(last);
-  return runner === null || adapterFor(runner).sessionIds === "lasso" || last.runner_session_id !== null;
+  return runner === null || adapterFor(runner).sessionIds === "lasso" || last.runner_session_id !== null ? last : null;
 }
 
-function ticketTriggers(ticket: TicketRow, stage: Stage | null, rows: SessionRow[]): Trigger[] {
+/** `refusal` says why Resume cannot re-enter a Session under the profile the Stage runs now, or null. */
+function ticketTriggers(ticket: TicketRow, stage: Stage | null, rows: SessionRow[], refusal: (last: SessionRow) => string | null): Trigger[] {
   if (ticket.state !== "active") return [];
   const abandon: Trigger = { action: "abandon", label: "Abandon" };
   if (!stage) return [abandon];
   if (ticket.flagged_at) {
     // Resume needs something to re-enter: a terminal window that opened, or the last headless Session of this
     // Stage, which a Runner that names its own sessions must have reported an id for.
-    const resumable = stage.kind === "runner" && (stage.human ? rows.some((r) => r.stage === stage.name && r.mode === "terminal" && r.ended_at === null && r.opened_at !== null) : resumableHeadless(rows, stage.name));
+    const resumable = stage.kind !== "runner" ? null : stage.human ? (rows.find((r) => r.stage === stage.name && r.mode === "terminal" && r.ended_at === null && r.opened_at !== null) ?? null) : resumableHeadless(rows, stage.name);
+    // A profile now on another Runner keeps Resume on show, unavailable, so the page can say to Retry instead.
+    const unavailable = resumable ? refusal(resumable) : null;
     return [
       { action: "retry", label: `Retry ${stage.name}` },
-      ...(resumable ? [{ action: "resume" as const, label: `Resume ${stage.name}` }] : []),
+      ...(resumable ? [{ action: "resume" as const, label: `Resume ${stage.name}`, ...(unavailable ? { unavailable } : {}) }] : []),
       { action: "extend", label: "Extend Budget" },
       { action: "done", label: `Mark ${stage.name} done` },
       { action: "skip", label: `Skip ${stage.name}` },
