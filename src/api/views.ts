@@ -167,7 +167,10 @@ export type StageFields =
 export interface PipelineListing {
   name: string;
   file: string;
-  stages: Array<{ name: string; kind: Stage["kind"]; label: string }>;
+  /** The Agent Profile its Stages inherit; null leaves them to default_profile. */
+  profile: string | null;
+  /** Each Stage, with the profile a Runner Stage names (null when it inherits, and for an action Stage). */
+  stages: Array<{ name: string; kind: Stage["kind"]; label: string; profile: string | null }>;
   problem: string | null;
 }
 
@@ -217,7 +220,8 @@ export function actionListings(config: Config): ActionListing[] {
 }
 
 export function pipelineListing(source: PipelineSource): PipelineListing {
-  return { name: source.name, file: source.file, stages: (source.pipeline?.stages ?? []).map((s) => ({ name: s.name, kind: s.kind, label: stageLabel(s) })), problem: source.problem };
+  const stages = (source.pipeline?.stages ?? []).map((s) => ({ name: s.name, kind: s.kind, label: stageLabel(s), profile: s.kind === "runner" ? s.profile : null }));
+  return { name: source.name, file: source.file, profile: source.pipeline?.profile ?? null, stages, problem: source.problem };
 }
 
 export function pipelineFileView(source: PipelineSource): PipelineFile {

@@ -4,7 +4,9 @@ import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { startLassoWithRepos, waitFor, claudeFixture, type Lasso, type LassoConfig, type TrackerReply } from "./harness.ts";
 import { sortForLedger, type TicketView, type TicketDetail, type IntakeResult, type DisplayState } from "../src/api/views.ts";
-import { metroDiagram, metroTrack, sessionsForStage, quickAction, relative, tickIndicator, sessionProfile } from "../src/dashboard/metro.js";
+import { metroDiagram, metroTrack, sessionsForStage, quickAction, relative, tickIndicator, sessionProfile, profileApplies, profileLine, profileSummary, profileUsers, usedByLine, profileWarnings, MODEL_SUGGESTIONS } from "../src/dashboard/metro.js";
+import type { ConfigFile, PipelineListing } from "../src/api/views.ts";
+import type { ProfileConfig } from "../src/server/config.ts";
 import type { TickChange, TickStatus } from "../src/server/tick.ts";
 import { setScene, sceneFile, swapTo, type Scene } from "./scenes.ts";
 
@@ -323,6 +325,84 @@ describe("the Session header", () => {
     expect(old).toMatchObject({ profile: null, runner: "codex" });
     expect(sessionProfile(old)).toEqual({ text: "codex", title: "runner codex · from before Agent Profiles" });
     expect(sessionProfile({ ...old, runner: null })).toBeNull();
+  });
+});
+
+describe("the Agent Profiles list and drawer", () => {
+  const PROFILES: Record<string, ProfileConfig> = {
+    "claude-opus": { runner: "claude", model: "opus", permission: "auto" },
+    "claude-haiku": { runner: "claude", model: "haiku", args: ["--verbose"], human: { permission: "auto", args: ["--debug"] } },
+    "codex-high": { runner: "codex", model: "gpt-6-sol", effort: "high", skills_dir: "/opt/skills", human: { permission: "auto" } },
+    "pi-gpt": { runner: "pi", model: "openai/gpt-5", permission: "full" },
+  };
+  // review names claude-haiku; implement and notes inherit the Pipeline's codex-high; the default Pipeline's Stages name the shipped ones or inherit claude-opus.
+  const NAMED = `profile: codex-high
+stages:
+  - name: implement
+    prompt: Do the work.
+    artifact: commits-on-branch
+  - name: notes
+    prompt: Write NOTES.md.
+    artifact: file NOTES.md
+  - name: review
+    prompt: Address the Feedback.
+    profile: claude-haiku
+    repeat: feedback
+    artifact: pr-merged
+`;
+
+  it("summarises each profile per mode, lists the Stages that use it, and warns on Haiku with auto, from real config and Pipelines", async () => {
+    const { lasso } = await lassoWithTicket({ profiles: { ...PROFILES, "claude-fable": { runner: "claude", model: "fable" }, "claude-sonnet": { runner: "claude", model: "sonnet" } }, default_profile: "claude-opus" });
+    await lasso.api("/api/pipelines/named", { method: "PUT", body: JSON.stringify({ text: NAMED, create: true }) });
+    const { config } = await lasso.api<ConfigFile>("/api/config");
+    const pipelines = await lasso.api<PipelineListing[]>("/api/pipelines");
+    const p = config.profiles;
+
+    // The summary: the headless line, then only what a human Session runs differently; unset permission shows each mode's default.
+    expect(profileSummary(p["claude-opus"]!)).toBe("claude · opus · effort default · auto");
+    expect(profileSummary(p["claude-haiku"]!)).toBe("claude · haiku · effort default · auto (default) · --verbose; human: auto · --verbose --debug");
+    expect(profileSummary(p["codex-high"]!)).toBe("codex · gpt-6-sol · effort high · edits (default); human: auto");
+    expect(profileSummary(p["pi-gpt"]!)).toBe("pi · openai/gpt-5 · effort default · permission n/a");
+    expect(profileLine({ runner: "claude" }, "human")).toBe("claude · model default · effort default · edits (default)");
+
+    // Used by: Stages naming the profile, then those inheriting it from their Pipeline or from default_profile.
+    expect(usedByLine(profileUsers("codex-high", pipelines, config.default_profile))).toBe("inherited by named/implement, named/notes");
+    expect(usedByLine(profileUsers("claude-haiku", pipelines, config.default_profile))).toBe("named/review");
+    expect(usedByLine(profileUsers("claude-opus", pipelines, config.default_profile))).toBe("inherited by default/implement, default/review, three/implement, three/notes, three/review");
+    expect(usedByLine(profileUsers("claude-fable", pipelines, config.default_profile))).toBe("default/grill, default/plan, default/code-review");
+    expect(usedByLine(profileUsers("pi-gpt", pipelines, config.default_profile))).toBe("no Stages");
+
+    // The known bad pair, per mode: Haiku runs headless in auto by default, and the human block asks for auto too.
+    expect(profileWarnings(p["claude-haiku"]!)).toEqual(["Claude runs Haiku in Manual mode, not auto (headless and human Sessions)"]);
+    expect(profileWarnings({ runner: "claude", model: "haiku", permission: "edits", human: { permission: "auto" } })).toEqual(["Claude runs Haiku in Manual mode, not auto (human Sessions)"]);
+    expect(profileWarnings({ runner: "claude", model: "opus", human: { model: "claude-haiku-4-5" } })).toEqual([]);
+    expect(profileWarnings({ runner: "claude", model: "opus", headless: { model: "claude-haiku-4-5" } })).toEqual(["Claude runs Haiku in Manual mode, not auto (headless Sessions)"]);
+    expect(profileWarnings({ runner: "pi", model: "anthropic/claude-haiku-4-5", permission: "auto" })).toEqual([]);
+    expect(profileWarnings(p["claude-opus"]!)).toEqual([]);
+
+    // n/a: permission on Pi, and skills_dir on any Runner but Codex.
+    expect(["claude", "codex", "pi"].map((r) => profileApplies(r, "permission"))).toEqual([true, true, false]);
+    expect(["claude", "codex", "pi"].map((r) => profileApplies(r, "skills_dir"))).toEqual([false, true, false]);
+    expect(MODEL_SUGGESTIONS.claude).toEqual(["fable", "opus", "sonnet", "haiku"]);
+  });
+
+  it("are on the page: the Config list and every part of the drawer", async () => {
+    const { lasso } = await lassoWithTicket();
+    const html = await (await lasso.page("/")).text();
+    for (const name of ["profileSummary", "profileUsers", "usedByLine", "profileWarnings", "profileApplies", "MODEL_SUGGESTIONS"]) expect(html).toMatch(new RegExp(`import \\{[^}]*\\b${name}\\b[^}]*\\} from '/metro\\.js'`));
+    // The Config list: one line per profile with the default marker, summary and used-by.
+    for (const role of ["config-profiles", "profile-list"]) expect(html).toContain(`'data-role': '${role}'`);
+    expect(html).toContain("'data-profile': name");
+    expect(html).toContain("class: 'default', text: 'default'");
+    // The drawer: the list with + New, the editor with its mode sections, n/a fields, used-by, warnings, default, save, delete and errors.
+    for (const role of ["profile-drawer", "profile-nav", "profile-new", "profile-editor", "profile-fields", "used-by", "profile-warnings", "profile-default", "profile-save", "profile-delete", "profile-error", "profile-close"]) expect(html).toContain(`'data-role': '${role}'`);
+    expect(html).toContain("['headless', 'mode-headless', 'headless only'], ['human', 'mode-human', 'human only']");
+    expect(html).toContain("na('permission', 'permission-na', 'n/a on Pi')");
+    expect(html).toContain("na('skills_dir', 'skills-dir-na', 'n/a: Codex only')");
+    expect(html).toContain("function openProfileDrawer(name, opts = {})");
+    // Saves go through the profile routes and the config patch.
+    expect(html).toContain("'/api/profiles/' + encodeURIComponent(name)");
+    expect(html).toContain("JSON.stringify({ default_profile: name })");
   });
 });
 

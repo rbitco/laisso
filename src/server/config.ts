@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
-import { parse, parseDocument } from "yaml";
-import { applyPatch } from "../yaml-edit.ts";
+import { isMap, isSeq, parse, parseDocument, type Document } from "yaml";
+import { applyPatch, writeLike } from "../yaml-edit.ts";
 import type { LassoHome } from "./home.ts";
 import { count, duration, flag, isPlainObject, mapping, money, positive, text, type Fail } from "../fields.ts";
 import { RUNNERS, type Pipeline, type RunnerName, type RunnerStage } from "../pipeline/load.ts";
@@ -277,6 +277,7 @@ const EDITABLE: Record<string, Set<string> | null> = {
   branch_prefix: null,
   port: null,
   notifications: new Set(["enabled", "flagged", "human", "gate"]),
+  default_profile: null,
 };
 
 /** Keys whose new value only takes effect once Lasso restarts. */
@@ -291,7 +292,9 @@ export function patchConfigText(text: string, file: string, patch: unknown): { t
   if (!isPlainObject(patch)) throw new ConfigError("patch must be a mapping");
   if (Object.keys(patch).length === 0) throw new ConfigError("nothing to change");
   for (const [key, value] of Object.entries(patch)) {
-    if (key === "repos" || key === "actions" || key === "profiles" || key === "default_profile") throw new ConfigError(`${key} ${key === "default_profile" ? "is" : "are"} edited in config.yaml by hand`);
+    if (key === "repos" || key === "actions") throw new ConfigError(`${key} are edited in config.yaml by hand`);
+    if (key === "profiles") throw new ConfigError("profiles are saved one at a time, through /api/profiles/<name>");
+    if (key === "default_profile" && typeof value !== "string") throw new ConfigError("default_profile must name a profile");
     if (!(key in EDITABLE)) throw new ConfigError(`unknown field ${key}`);
     const fields = EDITABLE[key];
     if (fields && value !== null) {
@@ -301,8 +304,96 @@ export function patchConfigText(text: string, file: string, patch: unknown): { t
   }
   const doc = parseDocument(text);
   applyPatch(doc, patch);
-  const out = doc.toString();
+  const out = doc.toString(writeLike(text));
+  const config = parseConfig(out, file);
+  if ("default_profile" in patch) knownProfile(config, config.default_profile!);
+  return { text: out, config };
+}
+
+/** A profile name config.yaml defines globally, or a ConfigError saying it does not. */
+function knownProfile(config: Config, name: string): void {
+  if (!config.profiles[name]) throw new ConfigError(`no profile named ${name} in config.yaml`);
+}
+
+/**
+ * Create or replace one global Agent Profile in config.yaml text, comments
+ * kept: fields the new profile leaves out are removed, unchanged ones are not
+ * touched, and the result is checked by the same parser as config load.
+ * `profile` is the profile as config.yaml would hold it. With `create`, an
+ * existing profile of that name is refused; without, a missing one is.
+ */
+export function writeProfileText(text: string, file: string, name: string, profile: unknown, opts: { create?: boolean } = {}): { text: string; config: Config } {
+  profileName(name, `profiles.${name}`);
+  if (!isPlainObject(profile)) throw new ConfigError("profile must be a mapping of its fields");
+  const before = parseConfig(text, file);
+  if (opts.create && before.profiles[name]) throw new ConfigError(`profile ${name} already exists`);
+  if (!opts.create && !before.profiles[name]) throw new ConfigError(`no profile named ${name} in config.yaml`);
+  // An empty mode block says nothing, so it is left out rather than written.
+  const now = Object.fromEntries(Object.entries(profile).filter(([key, value]) => !(MODES.includes(key as Mode) && isPlainObject(value) && !Object.keys(value).length)));
+  const doc = profilesDocument(text, before);
+  const node = doc.getIn(["profiles", name], true);
+  const was = isMap(node) ? (node.toJSON() as Record<string, unknown>) : null;
+  if (was) applyPatch(doc, { profiles: { [name]: replacing(was, now) } });
+  else doc.setIn(["profiles", name], doc.createNode(now));
+  // New args read best on one line, as the shipped examples write them.
+  const argsAt = (p: Record<string, unknown> | null, mode?: Mode) => JSON.stringify((mode ? (p?.[mode] as Record<string, unknown> | undefined) : p)?.args);
+  for (const mode of [undefined, ...MODES]) {
+    const args = doc.getIn(["profiles", name, ...(mode ? [mode] : []), "args"], true);
+    if (isSeq(args) && argsAt(was, mode) !== argsAt(now, mode)) args.flow = true;
+  }
+  const out = doc.toString(writeLike(text));
   return { text: out, config: parseConfig(out, file) };
+}
+
+/**
+ * Remove one global Agent Profile from config.yaml text, comments kept. The
+ * global default_profile cannot be removed; name another first. Whatever
+ * else names it is the caller's to weigh (see profileUsers).
+ */
+export function deleteProfileText(text: string, file: string, name: string): { text: string; config: Config } {
+  const before = parseConfig(text, file);
+  if (!before.profiles[name]) throw new ConfigError(`no profile named ${name} in config.yaml`);
+  if (before.default_profile === name) throw new ConfigError(`${name} is the default_profile; make another profile the default first`);
+  const doc = profilesDocument(text, before);
+  doc.deleteIn(["profiles", name]);
+  // An empty profiles: stays, written {}, since a missing one would bring the shipped profiles back.
+  const left = doc.get("profiles", true);
+  if (isMap(left) && left.items.length === 0) left.flow = true;
+  const out = doc.toString(writeLike(text));
+  return { text: out, config: parseConfig(out, file) };
+}
+
+/**
+ * Who names a global profile by name in config.yaml: the default_profile and
+ * each repo's (a repo with its own profile of that name is unaffected, as it
+ * never reads the global one).
+ */
+export function profileNamers(config: Config, name: string): string[] {
+  const namers = config.default_profile === name ? ["default_profile"] : [];
+  for (const [repo, r] of Object.entries(config.repos)) if (r.default_profile === name && !r.profiles[name]) namers.push(`repo ${repo}'s default_profile`);
+  return namers;
+}
+
+/** config.yaml's document with its profiles: written out, so an edit to one never drops the shipped ones a file without profiles: runs on. */
+function profilesDocument(text: string, config: Config): Document {
+  const doc = parseDocument(text);
+  if (!doc.has("profiles")) doc.set("profiles", doc.createNode(config.profiles));
+  const profiles = doc.get("profiles", true);
+  if (isMap(profiles)) profiles.flow = false;
+  return doc;
+}
+
+/** The patch that turns `was` into `now`: a field left out is cleared, an unchanged one left alone, and a mode block patched the same way. */
+function replacing(was: Record<string, unknown>, now: Record<string, unknown>): Record<string, unknown> {
+  const patch: Record<string, unknown> = {};
+  for (const key of Object.keys(was)) if (!(key in now)) patch[key] = null;
+  for (const [key, value] of Object.entries(now)) {
+    if (JSON.stringify(value) === JSON.stringify(was[key])) continue;
+    // A block that was there and still is keeps its comments; anything else is set whole (cleared first, as the patch merges mappings).
+    if (MODES.includes(key as Mode) && isPlainObject(value) && isPlainObject(was[key]) && Object.keys(value).length) patch[key] = replacing(was[key] as Record<string, unknown>, value);
+    else patch[key] = value;
+  }
+  return patch;
 }
 
 /** Carry a freshly parsed config into the object the running server shares, in place, so every holder sees it. */
@@ -365,6 +456,7 @@ export const PROFILE_NAME = /^[a-z0-9][a-z0-9._-]*$/;
 const PROFILE_FIELDS = new Set(["runner", "model", "effort", "permission", "args", "skills_dir", "headless", "human"]);
 const BLOCK_FIELDS = new Set(["model", "effort", "permission", "args"]);
 const MODES = ["headless", "human"] as const;
+type Mode = (typeof MODES)[number];
 
 function profileName(value: unknown, at: string): string {
   if (typeof value !== "string" || !PROFILE_NAME.test(value)) throw new ConfigError(`${at}: a profile name is lowercase letters, digits, dots, hyphens, and underscores, not ${String(value)}`);

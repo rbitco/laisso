@@ -1,4 +1,4 @@
-import { isMap, type Document } from "yaml";
+import { isMap, type Document, type ToStringOptions } from "yaml";
 import { isPlainObject } from "./fields.ts";
 
 /**
@@ -24,3 +24,12 @@ export function applyPatch(doc: Document, patch: Record<string, unknown>, path: 
   }
 }
 
+
+/**
+ * Keep what an edit does not touch as it was: no line folding, and [flow]
+ * collections padded as the file already pads them, since the writer
+ * applies one choice to every one of them.
+ */
+export function writeLike(text: string): ToStringOptions {
+  return { lineWidth: 0, flowCollectionPadding: /[{[] +[^\s}\]]/.test(text) };
+}

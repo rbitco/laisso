@@ -242,6 +242,31 @@
   .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   .bar .path { font-family: ui-monospace, monospace; font-size: 12px; color: var(--muted); word-break: break-all; }
   .panel.editor-panel { background: transparent; border: 0; padding: 0; }
+
+  /* Agent Profiles: the Config list, and the drawer that edits them */
+  .pf-list { display: grid; }
+  .pf-list a { display: grid; grid-template-columns: minmax(120px, max-content) minmax(0, 2fr) minmax(0, 1fr); gap: 4px 14px; padding: 6px 0; border-bottom: 1px solid var(--line); cursor: pointer; align-items: baseline; color: inherit; text-decoration: none; }
+  .pf-list a:last-child { border-bottom: 0; }
+  .pf-list a:hover b { color: var(--accent); }
+  .pf-list .default, .pf-drawer .default { font-size: 11px; color: var(--accent); font-weight: normal; margin-left: 6px; }
+  @media (max-width: 720px) { .pf-list a { grid-template-columns: 1fr; } }
+  .pf-summary { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); overflow-wrap: anywhere; }
+  .pf-warn { margin: 0; padding: 0 0 0 18px; color: var(--amber); font-size: 12px; }
+  .pf-na { opacity: 0.45; }
+  .pf-na span { padding: 4px 0; }
+  .pf-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  @media (max-width: 640px) { .pf-modes { grid-template-columns: 1fr; } }
+  .pf-modes > div { border: 1px dashed var(--line); border-radius: 6px; padding: 8px; display: grid; gap: 6px; align-content: start; }
+  .pf-modes .fields { grid-template-columns: 1fr; }
+  .pf-drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(760px, 100vw); z-index: 50; background: var(--bg); border-left: 1px solid var(--line); box-shadow: -8px 0 24px rgba(0,0,0,.15); display: grid; grid-template-columns: 200px minmax(0, 1fr); }
+  @media (max-width: 640px) { .pf-drawer { grid-template-columns: 1fr; grid-template-rows: max-content minmax(0, 1fr); } .pf-drawer nav { border-right: 0; border-bottom: 1px solid var(--line); max-height: 30vh; overflow: auto; } }
+  .pf-drawer nav { border-right: 1px solid var(--line); padding: 12px; display: grid; gap: 4px; align-content: start; overflow: auto; }
+  .pf-drawer nav a { padding: 6px 8px; border-radius: 6px; cursor: pointer; display: grid; color: inherit; text-decoration: none; }
+  .pf-drawer nav a:hover { background: var(--surface2); }
+  .pf-drawer nav a.on { background: var(--surface2); box-shadow: inset 3px 0 var(--accent); }
+  .pf-drawer nav button { justify-self: start; margin-top: 4px; }
+  .pf-drawer section { padding: 16px; overflow: auto; display: grid; gap: 12px; align-content: start; }
+  .pf-drawer h2 { margin: 0; font-size: 16px; }
 </style>
 </head>
 <body>
@@ -272,7 +297,7 @@
   </div>
 </main>
 <script type="module">
-import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, relative, tickIndicator, sessionProfile } from '/metro.js';
+import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, relative, tickIndicator, sessionProfile, MODEL_SUGGESTIONS, profileApplies, profileMode, profileLine, profileSummary, profileUsers, usedByLine, profileWarnings } from '/metro.js';
 (function () {
   const $ = (sel) => document.querySelector(sel);
   const layout = $('[data-role="layout"]');
@@ -1065,7 +1090,8 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
   async function showConfig() {
     let c;
     let actions;
-    try { [c, actions] = await Promise.all([api('/api/config'), api('/api/actions')]); } catch (e) { showNotice(e.message); return; }
+    let pipelines;
+    try { [c, actions, pipelines] = await Promise.all([api('/api/config'), api('/api/actions'), api('/api/pipelines')]); } catch (e) { showNotice(e.message); return; }
     const cfg = c.config;
     const num = (key, value) => el('input', { name: key, value: String(value) });
     const inputs = {
@@ -1080,6 +1106,7 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
       el('div', { class: 'card' }, [el('h3', { text: 'Budget defaults' }), el('div', { class: 'fields' }, [field('rounds per repeating Stage', inputs.rounds), field('attempts per Stage', inputs.attempts), field('wall time per Session', inputs.wallTime), field('spend per Ticket (USD)', inputs.spend)])]),
       el('div', { class: 'card' }, [el('h3', { text: 'Server' }), el('div', { class: 'fields' }, [field('tick (seconds)', inputs.tick), field('concurrency', inputs.concurrency), field('retention (days)', inputs.retention), field('branch prefix', inputs.branch_prefix), field('port', inputs.port)])]),
       el('div', { class: 'card' }, [el('h3', { text: 'Notifications' }), el('div', { class: 'fields' }, flags.map((f) => f[2]))]),
+      profilesCard(cfg, pipelines),
       actionsCard(actions),
       el('div', { class: 'card' }, [el('h3', { text: 'Repos' }), el('div', { class: 'why', text: Object.keys(cfg.repos).length ? Object.entries(cfg.repos).map(([n, r]) => n + ': ' + r.tracker + ' ' + r.project + ' at ' + r.path + ', Pipeline ' + r.pipeline).join(' · ') : 'none yet' }), el('div', { class: 'why', text: 'repos are edited in config.yaml by hand' })]),
       el('div', { class: 'bar' }, [button, el('span', { class: 'why', text: 'port and tick apply after a restart; everything else at once' })]),
@@ -1102,6 +1129,195 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
       }, () => { showNotice(restart.length ? 'saved; ' + restart.join(' and ') + ' apply after a restart' : 'saved'); showConfig(); });
     });
     configPanel.replaceChildren(form);
+  }
+
+  // The Agent Profiles, one line each: name, default marker, what each mode runs, and the Stages that run it.
+  // A click opens the profile drawer; a save there redraws this card in place, so the form around it keeps its edits.
+  function profilesCard(cfg, pipelines) {
+    const card = el('div', { class: 'card', 'data-role': 'config-profiles' });
+    const draw = (config) => {
+      const rows = Object.keys(config.profiles).map((name) => {
+        const row = el('a', { 'data-profile': name, tabindex: '0' }, [
+          el('b', {}, [name, ...(name === config.default_profile ? [el('span', { class: 'default', text: 'default' })] : [])]),
+          el('span', { class: 'pf-summary', text: profileSummary(config.profiles[name]) }),
+          el('span', { class: 'why', text: usedByLine(profileUsers(name, pipelines, config.default_profile)) }),
+        ]);
+        const open = () => openProfileDrawer(name, { onChange: draw });
+        row.addEventListener('click', open);
+        row.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') open(); });
+        return row;
+      });
+      card.replaceChildren(
+        el('h3', { text: 'Agent Profiles' }),
+        rows.length ? el('div', { class: 'pf-list', 'data-role': 'profile-list' }, rows) : el('div', { class: 'why', text: 'none yet' }),
+        el('div', { class: 'why', text: 'click a profile to edit it; saves write config.yaml at once, and the next Session uses them' }),
+      );
+    };
+    draw(cfg);
+    return card;
+  }
+
+  // The profile drawer: every global profile on the left with + New, one profile's editor on the right.
+  // openProfileDrawer(name, opts) opens it on that profile (default_profile when name is null). opts, all optional:
+  //   context: a line under the title saying where it was opened from (a Stage, a Ticket);
+  //   extra(name, config): nodes placed under the editor, such as "Use <profile> for <stage>";
+  //   onChange(config): called with the new config after each save, default change or delete.
+  // closeProfileDrawer() closes it; so do Close and Escape.
+  let profileDrawer = null;
+  function closeProfileDrawer() {
+    if (profileDrawer) profileDrawer.node.remove();
+    profileDrawer = null;
+  }
+  document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && profileDrawer) closeProfileDrawer(); });
+  async function openProfileDrawer(name, opts = {}) {
+    closeProfileDrawer();
+    const d = { node: el('aside', { class: 'pf-drawer', 'data-role': 'profile-drawer', role: 'dialog', 'aria-label': 'Agent Profiles' }), opts, config: null, pipelines: [], name: null, draft: null, dirty: false };
+    profileDrawer = d;
+    document.body.appendChild(d.node);
+    try { [d.config, d.pipelines] = await Promise.all([api('/api/config').then((c) => c.config), api('/api/pipelines')]); }
+    catch (e) { d.node.replaceChildren(el('section', {}, [el('p', { class: 'notice', text: e.message }), el('button', { type: 'button', class: 'sm', text: 'Close' })])); d.node.querySelector('button').addEventListener('click', closeProfileDrawer); return; }
+    if (profileDrawer !== d) return;
+    pickProfile(d, name && d.config.profiles[name] ? name : d.config.default_profile && d.config.profiles[d.config.default_profile] ? d.config.default_profile : Object.keys(d.config.profiles)[0] || null);
+  }
+  function pickProfile(d, name) {
+    d.name = name;
+    d.draft = name ? structuredClone(d.config.profiles[name]) : null;
+    d.dirty = false;
+    drawProfileDrawer(d);
+  }
+  // A profile as the API takes it: blanks left out, and fields that do nothing on its Runner dropped.
+  function cleanProfile(p) {
+    const out = { runner: p.runner };
+    const block = (b, into) => {
+      if (b.model && b.model.trim()) into.model = b.model.trim();
+      if (b.effort) into.effort = b.effort;
+      if (b.permission && profileApplies(p.runner, 'permission')) into.permission = b.permission;
+      if (b.args && b.args.length) into.args = b.args;
+      return into;
+    };
+    block(p, out);
+    if (p.skills_dir && p.skills_dir.trim() && profileApplies(p.runner, 'skills_dir')) out.skills_dir = p.skills_dir.trim();
+    for (const mode of ['headless', 'human']) { const b = block(p[mode] || {}, {}); if (Object.keys(b).length) out[mode] = b; }
+    return out;
+  }
+  // Runs one drawer action, showing a refusal in the drawer itself; `then` gets what the API answered.
+  async function drawerAct(d, button, act, then) {
+    const error = d.node.querySelector('[data-role="profile-error"]');
+    button.disabled = true; button.classList.add('busy'); error.hidden = true;
+    try { const res = await act(); if (profileDrawer === d) then(res); }
+    catch (e) { error.textContent = e.message; error.hidden = false; button.disabled = false; button.classList.remove('busy'); if (e.body && e.body.confirm) { button.dataset.confirm = '1'; button.textContent = 'Delete anyway'; } }
+  }
+  function savedConfig(d, config, name) {
+    d.config = config;
+    if (d.opts.onChange) d.opts.onChange(config);
+    pickProfile(d, name);
+  }
+  function drawProfileDrawer(d) {
+    const config = d.config;
+    const names = Object.keys(config.profiles);
+    const leave = () => !d.dirty || confirm('Drop the unsaved changes to ' + d.name + '?');
+    const nav = el('nav', { 'data-role': 'profile-nav' }, [el('div', { class: 'eyebrow', text: 'profiles' }), ...names.map((n) => {
+      const a = el('a', { class: n === d.name ? 'on' : '', 'data-profile': n }, [
+        el('span', {}, [n, ...(n === config.default_profile ? [el('span', { class: 'default', text: 'default' })] : [])]),
+        el('span', { class: 'why', text: profileLine(config.profiles[n], 'headless').split(' · ').slice(0, 2).join(' · ') }),
+      ]);
+      a.addEventListener('click', () => { if (n !== d.name && leave()) pickProfile(d, n); });
+      return a;
+    })]);
+    const add = el('button', { type: 'button', class: 'sm', 'data-role': 'profile-new', text: '+ New', title: d.name ? 'a new profile, copied from ' + d.name : 'a new profile' });
+    add.addEventListener('click', () => {
+      const name = (prompt(d.name ? 'Name for a copy of ' + d.name + ' (e.g. ' + d.name + '-high)' : 'Name for the new profile') || '').trim();
+      if (!name) return;
+      const profile = d.draft ? cleanProfile(d.draft) : { runner: 'claude' };
+      drawerAct(d, add, () => api('/api/profiles/' + encodeURIComponent(name), { method: 'PUT', body: JSON.stringify({ profile, create: true }) }), (res) => savedConfig(d, res.config, name));
+    });
+    nav.appendChild(add);
+    const close = el('button', { type: 'button', class: 'sm', 'data-role': 'profile-close', text: 'Close' });
+    close.addEventListener('click', () => { if (leave()) closeProfileDrawer(); });
+    const error = el('p', { class: 'notice', 'data-role': 'profile-error', hidden: '' });
+    if (!d.name) {
+      d.node.replaceChildren(nav, el('section', { 'data-role': 'profile-editor' }, [el('div', { class: 'bar' }, [el('h2', { text: 'Agent Profiles' }), el('span', { style: 'flex:1' }), close]), error, el('p', { class: 'empty', text: 'No profiles yet: + New makes one.' })]));
+      return;
+    }
+    const name = d.name;
+    const isDefault = name === config.default_profile;
+    const makeDefault = el('button', { type: 'button', class: 'sm', 'data-role': 'profile-default', text: 'Make default' });
+    makeDefault.hidden = isDefault;
+    makeDefault.addEventListener('click', () => drawerAct(d, makeDefault, () => api('/api/config', { method: 'PATCH', body: JSON.stringify({ default_profile: name }) }), (res) => savedConfig(d, res.config, name)));
+    const head = el('div', { class: 'bar' }, [el('h2', { text: name }), ...(isDefault ? [el('span', { class: 'default', text: 'default profile' })] : []), makeDefault, el('span', { style: 'flex:1' }), close]);
+    const usedBy = el('div', { class: 'why', 'data-role': 'used-by', text: 'used by ' + usedByLine(profileUsers(name, d.pipelines, config.default_profile)) });
+    const warnings = el('ul', { class: 'pf-warn', 'data-role': 'profile-warnings' });
+    const fieldsBox = el('div', { 'data-role': 'profile-fields', style: 'display:grid;gap:12px' });
+    const touched = () => {
+      d.dirty = true;
+      const list = profileWarnings(cleanProfile(d.draft));
+      warnings.replaceChildren(...list.map((w) => el('li', { text: '⚠ ' + w })));
+      warnings.hidden = !list.length;
+    };
+    const drawFields = () => { fieldsBox.replaceChildren(...profileFields(d.draft, () => { touched(); }, () => { touched(); drawFields(); })); };
+    drawFields();
+    touched(); d.dirty = false;
+    const saveButton = el('button', { type: 'button', class: 'primary', 'data-role': 'profile-save', text: 'Save' });
+    saveButton.addEventListener('click', () => drawerAct(d, saveButton, () => api('/api/profiles/' + encodeURIComponent(name), { method: 'PUT', body: JSON.stringify({ profile: cleanProfile(d.draft) }) }), (res) => savedConfig(d, res.config, name)));
+    const remove = el('button', { type: 'button', 'data-role': 'profile-delete', text: 'Delete' });
+    if (isDefault) { remove.disabled = true; remove.title = 'the default profile; make another the default first'; }
+    remove.addEventListener('click', () => {
+      if (!remove.dataset.armed) { remove.dataset.armed = '1'; remove.textContent = 'Delete for sure'; return; }
+      // Refused while in use, the message lists what names it and the next press deletes anyway.
+      const confirmed = remove.dataset.confirm === '1';
+      drawerAct(d, remove, () => api('/api/profiles/' + encodeURIComponent(name) + (confirmed ? '?confirm=1' : ''), { method: 'DELETE' }), (res) => savedConfig(d, res.config, res.config.default_profile && res.config.profiles[res.config.default_profile] ? res.config.default_profile : Object.keys(res.config.profiles)[0] || null));
+    });
+    const extra = d.opts.extra ? d.opts.extra(name, config) || [] : [];
+    d.node.replaceChildren(nav, el('section', { 'data-role': 'profile-editor' }, [
+      head,
+      ...(d.opts.context ? [el('div', { class: 'why', 'data-role': 'profile-context', text: d.opts.context })] : []),
+      usedBy, error, fieldsBox, warnings,
+      ...extra,
+      el('div', { class: 'bar' }, [saveButton, remove, el('span', { class: 'why', text: 'blank keeps the Runner\'s default; saved to config.yaml, used from the next Session' })]),
+    ]));
+  }
+  // The editor's fields, writing into the draft as they change; a runner change redraws them (n/a fields come and go).
+  function profileFields(p, onInput, onRunner) {
+    const listId = 'pf-models-' + p.runner;
+    if (!document.getElementById(listId)) document.body.appendChild(el('datalist', { id: listId }, (MODEL_SUGGESTIONS[p.runner] || []).map((m) => el('option', { value: m }))));
+    const choice = (fieldName, choices, value, blank, write) => {
+      const s = el('select', { name: fieldName }, [el('option', { value: '', text: blank }), ...choices.map((c) => el('option', { value: c, text: c }))]);
+      s.value = value || '';
+      s.addEventListener('change', () => { write(s.value || undefined); onInput(); });
+      return s;
+    };
+    const text = (fieldName, value, placeholder, write, list) => {
+      const i = el('input', Object.assign({ name: fieldName, value: value || '', placeholder }, list ? { list } : {}));
+      i.addEventListener('input', () => { write(i.value.trim() || undefined); onInput(); });
+      return i;
+    };
+    const na = (label, role, why) => el('label', { class: 'pf-na', 'data-role': role }, [label, el('span', { text: why })]);
+    // One set of model, effort, permission and args: the shared ones, or a mode block whose blanks inherit them.
+    const blockFields = (b, mode) => {
+      const shared = profileMode({ ...p, headless: undefined, human: undefined }, mode);
+      const inherit = (v) => 'inherits ' + v;
+      return [
+        field('model', text('model', b.model, mode ? inherit(p.model || 'default') : 'Runner default', (v) => { b.model = v; }, listId)),
+        field('effort', choice('effort', ['low', 'medium', 'high', 'xhigh', 'max'], b.effort, mode ? inherit(p.effort || 'default') : 'Runner default', (v) => { b.effort = v; })),
+        profileApplies(p.runner, 'permission')
+          ? field('permission', choice('permission', ['auto', 'edits', 'full'], b.permission, mode ? inherit(shared.permission + (shared.baseline ? ' (default)' : '')) : 'default per mode', (v) => { b.permission = v; }))
+          : na('permission', 'permission-na', 'n/a on Pi'),
+        field('args', text('args', (b.args || []).join(' '), mode ? 'added after the shared args' : '--flag value', (v) => { b.args = v ? v.split(/\s+/) : undefined; })),
+      ];
+    };
+    const runner = choice('runner', ['claude', 'codex', 'pi'], p.runner, 'pick one', (v) => { p.runner = v || 'claude'; });
+    runner.firstChild.remove();
+    runner.addEventListener('change', onRunner);
+    const skills = profileApplies(p.runner, 'skills_dir') ? field('skills_dir', text('skills_dir', p.skills_dir, '~/.agents/skills', (v) => { p.skills_dir = v; })) : na('skills_dir', 'skills-dir-na', 'n/a: Codex only');
+    p.headless = p.headless || {};
+    p.human = p.human || {};
+    return [
+      el('div', { class: 'fields' }, [field('runner', runner), ...blockFields(p, null), skills]),
+      el('div', { class: 'pf-modes' }, [['headless', 'mode-headless', 'headless only'], ['human', 'mode-human', 'human only']].map(([mode, role, title]) => el('div', { 'data-role': role }, [
+        el('div', { class: 'eyebrow', text: title }),
+        el('div', { class: 'fields' }, blockFields(p[mode], mode)),
+      ]))),
+    ];
   }
 
   // The Actions config.yaml defines, read-only: they run shell commands, so they are edited in the file.

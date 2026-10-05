@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { Changes, Change } from "../server/changes.ts";
-import { ConfigError, patchConfigText, applyLive, RESTART_KEYS, parseConfig, currentConfig, type Config } from "../server/config.ts";
+import { ConfigError, patchConfigText, writeProfileText, deleteProfileText, profileNamers, applyLive, RESTART_KEYS, parseConfig, currentConfig, type Config } from "../server/config.ts";
 import type { LassoHome } from "../server/home.ts";
 import type { Tick } from "../server/tick.ts";
 import type { Tickets, TicketRow } from "../store/tickets.ts";
@@ -248,6 +248,41 @@ export function createApp(deps: AppDeps): Hono {
     applyLive(deps.config, config);
     return c.json(configFile(text, RESTART_KEYS.filter((key) => was[key] !== config[key])));
   });
+
+  // Agent Profiles (ADR 0011), one global profile at a time, written into config.yaml in place and
+  // checked as config load checks it. Like any config edit they apply at once: the next Session reads them.
+  const writeConfig = (text: string, config: Config): ConfigFile => {
+    replaceFile(deps.home.configFile, text);
+    applyLive(deps.config, config);
+    return configFile(text);
+  };
+  app.put("/api/profiles/:name", async (c) => {
+    const body = ((await c.req.json().catch(() => null)) ?? {}) as { profile?: unknown; create?: unknown };
+    const create = body.create === true;
+    const { text, config } = writeProfileText(configText(), deps.home.configFile, c.req.param("name"), body.profile, { create });
+    return c.json(writeConfig(text, config), create ? 201 : 200);
+  });
+  // What still names a profile is listed first and the delete waits for ?confirm=1, as those Stages would be Flagged at their next Session.
+  app.delete("/api/profiles/:name", (c) => {
+    const name = c.req.param("name");
+    const before = configText();
+    const current = parseConfig(before, deps.home.configFile);
+    if (!current.profiles[name]) return c.json({ error: `no profile named ${name} in config.yaml` }, 404);
+    const { text, config } = deleteProfileText(before, deps.home.configFile, name);
+    const namers = [...profileNamers(current, name), ...pipelineNamers(name)];
+    if (namers.length && c.req.query("confirm") !== "1") {
+      return c.json({ error: `${name} is named by ${namers.join(", ")}; their next Sessions are Flagged once it is gone`, usedBy: namers, confirm: true }, 409);
+    }
+    return c.json(writeConfig(text, config));
+  });
+  /** Each Pipeline and Stage that names a profile in its file. */
+  const pipelineNamers = (name: string): string[] =>
+    pipelines.list().flatMap(({ pipeline }) => {
+      if (!pipeline) return [];
+      const named = pipeline.profile === name ? [`Pipeline ${pipeline.name}`] : [];
+      for (const s of pipeline.stages) if (s.kind === "runner" && s.profile === name) named.push(`${pipeline.name}/${s.name}`);
+      return named;
+    });
 
   app.get("/", (c) => c.html(dashboardHtml()));
   app.get("/metro.js", (c) => c.body(metroScript(), 200, { "content-type": "text/javascript; charset=utf-8" }));

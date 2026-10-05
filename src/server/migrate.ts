@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
-import { isMap, isScalar, isSeq, parseDocument, Scalar, type Document, type Pair, type ToStringOptions, type YAMLMap } from "yaml";
+import { isMap, isScalar, isSeq, parseDocument, Scalar, type Document, type Pair, type YAMLMap } from "yaml";
+import { writeLike } from "../yaml-edit.ts";
 import { listPipelines, parsePipeline, pipelineFile, RUNNERS } from "../pipeline/load.ts";
 import { replaceFile } from "../atomic-write.ts";
 import { DEFAULT_CONFIG } from "./config.ts";
@@ -37,15 +38,6 @@ export const GITHUB_TRANSITION = {
     `echo "moved $LASSO_REFERENCE to $LASSO_STATUS"`,
   ].join("\n"),
 };
-
-/**
- * Keep what the migration does not touch as it was: no line folding, and
- * [flow] collections padded as the file already pads them, since the
- * writer applies one choice to every one of them.
- */
-function writeLike(text: string): ToStringOptions {
-  return { lineWidth: 0, flowCollectionPadding: /[{[] +[^\s}\]]/.test(text) };
-}
 
 export interface Migrated {
   config: boolean;

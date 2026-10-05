@@ -219,3 +219,132 @@ export function metroDiagram(t, focus) {
   });
   return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Stage flow for ${esc(t.reference || t.shortId)}">${out}</svg>`;
 }
+
+// Agent Profiles (ADR 0011): what the Config list and the profile drawer say about a profile, from
+// config as /api/config returns it and the Pipelines as /api/pipelines lists them (LASSO-72).
+
+/** @typedef {import('../server/config.ts').ProfileConfig} ProfileConfig */
+/** @typedef {import('../api/views.ts').PipelineListing} PipelineListing */
+
+/** The model aliases the drawer suggests per Runner; any other text is passed on as written. */
+export const MODEL_SUGGESTIONS = {
+  claude: ['fable', 'opus', 'sonnet', 'haiku'],
+  codex: ['gpt-6-sol', 'gpt-6.1-sol', 'gpt-6-luna', 'gpt-5.5'],
+  pi: ['anthropic/claude-opus-5', 'anthropic/claude-sonnet-5'],
+};
+
+/** The permission each Runner's adapter starts a mode with when the profile sets none (null: no permission layer). */
+const BASELINE_PERMISSION = { claude: { headless: 'auto', human: 'edits' }, codex: { headless: 'edits', human: 'edits' }, pi: { headless: null, human: null } };
+
+/**
+ * Whether a field does anything on a Runner: Pi has no permission layer, and only Codex reads skills_dir.
+ * @param {string} runner
+ * @param {string} field
+ */
+export function profileApplies(runner, field) {
+  if (field === 'permission') return runner !== 'pi';
+  if (field === 'skills_dir') return runner === 'codex';
+  return true;
+}
+
+/**
+ * A profile with one mode's block merged in, as a Session of that mode runs it: the block's model, effort and
+ * permission replace the shared ones, and its args follow. `baseline` marks a permission the adapter supplies.
+ * @param {ProfileConfig} p
+ * @param {'headless' | 'human'} mode
+ */
+export function profileMode(p, mode) {
+  const block = p[mode] || {};
+  const set = block.permission || p.permission || null;
+  const permission = !profileApplies(p.runner, 'permission') ? null : set || BASELINE_PERMISSION[p.runner]?.[mode] || null;
+  return {
+    runner: p.runner,
+    model: block.model || p.model || null,
+    effort: block.effort || p.effort || null,
+    permission,
+    baseline: !set && permission !== null,
+    args: [...(p.args || []), ...(block.args || [])],
+  };
+}
+
+/** One mode's settings as the parts of a summary line. */
+function modeParts(p, mode) {
+  const s = profileMode(p, mode);
+  return [
+    s.runner,
+    s.model || 'model default',
+    'effort ' + (s.effort || 'default'),
+    !profileApplies(s.runner, 'permission') ? 'permission n/a' : s.permission + (s.baseline ? ' (default)' : ''),
+    s.args.join(' '),
+  ];
+}
+
+/**
+ * One mode's resolved settings on a line: runner · model · effort · permission · args.
+ * @param {ProfileConfig} p
+ * @param {'headless' | 'human'} mode
+ */
+export function profileLine(p, mode) {
+  return modeParts(p, mode).filter(Boolean).join(' · ');
+}
+
+/**
+ * The Config list's summary: the headless line, then what a human Session runs differently, if anything.
+ * @param {ProfileConfig} p
+ */
+export function profileSummary(p) {
+  const headless = modeParts(p, 'headless');
+  const human = modeParts(p, 'human');
+  const differs = human.filter((part, i) => part !== headless[i]).map((part) => part || 'no args');
+  return profileLine(p, 'headless') + (differs.length ? '; human: ' + differs.join(' · ') : '');
+}
+
+/**
+ * The Runner Stages that run under a profile: those naming it, and those inheriting it from their Pipeline's
+ * profile or from config's default_profile. A Pipeline that does not load lists no Stages.
+ * @param {string} name
+ * @param {PipelineListing[]} pipelines
+ * @param {string | null} defaultProfile
+ * @returns {Array<{ pipeline: string, stage: string, inherited: boolean }>}
+ */
+export function profileUsers(name, pipelines, defaultProfile) {
+  const users = [];
+  for (const p of pipelines) {
+    for (const s of p.stages) {
+      if (s.kind !== 'runner') continue;
+      const resolved = s.profile || p.profile || defaultProfile;
+      if (resolved === name) users.push({ pipeline: p.name, stage: s.name, inherited: !s.profile });
+    }
+  }
+  return users;
+}
+
+/**
+ * The used-by line: Stages naming the profile, then those that inherit it.
+ * @param {Array<{ pipeline: string, stage: string, inherited: boolean }>} users
+ */
+export function usedByLine(users) {
+  if (!users.length) return 'no Stages';
+  const list = (xs) => xs.map((u) => u.pipeline + '/' + u.stage).join(', ');
+  const named = users.filter((u) => !u.inherited);
+  const inherited = users.filter((u) => u.inherited);
+  return [named.length ? list(named) : '', inherited.length ? 'inherited by ' + list(inherited) : ''].filter(Boolean).join(' · ');
+}
+
+/** Pairs a Runner accepts but does not honour, checked per mode (ADR 0011 keeps a short list, no capability table). */
+const BAD_PAIRS = [
+  { applies: (s) => s.runner === 'claude' && /haiku/i.test(s.model || '') && s.permission === 'auto', text: 'Claude runs Haiku in Manual mode, not auto' },
+];
+
+/**
+ * The known-bad-pair warnings for a profile, each naming the modes it hits; an unset permission counts as
+ * the adapter's default for that mode, so Haiku warns for headless Sessions even with permission unset.
+ * @param {ProfileConfig} p
+ * @returns {string[]}
+ */
+export function profileWarnings(p) {
+  return BAD_PAIRS.flatMap((pair) => {
+    const modes = ['headless', 'human'].filter((mode) => pair.applies(profileMode(p, mode)));
+    return modes.length ? [pair.text + ' (' + modes.join(' and ') + ' Sessions)'] : [];
+  });
+}
