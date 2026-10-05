@@ -2,6 +2,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { renderPrompt, ticketEnv, profileArgs, jsonLines, str, obj, type RunnerAdapter, type RunRequest, type Command, type Outcome } from "./adapter.ts";
+import type { Permission } from "../server/config.ts";
 
 interface Item {
   type?: unknown;
@@ -9,7 +10,8 @@ interface Item {
 }
 
 /**
- * Codex through `codex exec --json`, workspace-write with approvals never.
+ * Codex through `codex exec --json`, workspace-write with approvals never
+ * unless the profile sets a permission.
  * Codex assigns its own thread id: headless runs report it in the first
  * event, and a terminal launch is recovered afterwards by `findSession`
  * from the thread table under CODEX_HOME by cwd and creation time. Skills
@@ -17,6 +19,13 @@ interface Item {
  * a path outside its skill roots is ignored without a word, so a Stage
  * whose skills live elsewhere runs under a profile with `skills_dir`.
  */
+
+/** A profile's permission as Codex's flags, each accepted top-level, on exec and on resume (research/runner-cli-flags). */
+const PERMISSION_FLAGS: Record<Permission, string[]> = {
+  auto: ["--approve-for-me"],
+  edits: ["-s", "workspace-write"],
+  full: ["--dangerously-bypass-approvals-and-sandbox"],
+};
 
 /** Codex's thread index; the name carries its schema version, so a newer Codex leaves resume finding nothing. */
 const STATE_DB = "state_5.sqlite";
@@ -30,14 +39,19 @@ export const codexAdapter: RunnerAdapter = {
     const prompt = renderPrompt(request, (name) => `[$${name}](${path.join(skillsDir, name, "SKILL.md")})`);
     // A terminal runs under the shell's environment: the home Lasso reads threads from must be the one Codex writes.
     const env = { ...ticketEnv(request), ...(process.env.CODEX_HOME ? { CODEX_HOME: process.env.CODEX_HOME } : {}) };
-    const args = profileArgs(request.profile, "-m");
+    const args = profileArgs(request.profile, "-m", (level) => ["-c", `model_reasoning_effort=${level}`]);
+    // Codex refuses a repeated -m, -s or -a, so a profile's permission is emitted alone in place of the baseline,
+    // and the baseline -a never (a no-op under exec) goes with it: --dangerously-bypass-approvals-and-sandbox refuses -a.
+    const permission = request.profile.permission;
+    const sandbox = permission ? PERMISSION_FLAGS[permission] : ["-s", "workspace-write"];
+    const approval = permission ? [] : ["-a", "never"];
     if (request.mode === "terminal") {
-      if (request.resume) return { argv: ["codex", "resume", request.runnerSessionId ?? request.sessionId, "-s", "workspace-write", ...args], cwd: request.cwd, env };
-      return { argv: ["codex", "-s", "workspace-write", ...args, prompt], cwd: request.cwd, env };
+      if (request.resume) return { argv: ["codex", "resume", request.runnerSessionId ?? request.sessionId, ...sandbox, ...args], cwd: request.cwd, env };
+      return { argv: ["codex", ...sandbox, ...args, prompt], cwd: request.cwd, env };
     }
-    // `exec resume` takes no sandbox or cwd of its own: the sandbox goes top-level and the cwd is the process's.
-    if (request.resume) return { argv: ["codex", "-a", "never", "-s", "workspace-write", "exec", "resume", "--json", ...args, request.runnerSessionId ?? request.sessionId, prompt], cwd: request.cwd, env };
-    return { argv: ["codex", "-a", "never", "exec", "--json", "-C", request.cwd, "-s", "workspace-write", ...args, prompt], cwd: request.cwd, env };
+    // `exec resume` takes no sandbox, approval or cwd of its own: the permission goes top-level and the cwd is the process's.
+    if (request.resume) return { argv: ["codex", ...approval, ...sandbox, "exec", "resume", "--json", ...args, request.runnerSessionId ?? request.sessionId, prompt], cwd: request.cwd, env };
+    return { argv: ["codex", ...approval, "exec", "--json", "-C", request.cwd, ...sandbox, ...args, prompt], cwd: request.cwd, env };
   },
 
   parse(stdout: string): Outcome {

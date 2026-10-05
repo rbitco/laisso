@@ -1,5 +1,5 @@
 import type { RunnerName } from "../pipeline/load.ts";
-import type { ProfileConfig } from "../server/config.ts";
+import type { Effort, ProfileConfig } from "../server/config.ts";
 import { renderFeedback, type FeedbackItem } from "../review/feedback.ts";
 
 export type OutcomeStatus = "succeeded" | "failed" | "exhausted" | "interrupted";
@@ -145,9 +145,13 @@ export function ticketEnv(request: RunRequest): Record<string, string> {
   };
 }
 
-/** The profile's model under the Runner's own flag, then its extra args: the flags a profile adds to the baseline, in that order. */
-export function profileArgs(profile: ProfileConfig, modelFlag: string): string[] {
-  return [...(profile.model ? [modelFlag, profile.model] : []), ...(profile.args ?? [])];
+/**
+ * The flags a profile adds to the baseline, in this order: its model under the
+ * Runner's own flag, its effort as the Runner spells it, then its extra args.
+ * Permission is not here: it replaces a baseline flag, so each adapter places it.
+ */
+export function profileArgs(profile: ProfileConfig, modelFlag: string, effort: (level: Effort) => string[]): string[] {
+  return [...(profile.model ? [modelFlag, profile.model] : []), ...(profile.effort ? effort(profile.effort) : []), ...(profile.args ?? [])];
 }
 
 /** Every well-formed JSON object on its own line of captured stdout; anything else is skipped. */

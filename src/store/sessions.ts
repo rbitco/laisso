@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { OutcomeStatus } from "../runner/adapter.ts";
 import type { RunnerName } from "../pipeline/load.ts";
+import type { Effort, Permission, ProfileConfig } from "../server/config.ts";
 
 export type SessionMode = "headless" | "terminal" | "action";
 
@@ -9,6 +10,10 @@ export interface SessionProfile {
   name: string;
   runner: RunnerName;
   model: string | null;
+  /** Null when the profile left it unset, so the Runner's default applied. */
+  effort: Effort | null;
+  /** Null when the profile left it unset, so the adapter's baseline for the mode applied. */
+  permission: Permission | null;
   args: string[];
 }
 export type EndedReason = "shutdown" | "wall_time" | "abandon" | "stop";
@@ -140,8 +145,8 @@ export class Sessions {
 }
 
 /** The record of what a Session runs under, for its row. */
-export function sessionProfile(name: string, profile: { runner: RunnerName; model?: string; args?: string[] }): string {
-  const record: SessionProfile = { name, runner: profile.runner, model: profile.model ?? null, args: profile.args ?? [] };
+export function sessionProfile(name: string, profile: ProfileConfig): string {
+  const record: SessionProfile = { name, runner: profile.runner, model: profile.model ?? null, effort: profile.effort ?? null, permission: profile.permission ?? null, args: profile.args ?? [] };
   return JSON.stringify(record);
 }
 

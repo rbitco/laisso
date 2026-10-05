@@ -61,6 +61,7 @@ describe("loadConfig", () => {
       profiles: { "codex-fast": { runner: "codex", model: "gpt-5-codex", args: ["-c", "1"], skills_dir: "/opt/skills" } },
       default_profile: "codex-fast",
     });
+    expect(loadConfig(homeWith("profiles:\n  deep: { runner: claude, effort: xhigh, permission: full }\n")).profiles.deep).toEqual({ runner: "claude", effort: "xhigh", permission: "full" });
     expect(loadConfig(homeWith("default_profile: null\n")).default_profile).toBeNull();
     const bad = (yaml: string) => () => loadConfig(homeWith(`profiles:\n${yaml}`));
     expect(bad("  fast: { model: x }\n")).toThrow(/profiles\.fast: runner must be one of claude, codex, pi, not unset/);
@@ -69,7 +70,10 @@ describe("loadConfig", () => {
     expect(bad("  fast: { runner: pi, model: \"\" }\n")).toThrow(/profiles\.fast\.model must be a model name/);
     expect(bad("  fast: { runner: pi, args: --verbose }\n")).toThrow(/profiles\.fast\.args must be a list of arguments/);
     expect(bad("  fast: { runner: codex, skills_dir: 3 }\n")).toThrow(/profiles\.fast\.skills_dir must be a directory/);
-    expect(bad("  fast: { runner: claude, effort: high }\n")).toThrow(/profiles\.fast: unknown field effort/);
+    expect(bad("  fast: { runner: claude, effort: extreme }\n")).toThrow(/profiles\.fast\.effort must be one of low, medium, high, xhigh, max, not extreme/);
+    expect(bad("  fast: { runner: codex, permission: yolo }\n")).toThrow(/profiles\.fast\.permission must be one of auto, edits, full, not yolo/);
+    expect(bad("  fast: { runner: pi, permission: true }\n")).toThrow(/profiles\.fast\.permission must be one of auto, edits, full, not true/);
+    expect(bad("  fast: { runner: claude, reasoning: high }\n")).toThrow(/profiles\.fast: unknown field reasoning/);
     expect(() => loadConfig(homeWith("default_profile: Big\n"))).toThrow(/default_profile: a profile name is lowercase/);
   });
 });

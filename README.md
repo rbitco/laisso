@@ -23,8 +23,12 @@ never touches either again.
 
 Stages run under Agent Profiles defined in `config.yaml` (`profiles:`):
 each names a `runner` (`claude | codex | pi`) and may set a `model`,
-extra `args` (argv before the prompt) and, for Codex, `skills_dir`
-(where its skill catalog lives, default `~/.agents/skills`). A Stage
+an `effort` (`low | medium | high | xhigh | max`), a `permission`
+(`auto | edits | full`; Pi has none and ignores it), extra `args` (argv
+before the prompt) and, for Codex, `skills_dir` (where its skill catalog
+lives, default `~/.agents/skills`). Unset effort keeps the Runner's
+default; unset permission keeps Lasso's per mode (Claude `auto` headless
+with prompts off, `acceptEdits` in a terminal; Codex workspace-write). A Stage
 runs its own `profile:`, else its Pipeline's, else `default_profile`.
 Profiles are read when each Session starts, so an edit applies to the
 next Session without a restart. Codex ignores a skill mention whose path

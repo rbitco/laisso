@@ -36,14 +36,26 @@ export interface ActionConfig {
   timeout: string;
 }
 
+/** Reasoning effort a profile may ask for: the set every Runner accepts (ADR 0011). */
+export const EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
+export type Effort = (typeof EFFORTS)[number];
+
+/** How much a Session may do unasked; each adapter maps it to its Runner's own flag, and Pi has none (ADR 0011). */
+export const PERMISSIONS = ["auto", "edits", "full"] as const;
+export type Permission = (typeof PERMISSIONS)[number];
+
 /**
- * An Agent Profile (ADR 0011): the Runner a Stage runs under, with the model
- * and extra args it is given. Fields left out keep the Runner's own default.
+ * An Agent Profile (ADR 0011): the Runner a Stage runs under, with the model,
+ * effort, permission and extra args it is given. Fields left out keep the
+ * Runner's own default, or the adapter's baseline for that mode.
  */
 export interface ProfileConfig {
   runner: RunnerName;
   /** Free text, passed to the Runner's model flag as written. */
   model?: string;
+  effort?: Effort;
+  /** In place of the adapter's baseline permission flag for the mode; Pi ignores it. */
+  permission?: Permission;
   /** Appended after every flag Lasso writes, so a repeated flag wins where the Runner lets the last one win. */
   args?: string[];
   /** Codex only: where the Stage's skills live; ~/.agents/skills when unset. */
@@ -105,6 +117,8 @@ profiles:
 #  codex-fast:
 #    runner: codex            # claude | codex | pi
 #    model: gpt-5-codex       # passed to the Runner's model flag; unset keeps its default
+#    effort: high             # low | medium | high | xhigh | max; unset keeps the Runner's default
+#    permission: auto         # auto | edits | full; unset keeps Lasso's default per mode; Pi has none
 #    args: [-c, foo=bar]      # extra flags, after the ones Lasso writes
 #    skills_dir: /opt/skills  # Codex only: where skills live; default ~/.agents/skills
 default_profile: claude
@@ -293,7 +307,7 @@ function parseActions(value: Record<string, unknown>, where: string): Record<str
 
 /** What an Agent Profile may be called. */
 export const PROFILE_NAME = /^[a-z0-9][a-z0-9._-]*$/;
-const PROFILE_FIELDS = new Set(["runner", "model", "args", "skills_dir"]);
+const PROFILE_FIELDS = new Set(["runner", "model", "effort", "permission", "args", "skills_dir"]);
 
 function profileName(value: unknown, at: string): string {
   if (typeof value !== "string" || !PROFILE_NAME.test(value)) throw new ConfigError(`${at}: a profile name is lowercase letters, digits, dots, hyphens, and underscores, not ${String(value)}`);
@@ -313,6 +327,8 @@ function parseProfiles(value: Record<string, unknown>, where: string): Record<st
       if (typeof profile.model !== "string" || !profile.model.trim()) throw new ConfigError(`${at}.model must be a model name`);
       parsed.model = profile.model;
     }
+    if (profile.effort !== undefined) parsed.effort = oneOf(EFFORTS, profile.effort, `${at}.effort`);
+    if (profile.permission !== undefined) parsed.permission = oneOf(PERMISSIONS, profile.permission, `${at}.permission`);
     if (profile.args !== undefined) {
       if (!Array.isArray(profile.args) || !profile.args.every((a) => typeof a === "string" || typeof a === "number")) throw new ConfigError(`${at}.args must be a list of arguments`);
       parsed.args = profile.args.map(String);
@@ -324,6 +340,11 @@ function parseProfiles(value: Record<string, unknown>, where: string): Record<st
     profiles[name] = parsed;
   }
   return profiles;
+}
+
+function oneOf<T extends string>(choices: readonly T[], value: unknown, at: string): T {
+  if (!(choices as readonly unknown[]).includes(value)) throw new ConfigError(`${at} must be one of ${choices.join(", ")}, not ${String(value)}`);
+  return value as T;
 }
 
 /** Where a Session's profile was named: the Stage, its Pipeline, or config's default_profile. */

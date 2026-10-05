@@ -20,8 +20,8 @@ interface AssistantMessage {
  * Pi through `pi -p --mode json`. The first line is the session header;
  * once `agent_end` says the loop finished, the last assistant `message_end`
  * is the Outcome. Pi takes the session id Lasso chose, has no approval
- * prompt and no budget flags, and is told to trust the worktree so project
- * skills load.
+ * prompt (so a profile's permission is ignored) and no budget flags, and
+ * is told to trust the worktree so project skills load.
  */
 export const piAdapter: RunnerAdapter = {
   name: "pi",
@@ -31,7 +31,8 @@ export const piAdapter: RunnerAdapter = {
   command(request: RunRequest): Command {
     const prompt = renderPrompt(request, (name) => `/skill:${name}`);
     const env = ticketEnv(request);
-    const args = profileArgs(request.profile, "--model");
+    // Pi has no approval layer, so a profile's permission has nothing to map to.
+    const args = profileArgs(request.profile, "--model", (level) => ["--thinking", level]);
     if (request.mode === "terminal") {
       if (request.resume) return { argv: ["pi", "--session-id", request.runnerSessionId ?? request.sessionId, "-a", ...args], cwd: request.cwd, env };
       const argv = ["pi", "--session-id", request.sessionId];

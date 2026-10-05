@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { claudeAdapter } from "../src/runner/claude.ts";
 import type { RunRequest } from "../src/runner/adapter.ts";
+import { EFFORTS, PERMISSIONS, type ProfileConfig } from "../src/server/config.ts";
 import { claudeFixture as fixture } from "./harness.ts";
 
 // Seam two: the adapter as pure functions against output recorded from claude 2.1.283.
@@ -91,6 +92,40 @@ describe("claude adapter command", () => {
     const cmd = claudeAdapter.command({ ...request, mode: "terminal", resume: true, name: "Lasso: APP-12 grill" });
     expect(cmd.argv).toEqual(["claude", "--resume", request.sessionId, "--permission-mode", "acceptEdits"]);
     expect(cmd.env.LASSO_SESSION).toBe(request.sessionId);
+  });
+});
+
+describe("claude adapter effort and permission", () => {
+  const sid = request.sessionId;
+  /** Headless, headless resume, terminal and terminal resume under one profile, with the prompt elided. */
+  const forms = (profile: ProfileConfig) =>
+    [
+      claudeAdapter.command({ ...request, profile }),
+      claudeAdapter.command({ ...request, profile, resume: true }),
+      claudeAdapter.command({ ...request, profile, mode: "terminal", name: "N" }),
+      claudeAdapter.command({ ...request, profile, mode: "terminal", resume: true }),
+    ].map((cmd) => cmd.argv.map((a) => (a.includes("\n") ? "<prompt>" : a)));
+  const shapes = (headlessMode: string, terminalMode: string, extra: string[] = []) => [
+    ["claude", "-p", "<prompt>", "--output-format", "stream-json", "--verbose", "--permission-mode", headlessMode, "--permission-prompts", "none", "--session-id", sid, "--max-budget-usd", "4.5", ...extra],
+    ["claude", "-p", "<prompt>", "--output-format", "stream-json", "--verbose", "--permission-mode", headlessMode, "--permission-prompts", "none", "--resume", sid, "--max-budget-usd", "4.5", ...extra],
+    ["claude", "--session-id", sid, "--permission-mode", terminalMode, "--name", "N", ...extra, "<prompt>"],
+    ["claude", "--resume", sid, "--permission-mode", terminalMode, ...extra],
+  ];
+
+  it("keeps today's baseline in every form with effort and permission unset", () => {
+    expect(forms({ runner: "claude" })).toEqual(shapes("auto", "acceptEdits"));
+  });
+
+  it.each(EFFORTS)("passes effort %s under --effort in every form, after the model and before the args", (effort) => {
+    expect(forms({ runner: "claude", effort })).toEqual(shapes("auto", "acceptEdits", ["--effort", effort]));
+    expect(forms({ runner: "claude", model: "opus", effort, args: ["--debug"] })).toEqual(shapes("auto", "acceptEdits", ["--model", "opus", "--effort", effort, "--debug"]));
+  });
+
+  const modes = { auto: "auto", edits: "acceptEdits", full: "bypassPermissions" } as const;
+  it.each(PERMISSIONS)("replaces the baseline permission mode with %s's in every form, once, and keeps prompts off headless", (permission) => {
+    const argvs = forms({ runner: "claude", permission });
+    expect(argvs).toEqual(shapes(modes[permission], modes[permission]));
+    for (const argv of argvs) expect(argv.filter((a) => a === "--permission-mode")).toHaveLength(1);
   });
 });
 

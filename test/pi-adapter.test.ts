@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { piAdapter } from "../src/runner/pi.ts";
 import type { RunRequest } from "../src/runner/adapter.ts";
+import { EFFORTS, PERMISSIONS, type ProfileConfig } from "../src/server/config.ts";
 import { runnerFixture } from "./harness.ts";
 
 // Seam two: the Pi adapter as pure functions against output recorded from pi 0.85.1.
@@ -77,6 +78,38 @@ describe("pi adapter command", () => {
   it("points at the sessions directory Pi keeps for the worktree before the run names its file", () => {
     expect(piAdapter.transcriptPath(request)).toBe(sessionsDir);
     expect(piAdapter.transcriptPath({ cwd: "/tmp/w t", sessionId: "abc" })).toMatch(/\/\.pi\/agent\/sessions\/--tmp-w t--$/);
+  });
+});
+
+describe("pi adapter effort and permission", () => {
+  const sid = request.sessionId;
+  /** Headless, headless resume, terminal and terminal resume under one profile, with the prompt elided. */
+  const forms = (profile: ProfileConfig) =>
+    [
+      piAdapter.command({ ...request, profile }),
+      piAdapter.command({ ...request, profile, resume: true }),
+      piAdapter.command({ ...request, profile, mode: "terminal", name: "N" }),
+      piAdapter.command({ ...request, profile, mode: "terminal", resume: true }),
+    ].map((cmd) => cmd.argv.map((a) => (a.includes("\n") ? "<prompt>" : a)));
+  const shapes = (extra: string[] = []) => [
+    ["pi", "-p", "--mode", "json", "--session-id", sid, "-a", ...extra, "<prompt>"],
+    ["pi", "-p", "--mode", "json", "--session-id", sid, "-a", ...extra, "<prompt>"],
+    ["pi", "--session-id", sid, "-n", "N", "-a", ...extra, "<prompt>"],
+    ["pi", "--session-id", sid, "-a", ...extra],
+  ];
+
+  it("keeps today's baseline in every form with effort and permission unset", () => {
+    expect(forms({ runner: "pi" })).toEqual(shapes());
+  });
+
+  it.each(EFFORTS)("passes effort %s under --thinking in every form, after the model and before the args", (effort) => {
+    expect(forms({ runner: "pi", effort })).toEqual(shapes(["--thinking", effort]));
+    expect(forms({ runner: "pi", model: "openai/gpt-5", effort, args: ["--offline"] })).toEqual(shapes(["--model", "openai/gpt-5", "--thinking", effort, "--offline"]));
+  });
+
+  it.each(PERMISSIONS)("ignores permission %s: Pi has no approval layer, so every form is unchanged", (permission) => {
+    expect(forms({ runner: "pi", permission })).toEqual(forms({ runner: "pi" }));
+    expect(forms({ runner: "pi", effort: "high", permission })).toEqual(forms({ runner: "pi", effort: "high" }));
   });
 });
 

@@ -219,8 +219,8 @@ ${stageProfile ? `    profile: ${stageProfile}\n` : ""}    artifact: commits-on-
     const [pi, codex] = await lasso.runner.calls();
     expect(pi!.argv.slice(0, 11)).toEqual(["pi", "-p", "--mode", "json", "--session-id", s.sessions.find((x) => x.stage === "implement")!.id, "-a", "--model", "openai/gpt-5", "--thinking", "high"]);
     expect(codex!.argv.slice(0, 11)).toEqual(["codex", "-a", "never", "exec", "--json", "-C", staged.worktree, "-s", "workspace-write", "-m", "gpt-5-codex"]);
-    expect(s.sessions.find((x) => x.stage === "implement")!.profile).toEqual({ name: "pi-gpt", runner: "pi", model: "openai/gpt-5", args: ["--thinking", "high"] });
-    expect(s.sessions.find((x) => x.stage === "notes")!.profile).toEqual({ name: "codex-fast", runner: "codex", model: "gpt-5-codex", args: [] });
+    expect(s.sessions.find((x) => x.stage === "implement")!.profile).toEqual({ name: "pi-gpt", runner: "pi", model: "openai/gpt-5", effort: null, permission: null, args: ["--thinking", "high"] });
+    expect(s.sessions.find((x) => x.stage === "notes")!.profile).toEqual({ name: "codex-fast", runner: "codex", model: "gpt-5-codex", effort: null, permission: null, args: [] });
 
     const plain = await intake(lasso, "plain");
     await checkNow(lasso);
@@ -228,7 +228,7 @@ ${stageProfile ? `    profile: ${stageProfile}\n` : ""}    artifact: commits-on-
     const claude = (await lasso.runner.calls()).slice(2);
     expect(claude.map((c) => c.argv[0])).toEqual(["claude", "claude"]);
     for (const call of claude) expect(call.argv.slice(-3)).toEqual(["--model", "opus", "--verbose"]);
-    expect(p.session!.profile).toEqual({ name: "claude-opus", runner: "claude", model: "opus", args: ["--verbose"] });
+    expect(p.session!.profile).toEqual({ name: "claude-opus", runner: "claude", model: "opus", effort: null, permission: null, args: ["--verbose"] });
   });
 
   it("gives Codex its skills from skills_dir as link-form mentions", async () => {
@@ -255,9 +255,35 @@ ${stageProfile ? `    profile: ${stageProfile}\n` : ""}    artifact: commits-on-
     const [before, after] = await lasso.runner.calls();
     expect(before!.argv.slice(-3)).toEqual(["--model", "opus", "--verbose"]);
     expect(after!.argv.slice(-3)).toEqual(["--model", "sonnet", "--debug"]);
-    expect(d.session!.profile).toEqual({ name: "claude-opus", runner: "claude", model: "sonnet", args: ["--debug"] });
+    expect(d.session!.profile).toEqual({ name: "claude-opus", runner: "claude", model: "sonnet", effort: null, permission: null, args: ["--debug"] });
     // The Pipeline file never changed, so both Tickets run Version 1.
     expect([(await detailOf(lasso, first.id)).pipelineVersion, d.pipelineVersion]).toEqual([1, 1]);
+  });
+
+  it("hands a profile's effort and permission to each Runner's flags, and the Session shows them", async () => {
+    const tuned: Record<string, ProfileConfig> = {
+      "claude-max": { runner: "claude", effort: "max", permission: "full" },
+      "codex-auto": { runner: "codex", model: "gpt-5-codex", effort: "xhigh", permission: "auto" },
+      "claude-edits": { runner: "claude", effort: "low", permission: "edits" },
+    };
+    const lasso = await lassoWith({ staged: TWO("codex-auto", "claude-max"), talk: HUMAN("claude-edits") }, undefined, { profiles: tuned });
+    const staged = await intake(lasso, "staged");
+    await lasso.runner.script(everyRunner);
+    await checkNow(lasso);
+    const s = await finished(lasso, staged.id);
+
+    const [claude, codex] = await lasso.runner.calls();
+    expect(claude!.argv.slice(6, 10)).toEqual(["--permission-mode", "bypassPermissions", "--permission-prompts", "none"]);
+    expect(claude!.argv.slice(-2)).toEqual(["--effort", "max"]);
+    expect(codex!.argv.slice(0, 11)).toEqual(["codex", "exec", "--json", "-C", staged.worktree, "--approve-for-me", "-m", "gpt-5-codex", "-c", "model_reasoning_effort=xhigh", codex!.argv[10]]);
+    expect(s.sessions.find((x) => x.stage === "implement")!.profile).toEqual({ name: "claude-max", runner: "claude", model: null, effort: "max", permission: "full", args: [] });
+    expect(s.sessions.find((x) => x.stage === "notes")!.profile).toEqual({ name: "codex-auto", runner: "codex", model: "gpt-5-codex", effort: "xhigh", permission: "auto", args: [] });
+
+    const talk = await intake(lasso, "talk");
+    const opened = await openTerminal(lasso, talk.id);
+    expect(opened.session!.profile).toMatchObject({ name: "claude-edits", effort: "low", permission: "edits" });
+    const [terminal] = await lasso.terminals();
+    expect(readFileSync(terminal!.launcher!, "utf8")).toContain(`exec 'claude' '--session-id' '${opened.session!.id}' '--permission-mode' 'acceptEdits' '--name' 'Lasso: ${talk.id.slice(-8)} grill' '--effort' 'low' '/grilling`);
   });
 
   it("refuses Intake into a Pipeline whose profile config.yaml lacks, or when there is no profile at all", async () => {

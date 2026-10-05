@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { codexAdapter } from "../src/runner/codex.ts";
 import type { RunRequest } from "../src/runner/adapter.ts";
+import { EFFORTS, PERMISSIONS, type ProfileConfig } from "../src/server/config.ts";
 import { runnerFixture } from "./harness.ts";
 
 // Seam two: the Codex adapter as pure functions against output recorded from
@@ -91,6 +92,54 @@ describe("codex adapter command", () => {
 
   it("has no transcript path to promise before the thread exists", () => {
     expect(codexAdapter.transcriptPath(request)).toBeNull();
+  });
+});
+
+describe("codex adapter effort and permission", () => {
+  const cwd = request.cwd;
+  /** Headless, headless resume, terminal and terminal resume under one profile, with the prompt elided. */
+  const forms = (profile: ProfileConfig) =>
+    [
+      codexAdapter.command({ ...request, profile }),
+      codexAdapter.command({ ...request, profile, resume: true, runnerSessionId: "t" }),
+      codexAdapter.command({ ...request, profile, mode: "terminal", name: "N" }),
+      codexAdapter.command({ ...request, profile, mode: "terminal", resume: true, runnerSessionId: "t" }),
+    ].map((cmd) => cmd.argv.map((a) => (a.includes("\n") ? "<prompt>" : a)));
+  /** `approval` is the root -a the headless forms keep only while permission is unset. */
+  const shapes = (permission: string[], approval: string[], extra: string[] = []) => [
+    ["codex", ...approval, "exec", "--json", "-C", cwd, ...permission, ...extra, "<prompt>"],
+    ["codex", ...approval, ...permission, "exec", "resume", "--json", ...extra, "t", "<prompt>"],
+    ["codex", ...permission, ...extra, "<prompt>"],
+    ["codex", "resume", "t", ...permission, ...extra],
+  ];
+  const baseline = ["-s", "workspace-write"];
+  const never = ["-a", "never"];
+  /** Codex refuses a single-value flag given twice in one scope; Lasso never gives one twice at all. */
+  const repeats = (argv: string[]) => ["-m", "-s", "-a", "--approve-for-me", "--dangerously-bypass-approvals-and-sandbox"].filter((flag) => argv.filter((a) => a === flag).length > 1);
+
+  it("keeps today's baseline in every form with effort and permission unset", () => {
+    expect(forms({ runner: "codex" })).toEqual(shapes(baseline, never));
+  });
+
+  it.each(EFFORTS)("passes effort %s as -c model_reasoning_effort in every form, after the model and before the args", (effort) => {
+    expect(forms({ runner: "codex", effort })).toEqual(shapes(baseline, never, ["-c", `model_reasoning_effort=${effort}`]));
+    expect(forms({ runner: "codex", model: "gpt-5-codex", effort, args: ["-c", "x=1"] })).toEqual(shapes(baseline, never, ["-m", "gpt-5-codex", "-c", `model_reasoning_effort=${effort}`, "-c", "x=1"]));
+  });
+
+  const flags = { auto: ["--approve-for-me"], edits: ["-s", "workspace-write"], full: ["--dangerously-bypass-approvals-and-sandbox"] } as const;
+  it.each(PERMISSIONS)("emits only %s's flag in place of the baseline sandbox and approval, top-level for exec resume", (permission) => {
+    expect(forms({ runner: "codex", permission })).toEqual(shapes([...flags[permission]], []));
+    expect(forms({ runner: "codex", model: "m", effort: "high", permission })).toEqual(shapes([...flags[permission]], [], ["-m", "m", "-c", "model_reasoning_effort=high"]));
+  });
+
+  it("never repeats -m, -s or -a in any form, whatever model, effort and permission the profile sets", () => {
+    for (const permission of [undefined, ...PERMISSIONS]) {
+      for (const effort of [undefined, ...EFFORTS]) {
+        for (const model of [undefined, "gpt-5-codex"]) {
+          for (const argv of forms({ runner: "codex", model, effort, permission })) expect(repeats(argv), argv.join(" ")).toEqual([]);
+        }
+      }
+    }
   });
 });
 
