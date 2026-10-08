@@ -199,57 +199,169 @@
   .timeline .pill.failed, .timeline .pill.exhausted { background: var(--crit-bg); color: var(--crit); }
   .timeline .pill.interrupted { background: var(--amber-bg); color: var(--amber); }
 
-  /* Pipelines and Config */
-  nav.views { display: flex; gap: 12px; }
-  nav.views a { color: var(--muted); text-decoration: none; }
-  nav.views a:hover { color: var(--accent); }
+  /* Pipelines and Config: shared form parts */
+  nav.views { display: flex; gap: 4px; }
+  nav.views a { color: var(--muted); text-decoration: none; padding: 4px 10px; border-radius: 6px; }
+  nav.views a:hover { color: var(--ink); background: var(--surface2); }
+  nav.views a.on { color: var(--ink); background: var(--surface2); font-weight: 600; }
   .panel h2 { margin: 0; font-size: 16px; }
-  .pipelines-grid { display: grid; grid-template-columns: minmax(180px, 240px) 1fr; gap: 16px; align-items: start; }
-  @media (max-width: 720px) { .pipelines-grid { grid-template-columns: 1fr; } }
-  .plist { display: grid; gap: 6px; }
-  .plist a { display: grid; gap: 2px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; color: inherit; text-decoration: none; }
-  .plist a.current { border-color: var(--accent); }
-  .plist a .why, .card .why, .panel .why { color: var(--muted); font-size: 12px; }
   .card { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; }
   .card.problem { border-color: var(--crit); }
   .card .links { display: flex; flex-wrap: wrap; gap: 12px; }
-  .card h3 .tools button:disabled { opacity: 0.3; }
-  .card h3 .tools { margin-left: auto; display: flex; gap: 4px; }
-  .card h3 .removed-note { display: none; color: var(--crit); font-weight: normal; }
-  .card.removed { border-style: dashed; opacity: 0.6; }
-  .card.removed .fields { display: none; }
-  .card.removed h3 .removed-note { display: inline; }
-  .card.fresh { border-color: var(--accent); }
-  .add-stage { justify-self: start; display: flex; gap: 6px; }
-  .add-stage button { background: none; border-style: dashed; color: var(--muted); }
+  .card pre { margin: 0; white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  .card h3 { margin: 0; font-size: 13px; display: flex; gap: 8px; align-items: baseline; text-transform: none; letter-spacing: 0; color: var(--ink); }
+  .plist a .why, .card .why, .panel .why { color: var(--muted); font-size: 12px; }
   dd .drift, .bar .drift { color: var(--amber); }
   [data-role="pipeline-version"] a, [data-role="live-versions"] a { color: var(--accent); }
-  .action-def { margin-top: 8px; }
-  .action-def h4 { margin: 0 0 4px; font-size: 13px; }
-  .card pre { margin: 0; white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px 14px; align-items: end; }
+  .fields label, .fields .check { display: grid; gap: 5px; font-size: 12.5px; color: var(--muted); }
+  .fields label.wide { grid-column: 1 / -1; }
+  .fields .check { display: flex; align-items: flex-start; gap: 8px; color: var(--ink); font-size: 13px; line-height: 1.35; }
+  .fields .check input { margin: 2px 0 0; accent-color: var(--accent); }
+  .fields input, .fields select, .fields textarea { padding: 6px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: inherit; font: inherit; min-width: 0; }
+  .fields input:focus, .fields select:focus, .fields textarea:focus, textarea.raw:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }
+  .fields textarea { min-height: 96px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.5; resize: vertical; }
   .fields .ro { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
   .fields .ro span { color: var(--ink); }
   .fields .ro.wide { grid-column: 1 / -1; }
-  .card h3 { margin: 0; font-size: 13px; display: flex; gap: 8px; align-items: baseline; text-transform: none; letter-spacing: 0; color: var(--ink); }
-  .card h3 .kind { font-weight: normal; }
-  .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; align-items: end; }
-  .fields label, .fields .check { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
-  .fields label.wide { grid-column: 1 / -1; }
-  .fields .check { display: flex; align-items: center; gap: 6px; }
-  .fields input, .fields select, .fields textarea { padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; font: inherit; }
-  .fields textarea { min-height: 96px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
-  textarea.raw { width: 100%; min-height: 360px; padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  textarea.raw { width: 100%; min-height: 480px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: inherit; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; line-height: 1.55; }
   .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   .bar .path { font-family: ui-monospace, monospace; font-size: 12px; color: var(--muted); word-break: break-all; }
   .panel.editor-panel { background: transparent; border: 0; padding: 0; }
+  :is(.ed, .pf-drawer) :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  button.danger { background: transparent; color: var(--crit); border-color: transparent; }
+  button.danger:hover { border-color: var(--crit); }
+  button.quiet { background: transparent; }
+
+  /* Page heads: the thing's name, then where it lives on disk */
+  .ed { display: grid; gap: 20px; min-width: 0; max-width: 1080px; }
+  .ed-head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: flex-end; justify-content: space-between; }
+  .ed-head h2 { margin: 0; font-size: 22px; font-weight: 650; letter-spacing: -0.01em; }
+  .ed-head .path { display: block; margin-top: 2px; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); overflow-wrap: anywhere; }
+  .ed-head .bar { flex: none; }
+  .ed .group-title { margin: 8px 0 -8px; font-size: 15px; font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--ink); }
+  .group-title span { font-weight: normal; color: var(--muted); font-size: 13px; margin-left: 8px; }
+
+  /* The save bar sticks to the bottom of what it saves, and says when there is something to save */
+  .savebar { position: sticky; bottom: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; padding: 10px 16px; background: var(--surface); border-top: 1px solid var(--line); border-radius: 0 0 10px 10px; }
+  .savebar .state { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+  .savebar .state::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--line); }
+  .dirty .savebar .state { color: var(--amber); }
+  .dirty .savebar .state::before { background: var(--amber); }
+  .savebar .why { flex: 1 1 240px; text-align: right; }
+
+  /* Config: one sheet per kind of setting. Saved-with-Save is a solid sheet with its own save bar;
+     saves-at-once is a sheet of tiles; read-only from config.yaml is recessed and dashed. */
+  .sheet { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+  .sheet.readonly { background: transparent; border-style: dashed; }
+  .setting { display: grid; grid-template-columns: minmax(180px, 260px) minmax(0, 1fr); gap: 12px 32px; padding: 18px 20px; border-top: 1px solid var(--line); }
+  .setting:first-child { border-top: 0; }
+  @media (max-width: 760px) { .setting { grid-template-columns: 1fr; padding: 16px; } }
+  .setting h3 { margin: 0 0 4px; font-size: 14px; font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--ink); }
+  .setting .about { margin: 0; font-size: 12.5px; color: var(--muted); max-width: 32ch; }
+  .setting .cfg-body { min-width: 0; display: grid; gap: 10px; align-content: start; }
+  .setting .fields { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+  .setting .fields.checks { grid-template-columns: 1fr; gap: 10px; }
+  .setting .fields.checks .check:first-child { padding-bottom: 10px; border-bottom: 1px solid var(--line); font-weight: 600; }
+  .readonly .note { font-size: 12.5px; color: var(--muted); }
+  .readonly .note code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink); }
+  .repos { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .repos th { text-align: left; font-weight: 500; color: var(--muted); font-size: 12px; padding: 0 12px 6px 0; border-bottom: 1px solid var(--line); }
+  .repos td { padding: 8px 12px 8px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .repos tr:last-child td { border-bottom: 0; }
+  .repos td.path { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); overflow-wrap: anywhere; }
+  @media (max-width: 640px) { .repos thead { display: none; } .repos tr { display: grid; padding: 8px 0; border-bottom: 1px solid var(--line); } .repos td { border: 0; padding: 1px 0; } }
+  .action-def { display: grid; gap: 6px; }
+  .action-def + .action-def { margin-top: 10px; }
+  .action-def h4 { margin: 0; font-size: 13px; display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+  .action-def .chip { font-weight: normal; }
+  .action-def pre { margin: 0; padding: 10px 12px; border-radius: 6px; background: var(--term-bg); color: var(--term-ink); font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; padding: 1px 8px; border-radius: 999px; background: var(--pill); color: var(--muted); white-space: nowrap; }
+  .chip.is-default { background: var(--accent); color: #fff; }
+
+  /* Agent Profiles on Config: one tile each, opening the drawer */
+  .pf-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+  .pf-list a { display: grid; gap: 6px; align-content: start; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); cursor: pointer; color: inherit; text-decoration: none; }
+  .pf-list a:hover, .pf-list a:focus-visible { border-color: var(--accent); }
+  .pf-list a b { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 14px; }
+  .pf-list a .why { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+  /* Pipelines: the list, with each Pipeline's Stages drawn as a little line */
+  .pipelines-grid { display: grid; grid-template-columns: minmax(200px, 250px) minmax(0, 1fr); gap: 24px; align-items: start; }
+  @media (max-width: 760px) { .pipelines-grid { grid-template-columns: 1fr; } }
+  .plist-wrap { position: sticky; top: 12px; display: grid; gap: 10px; }
+  @media (max-width: 760px) { .plist-wrap { position: static; } }
+  .plist { display: grid; gap: 2px; }
+  .plist a { display: grid; gap: 4px; padding: 8px 10px; border-radius: 8px; color: inherit; text-decoration: none; }
+  .plist a:hover { background: var(--surface2); }
+  .plist a.current { background: var(--surface); box-shadow: inset 3px 0 var(--accent), 0 0 0 1px var(--line); }
+  .plist a strong { font-weight: 600; }
+  .plist svg { display: block; height: 12px; max-width: 100%; }
+  .plist .count { font-size: 12px; color: var(--muted); }
+  [data-role="new-pipeline"] { padding: 12px; border: 1px dashed var(--line); border-radius: 8px; }
+  [data-role="new-pipeline"] .fields { grid-template-columns: 1fr; }
+  .info-strip { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: baseline; padding: 10px 14px; border-radius: 8px; background: var(--run-bg); color: var(--ink); font-size: 13px; }
+  .info-strip h3 { margin: 0; font-size: 13px; font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--run); }
+  .info-strip .why { flex-basis: 100%; }
+
+  /* Pipeline settings, then the Stages on a line, one station each */
+  .pipe-form { display: grid; gap: 0; background: transparent; border: 0; padding: 0; }
+  .pipe-settings { padding: 16px 20px; margin-bottom: 24px; }
+  .pipe-settings h3 { margin: 0 0 2px; font-size: 14px; font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--ink); }
+  .pipe-settings .about { margin: 0 0 12px; font-size: 12.5px; color: var(--muted); }
+  .stages-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 0 0 10px; }
+  .stages-head h3 { margin: 0; font-size: 15px; font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--ink); }
+  .stages-head .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--muted); align-items: center; }
+  .stages-head .legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .stages-head .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; border: 2.5px solid var(--k); }
+  .stages-head .legend i.bar { width: 10px; height: 10px; border: 0; border-radius: 3px; background: var(--k); }
+  .rail { position: relative; display: grid; gap: 0; padding-bottom: 8px; }
+  .rail::before { content: ''; position: absolute; left: 17px; top: 18px; bottom: 26px; width: 4px; border-radius: 2px; background: var(--surface2); }
+  .stage { --k: var(--run); position: relative; display: grid; grid-template-columns: 38px minmax(0, 1fr); gap: 12px; padding: 0; border: 0; }
+  .stage.k-human { --k: var(--amber); }
+  .stage.k-action { --k: var(--muted); }
+  .station { position: relative; z-index: 1; justify-self: center; margin-top: 9px; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; border: 3.5px solid var(--k); background: var(--bg); font-size: 12px; font-weight: 700; color: var(--k); font-variant-numeric: tabular-nums; }
+  .k-action .station { width: 24px; height: 24px; margin-top: 12px; border: 0; border-radius: 6px; background: var(--k); color: var(--bg); }
+  .stage-box { min-width: 0; background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--k); border-radius: 8px; }
+  .k-action .stage-box { background: transparent; border-color: var(--line); border-left-color: var(--k); }
+  .stage-box h3 { display: flex; align-items: center; gap: 10px; margin: 0; padding: 8px 10px 8px 12px; font-size: 14px; text-transform: none; letter-spacing: 0; color: var(--ink); }
+  .stage-toggle { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 2px 10px; align-items: center; padding: 2px 0; border: 0; background: none; text-align: left; font: inherit; color: inherit; cursor: pointer; }
+  .stage-toggle .nm { font-weight: 600; font-size: 14px; min-width: 0; overflow-wrap: anywhere; }
+  .stage-toggle .kind { justify-self: start; font-size: 11.5px; padding: 1px 8px; border-radius: 999px; color: var(--k); background: color-mix(in srgb, var(--k) 14%, transparent); text-transform: none; letter-spacing: 0; font-weight: 500; }
+  .k-action .stage-toggle .kind { color: var(--ink); background: var(--pill); }
+  .stage-toggle .sum { flex: 1 1 160px; min-width: 0; font-size: 12.5px; font-weight: normal; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .stage-toggle .peek { flex-basis: 100%; min-width: 0; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .stage-box h3::after { content: ''; flex: none; width: 7px; height: 7px; margin: 0 4px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); transition: transform .15s; order: 3; }
+  .stage.open .stage-box h3::after { transform: rotate(45deg); }
+  .stage.open .stage-toggle .peek { display: none; }
+  .stage-box h3 .tools { order: 2; margin-left: 0; display: flex; gap: 2px; }
+  .stage-box h3 .tools button { background: transparent; border-color: transparent; color: var(--muted); }
+  .stage-box h3 .tools button:hover:not(:disabled) { border-color: var(--line); color: var(--ink); }
+  .stage-box h3 .tools button:disabled { opacity: 0.3; }
+  .stage-box h3 .removed-note { display: none; color: var(--crit); font-weight: normal; font-size: 12px; }
+  .stage-fields { display: grid; gap: 0; border-top: 1px solid var(--line); }
+  .k-action .stage-fields { padding: 14px 14px 16px; }
+  .fgroup { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 8px 16px; padding: 14px; border-top: 1px solid var(--line); }
+  .fgroup:first-child { border-top: 0; }
+  .fgroup > h4 { margin: 6px 0 0; font-size: 12.5px; font-weight: 600; color: var(--ink); }
+  @media (max-width: 640px) { .fgroup { grid-template-columns: 1fr; } }
+  .stage.removed .stage-box { border-style: dashed; border-left-style: solid; opacity: 0.6; }
+  .stage.removed .station { opacity: 0.4; }
+  .stage.removed .stage-fields, .stage.removed .stage-toggle .peek { display: none; }
+  .stage.removed .stage-box h3 .removed-note { display: inline; }
+  .stage.fresh .stage-box { border-color: var(--accent); border-left-color: var(--k); }
+  .add-stage { position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-height: 32px; padding: 4px 0 4px 6px; }
+  .add-stage button[data-role="add-stage"] { width: 26px; height: 26px; padding: 0; border-radius: 50%; border: 2px dashed var(--line); background: var(--bg); color: var(--muted); font-size: 15px; line-height: 1; }
+  .add-stage button[data-role="add-stage"]:hover, .add-stage button[data-role="add-stage"]:focus-visible { border-color: var(--accent); color: var(--accent); border-style: solid; }
+  .add-stage button { font-size: 12px; }
+  .add-stage .add-k { margin-left: 44px; }
+  .add-stage .add-k + .add-k { margin-left: 0; }
+  .pipe-form > .savebar { border: 1px solid var(--line); border-radius: 10px; margin-top: 4px; }
+  .pf-pickbtn { display: grid; gap: 2px; justify-items: start; text-align: left; width: 100%; padding: 8px 10px; background: var(--bg); }
+  .pf-pickbtn:hover { border-color: var(--accent); }
 
   /* Agent Profiles: the Config list, and the drawer that edits them */
-  .pf-list { display: grid; }
-  .pf-list a { display: grid; grid-template-columns: minmax(120px, max-content) minmax(0, 2fr) minmax(0, 1fr); gap: 4px 14px; padding: 6px 0; border-bottom: 1px solid var(--line); cursor: pointer; align-items: baseline; color: inherit; text-decoration: none; }
-  .pf-list a:last-child { border-bottom: 0; }
-  .pf-list a:hover b { color: var(--accent); }
   .pf-list .default, .pf-drawer .default { font-size: 11px; color: var(--accent); font-weight: normal; margin-left: 6px; }
-  @media (max-width: 720px) { .pf-list a { grid-template-columns: 1fr; } }
   .pf-summary { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); overflow-wrap: anywhere; }
   .pf-warn { margin: 0; padding: 0 0 0 18px; color: var(--amber); font-size: 12px; }
   .pf-na { opacity: 0.45; }
@@ -272,7 +384,6 @@
   .pf-tabs button[role="tab"] { border-radius: 6px 6px 0 0; }
   .pf-tabs button[role="tab"].on { background: var(--surface2); box-shadow: inset 0 -2px var(--accent); font-weight: 600; }
   .pf-tabs select { margin-left: auto; width: auto; }
-  .pf-pickbtn { display: grid; gap: 2px; justify-items: start; text-align: left; width: 100%; padding: 6px 10px; }
   .pf-pickbtn .pf-pickname { font-weight: 600; }
   .pf-pickbtn .pf-summary { white-space: pre-wrap; }
   .pf-pickbtn .pf-overridden { font-size: 11px; color: var(--amber); font-weight: normal; margin-left: 6px; }
@@ -892,23 +1003,38 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
     catch (e) { showNotice(e.message); if (e.input) e.input.focus(); idle(); }
   }
 
-  // Pipelines: the list on the left, one Pipeline's Stages on the right, edited in place (comments and order kept).
+  // Pipelines: the list on the left, each with its Stages drawn as a line; one Pipeline's editor on the right.
   async function showPipelines(name, version) {
     let list;
     try { list = await api('/api/pipelines'); } catch (e) { showNotice(e.message); return; }
-    const side = el('div', { class: 'plist' }, list.map((p) => el('a', { href: '#pipelines/' + encodeURIComponent(p.name), class: p.name === name ? 'current' : '' }, [
-      el('strong', { text: p.name }),
-      el('span', { class: 'why', text: p.problem ? 'does not load' : p.stages.map((s) => s.label).join(' → ') }),
-    ])));
-    const body = !name ? el('p', { class: 'empty', text: 'Pick a Pipeline to edit it, or make a new one.' }) : version ? await versionView(name, version) : await pipelineEditor(name);
-    pipelinesPanel.replaceChildren(el('div', { class: 'pipelines-grid' }, [el('div', { class: 'panel' }, [side, newPipelineForm(list)]), body]));
+    const side = el('div', { class: 'plist' }, list.map((p) => el('a', { href: '#pipelines/' + encodeURIComponent(p.name), class: p.name === name ? 'current' : '', title: p.problem ? '' : p.stages.map((s) => s.label).join(' → ') }, p.problem
+      ? [el('strong', { text: p.name }), el('span', { class: 'why drift', text: 'does not load' })]
+      : [el('strong', { text: p.name }), miniLine(p.stages), el('span', { class: 'count', text: p.stages.length + ' Stage' + (p.stages.length === 1 ? '' : 's') })])));
+    const body = !name ? el('p', { class: 'empty', text: list.length ? 'Pick a Pipeline to edit it, or make a new one.' : 'No Pipelines yet. Make one to get started.' }) : version ? await versionView(name, version) : await pipelineEditor(name);
+    pipelinesPanel.replaceChildren(el('div', { class: 'pipelines-grid' }, [el('div', { class: 'plist-wrap' }, [side, newPipelineForm(list)]), body]));
+  }
+
+  // A Pipeline's Stages as a little line of stations: a ring for a Runner or human Stage, a square for an action Stage.
+  function miniLine(stages) {
+    let x = 5;
+    const pts = stages.map((s) => { const p = { s, x }; x += s.kind === 'action' ? 9 : 14; return p; });
+    const w = (pts.length ? pts[pts.length - 1].x : 0) + 5;
+    let svg = `<svg viewBox="0 0 ${w} 12" width="${w}" height="12" aria-hidden="true"><line x1="5" y1="6" x2="${w - 5}" y2="6" stroke="var(--line)" stroke-width="2"/>`;
+    for (const { s, x: cx } of pts) svg += s.kind === 'action' ? `<rect x="${cx - 3}" y="3" width="6" height="6" rx="1.5" fill="var(--muted)"/>` : `<circle cx="${cx}" cy="6" r="3.6" fill="var(--bg)" stroke="var(--run)" stroke-width="2"/>`;
+    const box = el('span');
+    box.innerHTML = svg + '</svg>';
+    return box;
   }
 
   function newPipelineForm(list) {
     const nameInput = el('input', { name: 'name', placeholder: 'new-pipeline' });
-    const copy = el('select', { name: 'copy' }, [el('option', { value: '', text: 'a blank Pipeline' }), ...list.map((p) => el('option', { value: p.name, text: 'copy of ' + p.name }))]);
+    const copy = el('select', { name: 'copy' }, [el('option', { value: '', text: 'A blank Pipeline' }), ...list.map((p) => el('option', { value: p.name, text: 'A copy of ' + p.name }))]);
     const create = el('button', { class: 'primary', type: 'submit', text: 'Create' });
-    const form = el('form', { class: 'card', 'data-role': 'new-pipeline' }, [el('div', { class: 'fields' }, [field('name', nameInput), field('start from', copy)]), el('div', { class: 'bar' }, [create])]);
+    const cancel = el('button', { type: 'button', class: 'quiet', text: 'Cancel' });
+    const form = el('form', { 'data-role': 'new-pipeline', hidden: '' }, [el('div', { class: 'fields' }, [field('Name', nameInput), field('Start from', copy)]), el('div', { class: 'bar', style: 'margin-top:10px' }, [create, cancel])]);
+    const open = el('button', { type: 'button', class: 'quiet', text: '+ New Pipeline' });
+    open.addEventListener('click', () => { form.hidden = false; open.hidden = true; nameInput.focus(); });
+    cancel.addEventListener('click', () => { form.hidden = true; open.hidden = false; });
     form.addEventListener('submit', (ev) => {
       ev.preventDefault();
       const name = nameInput.value.trim();
@@ -917,25 +1043,30 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
         await api('/api/pipelines/' + encodeURIComponent(name), { method: 'PUT', body: JSON.stringify({ text, create: true }) });
       }, () => { location.hash = 'pipelines/' + encodeURIComponent(name); });
     });
-    return form;
+    return el('div', { style: 'display:grid' }, [open, form]);
+  }
+
+  // A page head: the thing's name over the file it lives in, with its buttons on the right.
+  function editorHead(title, file, buttons) {
+    return el('div', { class: 'ed-head' }, [el('div', { style: 'min-width:0' }, [el('h2', { text: title }), el('span', { class: 'path', text: file })]), el('div', { class: 'bar' }, buttons)]);
   }
 
   async function pipelineEditor(name) {
     let p;
     try { p = await api('/api/pipelines/' + encodeURIComponent(name)); } catch (e) { return el('p', { class: 'notice', text: e.message }); }
-    const panel = el('div', { class: 'panel', 'data-role': 'pipeline-editor' });
-    const asText = el('button', { type: 'button', text: 'Edit as text' });
-    const remove = el('button', { type: 'button', text: 'Delete' });
-    const head = el('div', { class: 'bar' }, [el('h2', { text: p.name }), el('span', { class: 'path', text: p.file }), asText, remove]);
+    const panel = el('div', { class: 'ed', 'data-role': 'pipeline-editor' });
+    const asText = el('button', { type: 'button', class: 'quiet', text: 'Edit as text' });
+    const remove = el('button', { type: 'button', class: 'danger', text: 'Delete' });
+    const head = editorHead(p.name, p.file, [asText, remove]);
     remove.addEventListener('click', () => {
-      if (remove.textContent !== 'Delete for sure') { remove.textContent = 'Delete for sure'; setTimeout(() => { remove.textContent = 'Delete'; }, 4000); return; }
+      if (remove.textContent !== 'Click again to delete') { remove.textContent = 'Click again to delete'; setTimeout(() => { remove.textContent = 'Delete'; }, 4000); return; }
       save(remove, () => api('/api/pipelines/' + encodeURIComponent(name), { method: 'DELETE' }), () => { location.hash = 'pipelines'; });
     });
     const actions = await api('/api/actions').catch(() => []);
-    const config = await api('/api/config').then((c) => c.config).catch(() => ({ profiles: {}, default_profile: null }));
+    const config = await api('/api/config').then((c) => c.config).catch(() => ({ profiles: {}, default_profile: null, budget: {} }));
     // What the Pipeline and Stage cards share about profiles: config as last read (a drawer save refreshes it),
-    // the Pipeline dropdown's choice, and each card's redraw, run when either changes.
-    const profiles = { config, pipeline: name, chosen: () => null, redraws: [], changed(next) { if (next) this.config = next; for (const r of this.redraws) r(); } };
+    // the Pipeline dropdown's choice, each card's redraw, run when either changes, and touched(), which marks the form unsaved.
+    const profiles = { config, pipeline: name, chosen: () => null, redraws: [], touched: () => {}, changed(next) { if (next) this.config = next; for (const r of this.redraws) r(); } };
     const structured = p.pipeline ? stagesForm(p, actions, profiles) : el('div', { class: 'card problem' }, [el('div', { class: 'why', text: 'This file does not load: ' + p.problem + '. Fix it as text.' })]);
     const raw = rawForm(p);
     raw.hidden = !!p.pipeline;
@@ -949,12 +1080,47 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
   async function liveVersions(name) {
     let versions = [];
     try { versions = await api('/api/pipelines/' + encodeURIComponent(name) + '/versions'); } catch { /* the editor still works without it */ }
-    const box = el('div', { class: 'card', 'data-role': 'live-versions' });
+    const box = el('div', { class: 'info-strip', 'data-role': 'live-versions' });
     if (!versions.length) { box.hidden = true; return box; }
     const links = versions.map((v) => el('a', { href: '#pipelines/' + encodeURIComponent(name) + '/v' + v.version, text: 'v' + v.version + ' (' + v.live + ' Ticket' + (v.live === 1 ? '' : 's') + ')' }));
-    const list = el('div', { class: 'links' }, links);
-    box.replaceChildren(el('h3', { text: 'Versions in use' }), list, el('div', { class: 'why', text: 'Tickets under way keep the Version they started with; a save here applies to new Tickets.' }));
+    box.replaceChildren(el('h3', { text: 'Versions in use' }), ...links, el('div', { class: 'why', text: 'Tickets under way keep the Version they started with. Saving here changes new Tickets only.' }));
     return box;
+  }
+
+  // One Stage drawn on the line without its fields: a station, then a head naming the Stage and its kind.
+  function railStage(kind, name, children, open, attrs = {}) {
+    const station = el('span', { class: 'station', 'aria-hidden': 'true' });
+    const nm = el('span', { class: 'nm', text: name });
+    const chip = el('span', { class: 'kind', text: KIND_LABEL[kind] });
+    const sum = el('span', { class: 'sum' });
+    const peek = el('span', { class: 'peek' });
+    const toggle = el('button', { type: 'button', class: 'stage-toggle', 'aria-expanded': 'false' }, [nm, chip, sum, peek]);
+    const fields = el('div', { class: 'stage-fields' }, children);
+    const node = el('div', Object.assign({ class: 'stage k-' + kind }, attrs), [station, el('div', { class: 'stage-box' }, [el('h3', {}, [toggle]), fields])]);
+    const shell = {
+      node, station,
+      isOpen: () => !fields.hidden,
+      setOpen(on) { node.classList.toggle('open', on); fields.hidden = !on; toggle.setAttribute('aria-expanded', String(on)); },
+      label(text, kindNow, summary, prompt) {
+        nm.textContent = text;
+        for (const k of Object.keys(KIND_LABEL)) node.classList.toggle('k-' + k, k === kindNow);
+        chip.textContent = KIND_LABEL[kindNow];
+        sum.textContent = summary;
+        peek.textContent = prompt;
+        peek.hidden = !prompt;
+      },
+    };
+    toggle.addEventListener('click', () => shell.setOpen(fields.hidden));
+    shell.setOpen(open);
+    return shell;
+  }
+  const KIND_LABEL = { runner: 'Runner', human: 'Human', action: 'Action' };
+  const firstLine = (text) => (text || '').split('\n').find((l) => l.trim()) || '';
+  function stagesHead(onExpand) {
+    const key = (text, colour, bar) => el('span', {}, [el('i', { class: bar ? 'bar' : '', style: '--k:' + colour }), text]);
+    const expand = el('button', { type: 'button', class: 'sm quiet', text: 'Expand all' });
+    if (onExpand) expand.addEventListener('click', () => { expand.textContent = onExpand() ? 'Collapse all' : 'Expand all'; });
+    return el('div', { class: 'stages-head' }, [el('h3', { text: 'Stages' }), el('div', { class: 'legend' }, [key('Runner', 'var(--run)'), key('Human', 'var(--amber)'), key('Action', 'var(--muted)', true), ...(onExpand ? [expand] : [])])]);
   }
 
   // One frozen Version, read-only: nothing here saves.
@@ -964,26 +1130,31 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
     const ro = (label, value, wide) => el('div', { class: 'ro' + (wide ? ' wide' : '') }, [label, el('span', { text: value })]);
     const yes = (b) => (b ? 'yes' : 'no');
     const budget = (b) => ['rounds', 'attempts', 'wallTime'].filter((k) => b[k] !== undefined).map((k) => k + ' ' + b[k]).join(', ') || 'defaults';
-    const cards = v.pipeline.stages.map((s) => s.kind === 'action'
-      ? el('div', { class: 'card' }, [el('h3', {}, [el('span', { class: 'kind', text: 'action' }), s.action]), el('div', { class: 'fields' }, Object.entries(s.with).map(([key, value]) => ro(key, value)))])
-      : el('div', { class: 'card' }, [
-        el('h3', {}, [el('span', { class: 'kind', text: s.human ? 'human' : 'runner' }), s.name]),
-        el('div', { class: 'fields' }, [
+    const stages = v.pipeline.stages.map((s, i) => {
+      const kind = s.kind === 'action' ? 'action' : s.human ? 'human' : 'runner';
+      const shell = s.kind === 'action'
+        ? railStage(kind, s.name, [el('div', { class: 'fields' }, [ro('action', s.action), ...Object.entries(s.with).map(([key, value]) => ro(key, value))])], true)
+        : railStage(kind, s.name, [el('div', { class: 'fgroup' }, [el('h4', { text: 'Settings' }), el('div', { class: 'fields' }, [
           ro('profile', s.profile || (v.pipeline.profile ? 'Pipeline\'s (' + v.pipeline.profile + ')' : 'config default')), ro('artifact', s.artifact || 'none'), ro('skills', s.skills.join(', ') || 'none'),
           ro('advances on its own', yes(s.advance)), ro('repeats on Feedback', yes(s.repeat === 'feedback')), ro('budget', budget(s.budget)),
           el('div', { class: 'ro wide' }, ['prompt', el('pre', { text: s.prompt || '(none)' })]),
-        ]),
-      ]));
-    const head = el('div', { class: 'bar' }, [el('h2', { text: name + ' v' + version }), el('span', { class: 'why', text: 'read-only · frozen ' + relative(v.createdAt) + ' · ' + v.live + ' active Ticket' + (v.live === 1 ? '' : 's') }), v.deleted ? el('span', { class: 'drift', text: 'Pipeline deleted' }) : el('a', { href: '#pipelines/' + encodeURIComponent(name), text: 'current Pipeline' })]);
-    const pipelineCard = el('div', { class: 'card' }, [el('h3', { text: 'Pipeline' }), el('div', { class: 'fields' }, [ro('profile', v.pipeline.profile || 'config default'), ro('spend per Ticket (USD)', v.pipeline.budget.spend === undefined ? 'global default' : String(v.pipeline.budget.spend))])]);
-    return el('div', { class: 'panel', 'data-role': 'pipeline-version' }, [head, pipelineCard, ...cards]);
+        ])])], false);
+      shell.station.textContent = String(i + 1);
+      shell.label(s.name, kind, s.kind === 'action' ? s.action : s.artifact ? 'artifact ' + s.artifact : '', s.kind === 'action' ? '' : firstLine(s.prompt));
+      return shell;
+    });
+    const back = v.deleted ? el('span', { class: 'drift', text: 'Pipeline deleted' }) : el('a', { href: '#pipelines/' + encodeURIComponent(name), text: 'Open the current Pipeline' });
+    const head = editorHead(name + ' v' + version, 'Read-only. Frozen ' + relative(v.createdAt) + ', ' + v.live + ' active Ticket' + (v.live === 1 ? '' : 's') + '.', [back]);
+    const settings = el('section', { class: 'sheet pipe-settings' }, [el('h3', { text: 'Pipeline settings' }), el('div', { class: 'fields' }, [ro('Agent Profile', v.pipeline.profile || 'config default'), ro('Spend limit per Ticket (USD)', v.pipeline.budget.spend === undefined ? 'global default' : String(v.pipeline.budget.spend))])]);
+    const toggleAll = () => { const open = stages.some((s) => !s.isOpen()); for (const s of stages) s.setOpen(open); return open; };
+    return el('div', { class: 'ed', 'data-role': 'pipeline-version' }, [head, el('div', { class: 'pipe-form' }, [settings, stagesHead(toggleAll), el('div', { class: 'rail' }, stages.map((s) => s.node))])]);
   }
 
   function rawForm(p) {
-    const area = el('textarea', { class: 'raw', name: 'text' });
+    const area = el('textarea', { class: 'raw', name: 'text', spellcheck: 'false' });
     area.value = p.text;
     const button = el('button', { class: 'primary', type: 'submit', text: 'Save text' });
-    const form = el('form', { class: 'panel', 'data-role': 'pipeline-text' }, [area, el('div', { class: 'bar' }, [button, el('span', { class: 'why', text: 'the whole file, comments included; refused unless it parses' })])]);
+    const form = el('form', { class: 'pipe-form', 'data-role': 'pipeline-text' }, [area, el('div', { class: 'savebar' }, [button, el('span', { class: 'why', text: 'Saves the whole file, comments included. Refused unless it parses.' })])]);
     form.addEventListener('submit', (ev) => {
       ev.preventDefault();
       save(button, () => api('/api/pipelines/' + encodeURIComponent(p.name), { method: 'PUT', body: JSON.stringify({ text: area.value }) }), () => { showNotice('saved ' + p.name); showPipelines(p.name); });
@@ -991,12 +1162,22 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
     return form;
   }
 
+  // A save bar for a form: the button, whether anything waits to be saved, and a note. markDirty() flips it to unsaved.
+  function saveBar(form, button, note) {
+    const state = el('span', { class: 'state', text: 'No unsaved changes' });
+    const markDirty = () => { form.classList.add('dirty'); state.textContent = 'Unsaved changes'; };
+    form.addEventListener('input', markDirty);
+    form.addEventListener('change', markDirty);
+    return { node: el('div', { class: 'savebar' }, [button, state, el('span', { class: 'why', text: note })]), markDirty };
+  }
+
   function stagesForm(p, actions, profiles) {
     const pipeline = p.pipeline;
+    const defaults = profiles.config.budget || {};
     // Each configured Action's params, by name; a global one stands ahead of a repo's own of the same name.
     const params = {};
     for (const a of actions) if (!params[a.name]) params[a.name] = a.params;
-    const form = el('form', { class: 'panel', 'data-role': 'pipeline-fields' });
+    const form = el('form', { class: 'pipe-form', 'data-role': 'pipeline-fields' });
     // The Pipeline's profile: blank leaves its Stages to config's default_profile. A change redraws each Stage's button.
     const profile = el('select', { name: 'profile', 'data-role': 'pipeline-profile' });
     const fillProfile = () => profileOptions(profile, profile.dataset.drawn ? profile.value : pipeline.profile, Object.keys(profiles.config.profiles).sort(), 'config default (' + (profiles.config.default_profile || 'none') + ')');
@@ -1005,22 +1186,36 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
     profiles.chosen = () => profile.value || null;
     profiles.redraws.push(fillProfile);
     profile.addEventListener('change', () => profiles.changed());
-    const spend = el('input', { name: 'spend', value: pipeline.budget.spend === undefined ? '' : String(pipeline.budget.spend), placeholder: 'global default' });
-    form.appendChild(el('div', { class: 'card' }, [el('h3', { text: 'Pipeline' }), el('div', { class: 'fields' }, [field('profile', profile), field('spend per Ticket (USD)', spend)])]));
+    const spend = el('input', { name: 'spend', value: pipeline.budget.spend === undefined ? '' : String(pipeline.budget.spend), placeholder: defaults.spend === undefined ? 'global default' : 'global default (' + defaults.spend + ')' });
+    form.appendChild(el('section', { class: 'sheet pipe-settings' }, [
+      el('h3', { text: 'Pipeline settings' }),
+      el('p', { class: 'about', text: 'Defaults for every Stage below. A Stage can pick its own Agent Profile.' }),
+      el('div', { class: 'fields' }, [field('Agent Profile', profile), field('Spend limit per Ticket (USD)', spend)]),
+    ]));
     // The Stages as they will be saved: additions, moves and removals wait for Save, and undo brings a Stage back as it was.
     const stages = pipeline.stages.map((s) => withTools(stageCard(s, pipeline, false, params, profiles)));
-    const list = el('div', { class: 'stack', 'data-role': 'stage-list' });
+    const toggleAll = () => { const open = stages.some((c) => !c.isOpen()); for (const c of stages) c.setOpen(open); return open; };
+    form.appendChild(stagesHead(toggleAll));
+    const list = el('div', { class: 'rail', 'data-role': 'stage-list' });
+    const button = el('button', { class: 'primary', type: 'submit', text: 'Save changes' });
+    const bar = saveBar(form, button, 'Blank fields fall back to their defaults. Added, moved and removed Stages apply on Save.');
+    profiles.touched = bar.markDirty;
+    let drawn = false;
     const draw = () => {
       const kept = stages.filter((c) => !c.removed).length;
+      let n = 0;
       stages.forEach((card, i) => {
         card.up.style.visibility = i === 0 ? 'hidden' : '';
         card.down.style.visibility = i === stages.length - 1 ? 'hidden' : '';
         card.node.classList.toggle('removed', !!card.removed);
-        card.remove.textContent = card.removed ? 'undo' : '✕';
+        card.station.textContent = card.removed ? '' : String(++n);
+        card.remove.textContent = card.removed ? 'Undo' : '✕';
         card.remove.title = card.removed ? 'keep this Stage' : kept === 1 ? 'a Pipeline keeps at least one Stage' : card.fresh ? 'drop this new Stage' : 'remove this Stage on Save';
         card.remove.disabled = !card.removed && kept === 1;
       });
       list.replaceChildren(...stages.flatMap((c) => [c.node, addButton(c)]));
+      if (drawn) bar.markDirty();
+      drawn = true;
     };
     const move = (card, by) => {
       const from = stages.indexOf(card);
@@ -1028,23 +1223,23 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
       stages.splice(from + by, 0, card);
       draw();
     };
-    // A new Stage goes in after the card whose button was pressed, blank until the human fills it in; "+ Stage" asks which kind first.
+    // A new Stage goes in after the card whose button was pressed, blank until the human fills it in; "+" asks which kind first.
     function addButton(after) {
       const box = el('div', { class: 'add-stage' });
-      const choose = el('button', { type: 'button', class: 'sm', 'data-role': 'add-stage', title: 'add a Stage here', text: '+ Stage' });
-      const kinds = [['Runner Stage', 'add-runner', BLANK_STAGE], ['action Stage', 'add-action', BLANK_ACTION]].map(([text, role, blank]) => {
-        const b = el('button', { type: 'button', class: 'sm', 'data-role': role, text: '+ ' + text });
+      const choose = el('button', { type: 'button', 'data-role': 'add-stage', title: 'add a Stage here', 'aria-label': 'add a Stage after ' + (after.name || 'the new Stage'), text: '+' });
+      const kinds = [['Runner Stage', 'add-runner', BLANK_STAGE], ['Action Stage', 'add-action', BLANK_ACTION]].map(([text, role, blank]) => {
+        const b = el('button', { type: 'button', class: 'sm add-k', 'data-role': role, text: '+ ' + text });
         b.addEventListener('click', () => {
           const card = withTools(stageCard(blank, pipeline, true, params, profiles));
           card.fresh = true;
           card.node.classList.add('fresh');
           stages.splice(stages.indexOf(after) + 1, 0, card);
           draw();
-          card.node.querySelector('input, select').focus();
+          card.node.querySelector('.stage-fields input, .stage-fields select').focus();
         });
         return b;
       });
-      const cancel = el('button', { type: 'button', class: 'sm', 'data-role': 'add-cancel', title: 'add nothing', text: 'cancel' });
+      const cancel = el('button', { type: 'button', class: 'sm quiet', 'data-role': 'add-cancel', title: 'add nothing', text: 'Cancel' });
       choose.addEventListener('click', () => box.replaceChildren(...kinds, cancel));
       cancel.addEventListener('click', () => box.replaceChildren(choose));
       box.append(choose);
@@ -1062,13 +1257,12 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
         else card.removed = !card.removed;
         draw();
       });
-      card.node.querySelector('h3').append(el('span', { class: 'removed-note', text: 'removed' }), el('span', { class: 'tools' }, [card.up, card.down, card.remove]));
+      card.node.querySelector('h3').append(el('span', { class: 'removed-note', text: 'removed on Save' }), el('span', { class: 'tools' }, [card.up, card.down, card.remove]));
       return card;
     }
     draw();
     form.appendChild(list);
-    const button = el('button', { class: 'primary', type: 'submit', text: 'Save' });
-    form.appendChild(el('div', { class: 'bar' }, [button, el('span', { class: 'why', text: 'blank clears a field back to its default; + Stage, ↑ ↓ and ✕ add, move and remove Stages on Save' })]));
+    form.appendChild(bar.node);
     form.addEventListener('submit', (ev) => {
       ev.preventDefault();
       save(button, async () => {
@@ -1094,6 +1288,7 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
 
   // params: each Action config.yaml defines, by name, with the params a Stage supplies under with: (ADR 0010).
   // profiles: the editor's shared profile context (pipelineEditor), so the profile button resolves what a Stage inherits.
+  // A card starts closed to one summary line, except a new Stage, which opens ready to fill in.
   function stageCard(s, pipeline, fresh, params = {}, profiles) {
     if (s.kind === 'action') {
       // The Action is picked from config and shows one field per param; a Stage naming an Action config lacks keeps its own params.
@@ -1104,18 +1299,24 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
       const keysOf = (name) => params[name] || (name === s.action ? Object.keys(s.with) : []);
       const inputs = {};
       const fields = el('div', { class: 'fields' });
+      const shell = railStage('action', s.name, [fields], fresh, { 'data-role': 'action-stage' });
+      const summarize = () => {
+        const keys = keysOf(action.value);
+        shell.label(fresh ? 'New Stage' : s.name, 'action', [action.value || 'no Action picked', ...keys.map((key) => key + ': ' + (inputs[key].value.trim() || '(blank)'))].join(', '), '');
+      };
       const drawFields = () => {
         const keys = keysOf(action.value);
         for (const key of keys) inputs[key] = inputs[key] || el('input', { name: key, value: s.with[key] || '', placeholder: 'required' });
-        fields.replaceChildren(field('action', action), ...keys.map((key) => field(key, inputs[key])));
+        fields.replaceChildren(field('Action', action), ...keys.map((key) => field(key, inputs[key])));
         if (!names.length) fields.append(el('div', { class: 'why', text: 'config.yaml defines no Actions yet; add one under actions: to run it here' }));
+        summarize();
       };
       action.addEventListener('change', drawFields);
+      fields.addEventListener('input', summarize);
       drawFields();
-      const node = el('div', { class: 'card', 'data-role': 'action-stage' }, [el('h3', {}, [el('span', { class: 'kind', text: 'action' }), fresh ? 'new Stage' : s.name]), fields]);
       const values = () => Object.fromEntries(keysOf(action.value).map((key) => [key, inputs[key].value.trim()]));
       return {
-        name: s.name, node,
+        name: s.name, node: shell.node, station: shell.station, isOpen: shell.isOpen, setOpen: shell.setOpen,
         // A param left blank is left out, so the save names it as missing.
         patch() {
           const next = values();
@@ -1130,23 +1331,41 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
         },
       };
     }
-    const name = el('input', { name: 'name', value: s.name });
-    const prompt = el('textarea', { name: 'prompt' }); prompt.value = s.prompt || '';
+    const defaults = profiles.config.budget || {};
+    const byDefault = (v) => (v === undefined ? 'default' : 'default (' + v + ')');
+    const name = el('input', { name: 'name', value: s.name, placeholder: 'implement' });
+    const prompt = el('textarea', { name: 'prompt', placeholder: 'What the agent should do in this Stage' }); prompt.value = s.prompt || '';
     const skills = el('input', { name: 'skills', value: s.skills.join(', '), placeholder: 'grilling, to-spec' });
     const profile = stageProfileButton(s, name, profiles);
     const artifact = el('input', { name: 'artifact', value: s.artifact || '', placeholder: 'commits-on-branch, file NOTES.md' });
-    const [human, humanLabel] = check('human: opens a terminal for me', 'human', s.human);
-    const [advance, advanceLabel] = check('advance to the next Stage on its own', 'advance', s.advance);
-    const [repeat, repeatLabel] = check('repeat on Feedback until the artifact is met', 'repeat', s.repeat === 'feedback');
-    const rounds = el('input', { name: 'rounds', value: s.budget.rounds === undefined ? '' : String(s.budget.rounds), placeholder: 'default' });
-    const attempts = el('input', { name: 'attempts', value: s.budget.attempts === undefined ? '' : String(s.budget.attempts), placeholder: 'default' });
-    const wallTime = el('input', { name: 'wallTime', value: s.budget.wallTime || '', placeholder: '30m' });
-    const node = el('div', { class: 'card' }, [
-      el('h3', {}, [el('span', { class: 'kind', text: s.human ? 'human' : 'runner' }), s.name || 'new Stage']),
-      el('div', { class: 'fields' }, [field('name', name), field('profile', profile.node, true), field('artifact', artifact), field('skills', skills), field('prompt', prompt, true), humanLabel, advanceLabel, repeatLabel, field('rounds', rounds), field('attempts', attempts), field('wall time', wallTime)]),
-    ]);
+    const [human, humanLabel] = check('Human Stage: opens a terminal for you to work in', 'human', s.human);
+    const [advance, advanceLabel] = check('Move to the next Stage on its own', 'advance', s.advance);
+    const [repeat, repeatLabel] = check('Repeat on Feedback until the artifact is met', 'repeat', s.repeat === 'feedback');
+    const rounds = el('input', { name: 'rounds', value: s.budget.rounds === undefined ? '' : String(s.budget.rounds), placeholder: byDefault(defaults.rounds) });
+    const attempts = el('input', { name: 'attempts', value: s.budget.attempts === undefined ? '' : String(s.budget.attempts), placeholder: byDefault(defaults.attempts) });
+    const wallTime = el('input', { name: 'wallTime', value: s.budget.wallTime || '', placeholder: byDefault(defaults.wallTime) });
+    for (const label of [humanLabel, advanceLabel, repeatLabel]) label.classList.add('wide');
+    const group = (title, children) => el('div', { class: 'fgroup' }, [el('h4', { text: title }), el('div', { class: 'fields' }, children)]);
+    const shell = railStage(s.human ? 'human' : 'runner', s.name || 'New Stage', [
+      group('Task', [field('Name', name), field('Skills', skills), field('Prompt', prompt, true)]),
+      group('Runs as', [field('Agent Profile', profile.node, true), humanLabel]),
+      group('Done when', [field('Artifact', artifact, true), advanceLabel, repeatLabel]),
+      group('Limits', [field('Feedback rounds', rounds), field('Attempts', attempts), field('Time per Session', wallTime)]),
+    ], fresh);
+    // The closed card's line: who runs it, what it leaves behind, and anything unusual about how it moves on.
+    const summarize = () => {
+      const v = stageProfileView(profile.chosen(), profiles.chosen(), profiles.config);
+      const bits = [v.name || 'no profile', artifact.value.trim() ? 'leaves ' + artifact.value.trim() : 'no artifact'];
+      if (repeat.checked) bits.push('repeats on Feedback');
+      if (!advance.checked) bits.push('waits for Start');
+      shell.label(name.value.trim() || 'New Stage', human.checked ? 'human' : 'runner', bits.join(', '), firstLine(prompt.value));
+    };
+    shell.node.addEventListener('input', summarize);
+    shell.node.addEventListener('change', summarize);
+    profiles.redraws.push(summarize);
+    summarize();
     return {
-      name: s.name, node,
+      name: s.name, node: shell.node, station: shell.station, isOpen: shell.isOpen, setOpen: shell.setOpen,
       patch() {
         const patch = { budget: {} };
         changed(patch, 'name', s.name, name.value.trim());
@@ -1185,6 +1404,7 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
       if (profileDrawer && profileDrawer.dirty && !confirm('Drop the unsaved changes to ' + profileDrawer.name + '?')) return;
       chosen = name;
       draw();
+      profiles.touched();
       closeProfileDrawer();
     };
     button.addEventListener('click', (ev) => {
@@ -1207,31 +1427,35 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
     return { node: button, chosen: () => chosen };
   }
 
-  // Config: every key the dashboard may set, edited in place; repos stay a hand edit.
+  // Config, in three groups by how each saves: settings saved with the form's Save; Agent Profiles, which save from
+  // their drawer at once; and Actions and repos, which are read-only here and edited in config.yaml by hand.
   async function showConfig() {
     let c;
     let actions;
     let pipelines;
     try { [c, actions, pipelines] = await Promise.all([api('/api/config'), api('/api/actions'), api('/api/pipelines')]); } catch (e) { showNotice(e.message); return; }
     const cfg = c.config;
-    const num = (key, value) => el('input', { name: key, value: String(value) });
+    const num = (key, value) => el('input', { name: key, value: String(value), inputmode: 'decimal' });
     const inputs = {
-      rounds: num('rounds', cfg.budget.rounds), attempts: num('attempts', cfg.budget.attempts), wallTime: el('input', { name: 'wallTime', value: cfg.budget.wallTime }), spend: num('spend', cfg.budget.spend),
+      rounds: num('rounds', cfg.budget.rounds), attempts: num('attempts', cfg.budget.attempts), wallTime: el('input', { name: 'wallTime', value: cfg.budget.wallTime, placeholder: '30m' }), spend: num('spend', cfg.budget.spend),
       tick: num('tick', cfg.tick), concurrency: num('concurrency', cfg.concurrency), retention: num('retention', cfg.retention), port: num('port', cfg.port),
       branch_prefix: el('input', { name: 'branch_prefix', value: cfg.branch_prefix, placeholder: 'none' }),
     };
-    const flags = ['enabled', 'flagged', 'human', 'gate'].map((k) => [k, ...check(k, k, cfg.notifications[k])]);
-    const button = el('button', { class: 'primary', type: 'submit', text: 'Save' });
-    const form = el('form', { class: 'panel', 'data-role': 'config-fields' }, [
-      el('div', { class: 'bar' }, [el('h2', { text: 'Config' }), el('span', { class: 'path', text: c.file })]),
-      el('div', { class: 'card' }, [el('h3', { text: 'Budget defaults' }), el('div', { class: 'fields' }, [field('rounds per repeating Stage', inputs.rounds), field('attempts per Stage', inputs.attempts), field('wall time per Session', inputs.wallTime), field('spend per Ticket (USD)', inputs.spend)])]),
-      el('div', { class: 'card' }, [el('h3', { text: 'Server' }), el('div', { class: 'fields' }, [field('tick (seconds)', inputs.tick), field('concurrency', inputs.concurrency), field('retention (days)', inputs.retention), field('branch prefix', inputs.branch_prefix), field('port', inputs.port)])]),
-      el('div', { class: 'card' }, [el('h3', { text: 'Notifications' }), el('div', { class: 'fields' }, flags.map((f) => f[2]))]),
-      profilesCard(cfg, pipelines),
-      actionsCard(actions),
-      el('div', { class: 'card' }, [el('h3', { text: 'Repos' }), el('div', { class: 'why', text: Object.keys(cfg.repos).length ? Object.entries(cfg.repos).map(([n, r]) => n + ': ' + r.tracker + ' ' + r.project + ' at ' + r.path + ', Pipeline ' + r.pipeline).join(' · ') : 'none yet' }), el('div', { class: 'why', text: 'repos are edited in config.yaml by hand' })]),
-      el('div', { class: 'bar' }, [button, el('span', { class: 'why', text: 'port and tick apply after a restart; everything else at once' })]),
-    ]);
+    const FLAG_LABEL = { enabled: 'Send notifications', flagged: 'A Ticket is Flagged', human: 'A human Stage is ready for you', gate: 'A Stage finished and the next waits for Start' };
+    const flags = ['enabled', 'flagged', 'human', 'gate'].map((k) => [k, ...check(FLAG_LABEL[k], k, cfg.notifications[k])]);
+    // With notifications off, the kinds below it have nothing to say; they keep their values for when it is back on.
+    const syncFlags = () => { for (const [k, input, label] of flags) if (k !== 'enabled') { input.disabled = !flags[0][1].checked; label.style.opacity = input.disabled ? '0.5' : ''; } };
+    flags[0][1].addEventListener('change', syncFlags);
+    syncFlags();
+    const button = el('button', { class: 'primary', type: 'submit', text: 'Save changes' });
+    const form = el('form', { class: 'sheet', 'data-role': 'config-fields' });
+    const bar = saveBar(form, button, 'Port and check interval apply after a restart; everything else at once.');
+    form.replaceChildren(
+      setting('Budget defaults', 'What every Ticket may use unless its Pipeline or a Stage sets its own.', el('div', { class: 'fields' }, [field('Rounds per repeating Stage', inputs.rounds), field('Attempts per Stage', inputs.attempts), field('Time per Session', inputs.wallTime), field('Spend per Ticket (USD)', inputs.spend)])),
+      setting('Server', 'How often Lasso checks for work, how much it runs at once, and how long it keeps finished Tickets.', el('div', { class: 'fields' }, [field('Check every (seconds)', inputs.tick), field('Sessions at once', inputs.concurrency), field('Keep finished Tickets (days)', inputs.retention), field('Branch prefix', inputs.branch_prefix), field('Port', inputs.port)])),
+      setting('Notifications', 'Desktop notifications for the moments that need you.', el('div', { class: 'fields checks' }, flags.map((f) => f[2]))),
+      bar.node,
+    );
     form.addEventListener('submit', (ev) => {
       ev.preventDefault();
       let restart = [];
@@ -1249,34 +1473,60 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
         restart = (await api('/api/config', { method: 'PATCH', body: JSON.stringify(patch) })).restart;
       }, () => { showNotice(restart.length ? 'saved; ' + restart.join(' and ') + ' apply after a restart' : 'saved'); showConfig(); });
     });
-    configPanel.replaceChildren(form);
+    const groupTitle = (title, how) => el('h3', { class: 'group-title' }, [title, el('span', { text: how })]);
+    configPanel.replaceChildren(el('div', { class: 'ed' }, [
+      editorHead('Config', c.file, []),
+      groupTitle('Settings', 'Saved with Save changes'),
+      form,
+      groupTitle('Agent Profiles', 'Each saves from its editor as you go'),
+      profilesCard(cfg, pipelines),
+      groupTitle('From config.yaml', 'Read-only here; edit the file by hand'),
+      el('div', { class: 'sheet readonly' }, [actionsCard(actions), reposCard(cfg.repos)]),
+    ]));
   }
 
-  // The Agent Profiles, one line each: name, default marker, repo overrides ("overridden in app") or the repos a
-  // repo-only profile lives in ("only in app"), what each mode runs, and the Stages that run it. A repo-only line
-  // shows its first repo's definition. A click opens the profile drawer; a save there redraws this card in place,
-  // so the form around it keeps its edits.
+  // One row of a Config sheet: its name and what it is for on the left, its contents on the right.
+  function setting(title, about, body, attrs = {}) {
+    return el('section', Object.assign({ class: 'setting' }, attrs), [el('div', {}, [el('h3', { text: title }), el('p', { class: 'about', text: about })]), el('div', { class: 'cfg-body' }, [body].flat())]);
+  }
+
+  function reposCard(repos) {
+    const rows = Object.entries(repos).map(([n, r]) => el('tr', {}, [
+      el('td', {}, [el('strong', { text: n })]),
+      el('td', { text: r.tracker + ' ' + r.project }),
+      el('td', { text: r.pipeline }),
+      el('td', { text: r.default_profile || 'global default' }),
+      el('td', { class: 'path', text: r.path }),
+    ]));
+    const table = el('table', { class: 'repos' }, [
+      el('thead', {}, [el('tr', {}, ['Repo', 'Tracker', 'Pipeline', 'Agent Profile', 'Path'].map((h) => el('th', { text: h })))]),
+      el('tbody', {}, rows),
+    ]);
+    return setting('Repos', 'The repos Lasso takes Tickets for, and the Pipeline each starts on.', rows.length ? table : el('div', { class: 'note', text: 'None yet. Add one under repos: in config.yaml.' }), { 'data-role': 'config-repos' });
+  }
+
+  // The Agent Profiles, one tile each: name, default marker, repo overrides ("overridden in app") or the repos a
+  // repo-only profile lives in ("only in app"), what each mode runs, and the Stages that run it. A repo-only tile
+  // shows its first repo's definition. A click opens the profile drawer; a save there redraws this sheet in place,
+  // so the settings form above keeps its edits.
   function profilesCard(cfg, pipelines) {
-    const card = el('div', { class: 'card', 'data-role': 'config-profiles' });
+    const card = el('div', { class: 'sheet', style: 'padding:16px', 'data-role': 'config-profiles' });
     const draw = (config) => {
       const rows = profileIndex(config).map((entry) => {
         const name = entry.name;
         const note = scopeNote(entry);
-        const row = el('a', { 'data-profile': name, tabindex: '0' }, [
-          el('b', {}, [name, ...(entry.global && name === config.default_profile ? [el('span', { class: 'default', text: 'default' })] : []), ...(note ? [el('span', { class: 'pf-scope', 'data-role': 'profile-scope', text: note })] : [])]),
+        const used = usedByLine(profileUsers(name, pipelines, config.default_profile));
+        const row = el('a', { 'data-profile': name, tabindex: '0', role: 'button', 'aria-label': 'edit Agent Profile ' + name }, [
+          el('b', {}, [name, ...(entry.global && name === config.default_profile ? [el('span', { class: 'chip is-default', text: 'default' })] : []), ...(note ? [el('span', { class: 'chip', 'data-role': 'profile-scope', text: note })] : [])]),
           el('span', { class: 'pf-summary', text: profileSummary(scopedProfile(config, name, entry.global ? null : entry.repos[0])) }),
-          el('span', { class: 'why', text: usedByLine(profileUsers(name, pipelines, config.default_profile)) }),
+          el('span', { class: 'why', title: used, text: used }),
         ]);
         const open = () => openProfileDrawer(name, { onChange: draw });
         row.addEventListener('click', open);
-        row.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') open(); });
+        row.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); open(); } });
         return row;
       });
-      card.replaceChildren(
-        el('h3', { text: 'Agent Profiles' }),
-        rows.length ? el('div', { class: 'pf-list', 'data-role': 'profile-list' }, rows) : el('div', { class: 'why', text: 'none yet' }),
-        el('div', { class: 'why', text: 'click a profile to edit it; saves write config.yaml at once, and the next Session uses them' }),
-      );
+      card.replaceChildren(rows.length ? el('div', { class: 'pf-list', 'data-role': 'profile-list' }, rows) : el('div', { class: 'why', text: 'None yet. Open a Stage\'s profile to make one.' }));
     };
     draw(cfg);
     return card;
@@ -1494,14 +1744,10 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
   // The Actions config.yaml defines, read-only: they run shell commands, so they are edited in the file.
   function actionsCard(actions) {
     const rows = actions.map((a) => el('div', { class: 'action-def', 'data-action': a.name }, [
-      el('h4', {}, [a.name, el('span', { class: 'why', text: ' ' + (a.repo ? 'repo ' + a.repo : 'global') + ' · params ' + (a.params.join(', ') || 'none') + ' · timeout ' + a.timeout })]),
+      el('h4', {}, [a.name, el('span', { class: 'chip', text: a.repo ? 'repo ' + a.repo : 'global' }), el('span', { class: 'chip', text: 'params: ' + (a.params.join(', ') || 'none') }), el('span', { class: 'chip', text: 'timeout ' + a.timeout })]),
       el('pre', { text: a.run }),
     ]));
-    return el('div', { class: 'card', 'data-role': 'config-actions' }, [
-      el('h3', { text: 'Actions' }),
-      ...(rows.length ? rows : [el('div', { class: 'why', text: 'none yet' })]),
-      el('div', { class: 'why', text: 'Actions are edited in config.yaml by hand; a repo\'s own replaces a global one of the same name' }),
-    ]);
+    return setting('Actions', 'Shell commands an action Stage runs. A repo\'s own Action replaces a global one with the same name.', rows.length ? rows : el('div', { class: 'note', text: 'None yet. Add one under actions: in config.yaml.' }), { 'data-role': 'config-actions' });
   }
 
   function decodeName(part) { try { return decodeURIComponent(part); } catch { return part; } }
@@ -1509,6 +1755,7 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
     const hash = location.hash.replace(/^#/, '');
     detailGen++;
     const view = hash === 'config' ? 'config' : hash === 'pipelines' || hash.startsWith('pipelines/') ? 'pipelines' : hash ? 'detail' : 'ledger';
+    for (const a of document.querySelectorAll('nav.views a')) a.classList.toggle('on', (a.getAttribute('href').slice(1) || 'ledger') === (view === 'detail' ? 'ledger' : view));
     // A Ticket's page swaps itself in once its data is here, rather than showing the last one meanwhile.
     if (view === 'detail') { showDetail(hash); return; }
     ledger.hidden = view !== 'ledger'; ledgerTools.hidden = view !== 'ledger'; detail.hidden = view !== 'detail'; pipelinesPanel.hidden = view !== 'pipelines'; configPanel.hidden = view !== 'config';
