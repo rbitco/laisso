@@ -4,7 +4,6 @@ import { render, screen, cleanup, act, waitFor, within } from "@testing-library/
 import { userEvent } from "@testing-library/user-event";
 import type { LiveVersionView, PipelineFile, PipelineListing, PipelineVersionView, PipelineView } from "../src/api/views.ts";
 import { PipelinesPage } from "../src/dashboard/app/pipelines/PipelinesPage.tsx";
-import { adoptOldStagesForm } from "../src/dashboard/app/pipelines/StagesForm.tsx";
 import { BLANK_PIPELINE } from "../src/dashboard/app/pipelines/PipelineList.tsx";
 import { events } from "../src/dashboard/app/events.ts";
 
@@ -82,13 +81,6 @@ async function showPage(name: string | null = null, version: number | null = nul
 beforeEach(() => {
   document.body.innerHTML = '<p data-role="notice" hidden></p>';
   location.hash = "";
-  // The old script's Stage editor, until LASSO-80: here a stand-in naming the file it was built for.
-  adoptOldStagesForm(async (file) => {
-    const form = document.createElement("form");
-    form.dataset.role = "pipeline-fields";
-    form.textContent = `Stage editor for ${file.name}, ${file.pipeline.stages.length} Stages`;
-    return form;
-  });
 });
 afterEach(() => {
   cleanup();
@@ -135,7 +127,8 @@ describe("+ New Pipeline", () => {
     await within(list()).findByText("hotfix");
     expect(within(list()).getByText("hotfix").closest("a")!.className).toBe("current");
     await user.click(screen.getByRole("button", { name: "+ New Pipeline" }));
-    await user.type(screen.getByLabelText("Name"), "careful");
+    // The open Pipeline's Stages have names of their own.
+    await user.type(within(document.querySelector<HTMLElement>('[data-role="new-pipeline"]')!).getByLabelText("Name"), "careful");
     await user.selectOptions(screen.getByLabelText("Start from"), "A copy of default");
     await user.click(screen.getByRole("button", { name: "Create" }));
     await waitFor(() => expect(location.hash).toBe("#pipelines/careful"));
@@ -160,7 +153,7 @@ describe("a Pipeline's editor", () => {
     const lasso = fakeLasso();
     lasso.state.versions.default = [{ version: 1, createdAt: "2026-10-01T00:00:00Z", live: 2 }, { version: 3, createdAt: "2026-10-02T00:00:00Z", live: 1 }];
     await showPage("default");
-    await screen.findByText("Stage editor for default, 2 Stages");
+    await screen.findByText("Pipeline settings");
     expect(screen.getByText("/p/default.yaml")).toBeTruthy();
     const strip = await screen.findByText("Versions in use");
     expect(within(strip.parentElement!).getAllByRole("link").map((a) => [a.textContent, a.getAttribute("href")])).toEqual([
@@ -197,13 +190,13 @@ describe("a Pipeline's editor", () => {
     await user.click(screen.getByRole("button", { name: "Edit as text" }));
     const area = screen.getByRole("textbox", { name: "default as text" }) as HTMLTextAreaElement;
     expect(area.value).toBe(DEFAULT_TEXT);
-    expect(screen.getByText("Stage editor for default, 2 Stages").closest("[hidden]")).toBeTruthy();
+    expect((await screen.findByText("Pipeline settings")).closest("[hidden]")).toBeTruthy();
     await user.type(area, "# reviewed\n");
     await user.click(screen.getByRole("button", { name: "Save text" }));
     await waitFor(() => expect(notice().textContent).toBe("saved default"));
     expect(lasso.sent).toEqual([{ method: "PUT", route: "/api/pipelines/default", body: { text: DEFAULT_TEXT + "# reviewed\n" } }]);
     await waitFor(() => expect(screen.getByRole("button", { name: "Edit as text" })).toBeTruthy());
-    expect(screen.getByText("Stage editor for default, 2 Stages").closest("[hidden]")).toBeNull();
+    expect((await screen.findByText("Pipeline settings")).closest("[hidden]")).toBeNull();
   });
 
   it("shows a refused text save and keeps the text, to fix and save again", async () => {
@@ -230,7 +223,7 @@ describe("a Pipeline's editor", () => {
     expect(area.value).toBe("stages: [");
     expect(area.closest("[hidden]")).toBeNull();
     expect(screen.queryByRole("button", { name: "Edit as text" })).toBeNull();
-    expect(screen.queryByText(/Stage editor for/)).toBeNull();
+    expect(screen.queryByText("Pipeline settings")).toBeNull();
   });
 });
 

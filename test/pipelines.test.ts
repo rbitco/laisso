@@ -6,6 +6,7 @@ import type { TicketDetail, IntakeResult } from "../src/api/views.ts";
 import type { PipelineFile, PipelineListing, ConfigFile, PipelineVersionView, ActionListing } from "../src/api/views.ts";
 import type { TickChange } from "../src/server/tick.ts";
 import { DEFAULT_CONFIG } from "../src/server/config.ts";
+import { addStage, draftOf, moveStage, pipelinePatch, removeStage, type RunnerDraft } from "../src/dashboard/app/pipelines/stages.ts";
 
 // Seam one: Pipelines and config are edited through the API the dashboard
 // uses, in place, with comments and ordering kept (LASSO-40).
@@ -527,6 +528,52 @@ describe("config Actions in the Pipeline editor", () => {
   });
 });
 
+describe("the Stage editor's save", () => {
+  it("writes an edit, an add, a move and a removal in one patch, keeping comments and the other Stages as they were", async () => {
+    const THREE = WORK + `
+  # ship it
+  - name: ship    # last
+    prompt: Ship.
+`;
+    const lasso = await lassoWith({ work: THREE });
+    const file = await lasso.api<PipelineFile>("/api/pipelines/work");
+    const draft = draftOf(file.pipeline!);
+    const [implement, notes, ship] = draft.cards;
+    // implement's prompt and attempts edited; a Stage added after it; ship moved first; notes removed.
+    const edited: RunnerDraft = { ...(implement!.draft as RunnerDraft), prompt: "Do the work well.", attempts: "" };
+    let cards = draft.cards.map((c) => (c.id === implement!.id ? { ...c, draft: edited } : c));
+    cards = addStage(cards, implement!.id, "runner");
+    cards = cards.map((c) => (c.fresh ? { ...c, draft: { ...(c.draft as RunnerDraft), name: "review", prompt: "Review it.", rounds: "2", advance: false } } : c));
+    cards = moveStage(moveStage(moveStage(cards, ship!.id, -1), ship!.id, -1), ship!.id, -1);
+    cards = removeStage(cards, notes!.id);
+    const patch = pipelinePatch(file.pipeline!, { ...draft, cards }, {});
+    expect(patch).toEqual({
+      stages: { implement: { prompt: "Do the work well.", budget: { attempts: null } } },
+      order: ["ship", "implement", { budget: { rounds: 2 }, name: "review", prompt: "Review it.", advance: false }],
+    });
+
+    const after = await lasso.api<PipelineFile>("/api/pipelines/work", { method: "PATCH", body: json(patch) });
+    expect(after.text).toBe(`# The work Pipeline. Keep this comment.
+profile: claude # the default profile
+
+stages:
+  # ship it
+  - name: ship # last
+    prompt: Ship.
+
+  - name: implement # first
+    prompt: Do the work well.
+    artifact: commits-on-branch
+
+  - budget:
+      rounds: 2
+    name: review
+    prompt: Review it.
+    advance: false
+`);
+  });
+});
+
 describe("the dashboard", () => {
   it("carries the Pipeline and config editors", async () => {
     const lasso = await lassoWith();
@@ -535,8 +582,5 @@ describe("the dashboard", () => {
     expect(html).toContain('data-role="config"');
     expect(html).toContain('href="#pipelines"');
     expect(html).toContain('href="#config"');
-    // Action Stages pick from config's Actions.
-    expect(html).toContain("api('/api/actions')");
-    expect(html).toContain("'data-role': 'action-stage'");
   });
 });

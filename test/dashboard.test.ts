@@ -435,23 +435,6 @@ stages:
     expect(stageProfileView("claude-ghost", null, config)).toMatchObject({ label: "claude-ghost", headless: "no profile named claude-ghost in config.yaml" });
     expect(stageProfileView(null, null, { profiles: {}, default_profile: null })).toMatchObject({ name: null, label: "inherit → none", human: "no profile: config.yaml sets no default_profile" });
   });
-
-  it("is on the page: the Stage profile button, its drawer choices, and the Pipeline dropdown", async () => {
-    const { lasso } = await lassoWithTicket();
-    const html = dashboardSource();
-    expect(html).toMatch(/import \{[^}]*\bstageProfileView\b[^}]*\} from '\.\/metro\.js'/);
-    // The Stage card's button, with its two summary lines, opens the drawer with the Stage as context and two choices.
-    for (const role of ["stage-profile", "stage-profile-headless", "stage-profile-human", "pipeline-profile"]) expect(html).toContain(`'data-role': '${role}'`);
-    expect(html).toContain("import { openProfileDrawer } from './app/profiles/drawer.tsx';");
-    expect(html).toContain("context: 'Stage ' + stage + ' of Pipeline ' + profiles.pipeline");
-    for (const role of ["stage-profile-choice", "profile-use", "profile-inherit"]) expect(html).toContain(`role: '${role}'`);
-    expect(html).toContain("label: 'Use ' + name + ' for ' + stage");
-    expect(html).toContain("label: 'Inherit instead'");
-    // The Pipeline dropdown's blank names the default it falls back to; both save through the Pipeline patch.
-    expect(html).toContain("'config default (' + (profiles.config.default_profile || 'none') + ')'");
-    expect(html).toContain("if (profile.chosen() !== s.profile) patch.profile = profile.chosen();");
-    expect(html).toContain("if (profile.value !== (pipeline.profile || '')) patch.profile = profile.value || null;");
-  });
 });
 
 describe("repo overrides in the profile drawer", () => {
@@ -498,13 +481,6 @@ describe("repo overrides in the profile drawer", () => {
     const saved = await lasso.api<ConfigFile>(profileRoute("claude-opus", "app"), { method: "PUT", body: JSON.stringify({ profile: { runner: "claude", model: "haiku" } }) });
     expect(scopedProfile(saved.config, "claude-opus", "app")).toEqual({ runner: "claude", model: "haiku" });
     expect(scopedProfile(saved.config, "claude-opus", null)).toEqual({ runner: "claude", model: "opus" });
-  });
-
-  it("opens from a Stage on the global tab: the Stage passes no scope", () => {
-    const html = dashboardSource();
-    const fromStage = html.slice(html.indexOf("openProfileDrawer(stageProfileView("), html.indexOf("onChange: (config) => profiles.changed(config)"));
-    expect(fromStage).toContain("context: 'Stage '");
-    expect(fromStage).not.toContain("scope:");
   });
 });
 

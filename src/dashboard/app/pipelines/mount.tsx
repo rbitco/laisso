@@ -1,8 +1,6 @@
 import { createRoot, type Root } from "react-dom/client";
 import { PipelinesPage } from "./PipelinesPage.tsx";
 
-export { adoptOldStagesForm } from "./StagesForm.tsx";
-
 let root: Root | null = null;
 let visit = 0;
 

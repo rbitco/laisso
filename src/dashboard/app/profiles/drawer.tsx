@@ -11,7 +11,7 @@ let unsavedIn: string | null = null;
 
 /**
  * Opens the one profile drawer on `name` (default_profile when null), replacing any drawer already open once its
- * unsaved edits are dropped with consent. The way in for the old script's Stage and Ticket pages and for the
+ * unsaved edits are dropped with consent. The way in for the Stage editor, the old script's Ticket page and the
  * Config tiles alike; see DrawerOptions for what `options` carries.
  */
 export function openProfileDrawer(name: string | null, options: DrawerOptions = {}): void {

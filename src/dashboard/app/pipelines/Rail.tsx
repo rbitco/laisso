@@ -18,13 +18,18 @@ export interface RailStageProps {
   peek: string;
   open: boolean;
   onToggle: () => void;
+  /** More classes on the Stage, such as the editor's "fresh" and "removed". */
+  className?: string;
+  role?: string;
+  /** What the head carries after the toggle, such as the editor's move and remove buttons. */
+  tools?: ReactNode;
   children: ReactNode;
 }
 
 /** One Stage drawn on the line: a station, then a head naming the Stage and its kind that opens its fields. */
-export function RailStage({ kind, station, name, summary, peek, open, onToggle, children }: RailStageProps) {
+export function RailStage({ kind, station, name, summary, peek, open, onToggle, className, role, tools, children }: RailStageProps) {
   return (
-    <div className={`stage k-${kind}${open ? " open" : ""}`}>
+    <div className={`stage k-${kind}${open ? " open" : ""}${className ? " " + className : ""}`} data-role={role}>
       <span className="station" aria-hidden="true">
         {station}
       </span>
@@ -38,6 +43,7 @@ export function RailStage({ kind, station, name, summary, peek, open, onToggle, 
               {peek}
             </span>
           </button>
+          {tools}
         </h3>
         <div className="stage-fields" hidden={!open}>
           {children}
