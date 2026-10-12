@@ -2,7 +2,7 @@ import { useRef, useState, type FormEvent, type ReactNode } from "react";
 import type { Config, NotificationConfig } from "../../../server/config.ts";
 import type { ConfigFile } from "../../../api/views.ts";
 import { api } from "../api.ts";
-import { showNotice } from "../notice.ts";
+import { showNotice } from "../notice.tsx";
 import { Setting } from "../Setting.tsx";
 import { draftOf, FieldError, rebase, settingsPatch, unsaved, type Draft, type TextField } from "./settings.ts";
 

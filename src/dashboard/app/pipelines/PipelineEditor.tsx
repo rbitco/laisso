@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { LiveVersionView, PipelineFile } from "../../../api/views.ts";
 import { api } from "../api.ts";
-import { showNotice } from "../notice.ts";
+import { showNotice } from "../notice.tsx";
 import { EditorHead } from "../Setting.tsx";
 import { pipelineHref } from "./href.ts";
 import { StagesForm, type LoadedPipeline } from "./StagesForm.tsx";

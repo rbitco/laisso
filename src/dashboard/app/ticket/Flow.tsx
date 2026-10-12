@@ -1,6 +1,6 @@
 import type { CSSProperties, MouseEvent } from "react";
 import type { TicketDetail } from "../../../api/views.ts";
-import { duration, metroDiagram, relative, sessionsForStage } from "../../metro.js";
+import { duration, metroDiagram, relative, sessionsForStage } from "../../metro.ts";
 import { sessionLabel } from "./SessionPane.tsx";
 
 const LEGEND =

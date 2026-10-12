@@ -1,5 +1,5 @@
 import type { StageProfileView, TicketDetail } from "../../../api/views.ts";
-import { ticketProfileView } from "../../metro.js";
+import { ticketProfileView } from "../../metro.ts";
 import { api } from "../api.ts";
 import { openProfileDrawer } from "../profiles/drawer.tsx";
 import { ProfileButton } from "../profiles/ProfileButton.tsx";

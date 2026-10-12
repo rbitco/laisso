@@ -1,6 +1,6 @@
 import type { ProfileBlock, ProfileConfig } from "../../../server/config.ts";
 import type { RunnerName } from "../../../pipeline/load.ts";
-import { profileApplies } from "../../metro.js";
+import { profileApplies } from "../../metro.ts";
 
 /** One set of model, effort, permission and args as typed: each field its raw text, blank when unset. */
 export interface BlockDraft {

@@ -5,7 +5,8 @@ import { userEvent } from "@testing-library/user-event";
 import { DEFAULT_CONFIG, type Config } from "../src/server/config.ts";
 import type { ActionListing, ConfigFile, PipelineView } from "../src/api/views.ts";
 import { StagesForm, type LoadedPipeline } from "../src/dashboard/app/pipelines/StagesForm.tsx";
-import { closeProfileDrawer } from "../src/dashboard/app/profiles/drawer.tsx";
+import { closeProfileDrawer, ProfileDrawerHost } from "../src/dashboard/app/profiles/drawer.tsx";
+import { Notice, showNotice } from "../src/dashboard/app/notice.tsx";
 
 // The Stage editor as a person uses it (ADR 0012): what each edit, add, move and removal sends on Save.
 
@@ -75,8 +76,17 @@ async function save(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: "Save changes" }));
 }
 
+/** What the app draws over every view: the notice line and the profile drawer. */
+const Overlays = () => (
+  <>
+    <Notice />
+    <ProfileDrawerHost />
+  </>
+);
+
 beforeEach(() => {
-  document.body.innerHTML = '<p data-role="notice" hidden></p>';
+  showNotice("");
+  render(<Overlays />);
 });
 afterEach(() => {
   closeProfileDrawer();

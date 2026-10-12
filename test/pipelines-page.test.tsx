@@ -6,6 +6,8 @@ import type { LiveVersionView, PipelineFile, PipelineListing, PipelineVersionVie
 import { PipelinesPage } from "../src/dashboard/app/pipelines/PipelinesPage.tsx";
 import { BLANK_PIPELINE } from "../src/dashboard/app/pipelines/PipelineList.tsx";
 import { events } from "../src/dashboard/app/events.ts";
+import { Notice, showNotice } from "../src/dashboard/app/notice.tsx";
+import { ProfileDrawerHost } from "../src/dashboard/app/profiles/drawer.tsx";
 
 // The Pipelines page as a person uses it (ADR 0012): the list, + New Pipeline, Delete, the text editor, and Versions.
 
@@ -78,8 +80,17 @@ async function showPage(name: string | null = null, version: number | null = nul
   return view;
 }
 
+/** What the app draws over every view: the notice line and the profile drawer. */
+const Overlays = () => (
+  <>
+    <Notice />
+    <ProfileDrawerHost />
+  </>
+);
+
 beforeEach(() => {
-  document.body.innerHTML = '<p data-role="notice" hidden></p>';
+  showNotice("");
+  render(<Overlays />);
   location.hash = "";
 });
 afterEach(() => {

@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { TicketDetail } from "../../../api/views.ts";
 import type { BudgetView, GaugeView, TicketBudget } from "../../../budget/budget.ts";
-import { duration } from "../../metro.js";
+import { duration } from "../../metro.ts";
 import { api } from "../api.ts";
-import { showNotice } from "../notice.ts";
+import { showNotice } from "../notice.tsx";
 import { message, ticketRoute } from "./ticket.ts";
 
 type GaugeKey = keyof TicketBudget;
 
-const GAUGES: Array<[GaugeKey, string, (g: BudgetView[GaugeKey]) => string]> = [
+/** The four gauges in the order shown: key, name, and the used/limit text. */
+export const GAUGES: Array<[GaugeKey, string, (g: BudgetView[GaugeKey]) => string]> = [
   ["rounds", "Rounds", (g) => g.used + "/" + g.limit],
   ["attempts", "attempts", (g) => g.used + "/" + g.limit],
   ["wallTime", "wall time", (g) => duration(g.used) + "/" + ("limitText" in g ? g.limitText : "")],
@@ -29,6 +30,17 @@ function Ring({ gauge, size }: { gauge: GaugeView; size: number }) {
       <circle className="track" cx={size / 2} cy={size / 2} r={r} />
       <circle className="arc" cx={size / 2} cy={size / 2} r={r} strokeDasharray={c} strokeDashoffset={c * (1 - share)} />
     </svg>
+  );
+}
+
+/** The Ledger's four mini rings, no words; the hover names each. */
+export function MiniRings({ budget }: { budget: BudgetView }) {
+  return (
+    <span className="rings" data-role="rings" title={GAUGES.map(([k, name, text]) => name + " " + text(budget[k])).join(" · ")}>
+      {GAUGES.map(([k]) => (
+        <Ring key={k} gauge={budget[k]} size={18} />
+      ))}
+    </span>
   );
 }
 

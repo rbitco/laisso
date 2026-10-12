@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { startLassoWithRepos, startLasso, waitFor, claudeFixture, runCli, type Lasso, dashboardSource } from "./harness.ts";
+import { startLassoWithRepos, startLasso, waitFor, claudeFixture, runCli, type Lasso } from "./harness.ts";
 import type { TicketDetail, IntakeResult } from "../src/api/views.ts";
 import type { PipelineFile, PipelineListing, ConfigFile, PipelineVersionView, ActionListing } from "../src/api/views.ts";
 import type { TickChange } from "../src/server/tick.ts";
@@ -571,16 +571,5 @@ stages:
     prompt: Review it.
     advance: false
 `);
-  });
-});
-
-describe("the dashboard", () => {
-  it("carries the Pipeline and config editors", async () => {
-    const lasso = await lassoWith();
-    const html = dashboardSource();
-    expect(html).toContain('data-role="pipelines"');
-    expect(html).toContain('data-role="config"');
-    expect(html).toContain('href="#pipelines"');
-    expect(html).toContain('href="#config"');
   });
 });

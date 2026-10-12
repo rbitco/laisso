@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { RunnerName } from "../../../pipeline/load.ts";
-import { MODEL_SUGGESTIONS, profileApplies, profileMode } from "../../metro.js";
+import { MODEL_SUGGESTIONS, profileApplies, profileMode } from "../../metro.ts";
 import { profileOf, type BlockDraft, type Draft, type Mode } from "./profile.ts";
 
 const RUNNERS: RunnerName[] = ["claude", "codex", "pi"];

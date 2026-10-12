@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { TicketDetail, Trigger } from "../../../api/views.ts";
-import { showNotice } from "../notice.ts";
+import { showNotice } from "../notice.tsx";
 import { openProfileDrawer } from "../profiles/drawer.tsx";
 import { message, pullTrigger, type ArtifactProblem } from "./ticket.ts";
 

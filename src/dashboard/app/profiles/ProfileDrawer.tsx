@@ -3,7 +3,7 @@ import type { Config } from "../../../server/config.ts";
 import type { ConfigFile, PipelineListing } from "../../../api/views.ts";
 import { api, ApiError } from "../api.ts";
 import { useEvents } from "../events.ts";
-import { overridableRepos, profileIndex, profileLine, profileRoute, profileScopes, profileUsers, profileWarnings, scopedProfile, scopeNote, usedByLine } from "../../metro.js";
+import { overridableRepos, profileIndex, profileLine, profileRoute, profileScopes, profileUsers, profileWarnings, scopedProfile, scopeNote, usedByLine } from "../../metro.ts";
 import { draftOf, profileOf, unsaved, type Draft } from "./profile.ts";
 import { ProfileFields } from "./ProfileFields.tsx";
 

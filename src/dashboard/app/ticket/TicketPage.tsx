@@ -2,9 +2,9 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { createPortal } from "react-dom";
 import type { TicketDetail, TicketView } from "../../../api/views.ts";
 import type { Drift } from "../../../store/versions.ts";
-import { relative } from "../../metro.js";
+import { relative } from "../../metro.ts";
 import { useEvents } from "../events.ts";
-import { showNotice } from "../notice.ts";
+import { showNotice } from "../notice.tsx";
 import { pipelineHref } from "../pipelines/href.ts";
 import { BudgetEditor, Gauges } from "./Budget.tsx";
 import { Flow, Timeline } from "./Flow.tsx";
@@ -22,7 +22,7 @@ export interface TicketPageProps {
   all: boolean;
   /** Where the sidebar of Tickets goes, beside the page. */
   side: HTMLElement | null;
-  /** Called once each visit's Ticket is first drawn, so the old script can swap the page in. */
+  /** Called once each visit's Ticket is first drawn, so the app can swap the page in. */
   onShown: () => void;
 }
 

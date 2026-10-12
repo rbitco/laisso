@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { startLassoWithRepos, waitFor, claudeFixture, type Lasso, type LassoConfig, dashboardSource } from "./harness.ts";
+import { startLassoWithRepos, waitFor, claudeFixture, type Lasso, type LassoConfig } from "./harness.ts";
 import type { TicketDetail, TicketView, IntakeResult } from "../src/api/views.ts";
 import type { TickChange } from "../src/server/tick.ts";
 
@@ -221,11 +221,5 @@ describe("the other exits", () => {
     expect((await lasso.api<TicketView[]>("/api/tickets?all=1")).map((t) => t.state)).toEqual(["abandoned"]);
     await expect(pull(lasso, ticket.id, "abandon")).rejects.toThrow("is already abandoned");
     await expect(pull(lasso, ticket.id, "retry")).rejects.toThrow("is abandoned");
-  });
-
-  it("serves the Ledger's mini rings in the dashboard shell; the Ticket page's Flag box, gauges and editor are in test/ticket-page.test.tsx", async () => {
-    const { lasso } = await lassoWithTicket();
-    const html = dashboardSource();
-    expect(html).toContain("'data-role': 'rings'");
   });
 });

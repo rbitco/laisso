@@ -1,7 +1,7 @@
 import type { KeyboardEvent } from "react";
 import type { Config } from "../../../server/config.ts";
 import type { PipelineListing } from "../../../api/views.ts";
-import { profileIndex, profileSummary, profileUsers, scopedProfile, scopeNote, usedByLine } from "../../metro.js";
+import { profileIndex, profileSummary, profileUsers, scopedProfile, scopeNote, usedByLine } from "../../metro.ts";
 import { openProfileDrawer } from "./drawer.tsx";
 
 /**

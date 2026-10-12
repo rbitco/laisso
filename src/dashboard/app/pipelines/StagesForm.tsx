@@ -1,9 +1,9 @@
 import { Fragment, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import type { Config } from "../../../server/config.ts";
 import type { ActionListing, ConfigFile, PipelineFile, PipelineView } from "../../../api/views.ts";
-import { stageProfileView } from "../../metro.js";
+import { stageProfileView } from "../../metro.ts";
 import { api } from "../api.ts";
-import { showNotice } from "../notice.ts";
+import { showNotice } from "../notice.tsx";
 import { openProfileDrawer } from "../profiles/drawer.tsx";
 import { ProfileButton } from "../profiles/ProfileButton.tsx";
 import { firstLine, RailStage, StagesHead } from "./Rail.tsx";

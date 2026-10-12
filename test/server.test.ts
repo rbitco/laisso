@@ -122,14 +122,12 @@ describe("the lasso process", () => {
     }
   });
 
-  it("serves the dashboard shell and an empty ledger", async () => {
+  it("serves the dashboard page and an empty ledger", async () => {
     const lasso = await startLasso();
     running.push(lasso);
+    // The page is the React app's entry; its header and Ledger are tested as components (test/app.test.tsx).
     const html = await (await lasso.page("/")).text();
-    expect(html).toContain('data-role="intake"');
-    expect(html).toContain('data-role="tick-dot"');
-    expect(html).toContain('data-role="check-now"');
-    expect(html).toContain('data-role="ledger"');
+    expect(html).toContain('<div id="root"></div>');
 
     const tickets = await lasso.api<unknown[]>("/api/tickets");
     expect(tickets).toEqual([]);

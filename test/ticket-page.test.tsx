@@ -6,8 +6,9 @@ import { DEFAULT_CONFIG, type Config } from "../src/server/config.ts";
 import type { BudgetView } from "../src/budget/budget.ts";
 import type { ConfigFile, PipelineListing, SessionView, StageProfileView, TicketDetail } from "../src/api/views.ts";
 import { TicketPage } from "../src/dashboard/app/ticket/TicketPage.tsx";
-import { closeProfileDrawer } from "../src/dashboard/app/profiles/drawer.tsx";
+import { closeProfileDrawer, ProfileDrawerHost } from "../src/dashboard/app/profiles/drawer.tsx";
 import { events } from "../src/dashboard/app/events.ts";
+import { Notice, showNotice } from "../src/dashboard/app/notice.tsx";
 
 // A Ticket's page as a person uses it (ADR 0012): what it shows, what each lever sends, and how it keeps up with Lasso.
 
@@ -139,8 +140,17 @@ function held() {
   return { promise, release };
 }
 
+/** What the app draws over every view: the notice line and the profile drawer. */
+const Overlays = () => (
+  <>
+    <Notice />
+    <ProfileDrawerHost />
+  </>
+);
+
 beforeEach(() => {
-  document.body.innerHTML = '<p data-role="notice" hidden></p>';
+  showNotice("");
+  render(<Overlays />);
   side = document.createElement("aside");
   document.body.appendChild(side);
   location.hash = "";
@@ -148,6 +158,7 @@ beforeEach(() => {
 afterEach(() => {
   closeProfileDrawer();
   cleanup();
+  side.remove();
   vi.unstubAllGlobals();
   vi.stubGlobal("EventSource", FakeEventSource);
 });

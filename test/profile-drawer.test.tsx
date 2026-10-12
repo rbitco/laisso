@@ -5,8 +5,9 @@ import { userEvent } from "@testing-library/user-event";
 import { DEFAULT_CONFIG, type Config, type ProfileConfig } from "../src/server/config.ts";
 import type { ConfigFile, PipelineListing } from "../src/api/views.ts";
 import { ProfileDrawer, type DrawerOptions } from "../src/dashboard/app/profiles/ProfileDrawer.tsx";
-import { closeProfileDrawer, openProfileDrawer } from "../src/dashboard/app/profiles/drawer.tsx";
+import { closeProfileDrawer, openProfileDrawer, ProfileDrawerHost } from "../src/dashboard/app/profiles/drawer.tsx";
 import { ConfigPage } from "../src/dashboard/app/config/ConfigPage.tsx";
+import { Notice, showNotice } from "../src/dashboard/app/notice.tsx";
 
 // The Agent Profile drawer as a person uses it (ADR 0012): what it shows, what each action writes, and how it closes.
 
@@ -85,8 +86,17 @@ async function showDrawer(name: string | null, options: DrawerOptions = {}, conf
   return { ...lasso, onClose };
 }
 
+/** What the app draws over every view: the notice line and the profile drawer. */
+const Overlays = () => (
+  <>
+    <Notice />
+    <ProfileDrawerHost />
+  </>
+);
+
 beforeEach(() => {
-  document.body.innerHTML = '<p data-role="notice" hidden></p>';
+  showNotice("");
+  render(<Overlays />);
 });
 afterEach(() => {
   act(() => closeProfileDrawer());

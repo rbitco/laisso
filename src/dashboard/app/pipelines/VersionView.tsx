@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import type { PipelineVersionView, StageFields } from "../../../api/views.ts";
-import { relative } from "../../metro.js";
+import { relative } from "../../metro.ts";
 import { api } from "../api.ts";
 import { EditorHead } from "../Setting.tsx";
 import { pipelineHref } from "./href.ts";

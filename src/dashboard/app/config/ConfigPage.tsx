@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ActionListing, ConfigFile, PipelineListing } from "../../../api/views.ts";
 import { api } from "../api.ts";
 import { useEvents } from "../events.ts";
-import { showNotice } from "../notice.ts";
+import { showNotice } from "../notice.tsx";
 import { EditorHead, GroupTitle } from "../Setting.tsx";
 import { SettingsForm } from "./SettingsForm.tsx";
 import { Actions, Repos } from "./FromConfigFile.tsx";

@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { startLassoWithRepos, waitFor, claudeFixture, type Lasso, type LassoConfig, type RepoSpec, dashboardSource } from "./harness.ts";
+import { startLassoWithRepos, waitFor, claudeFixture, type Lasso, type LassoConfig, type RepoSpec } from "./harness.ts";
 import type { TicketDetail, IntakeResult, TicketView } from "../src/api/views.ts";
 import type { TickChange } from "../src/server/tick.ts";
 
@@ -183,13 +183,5 @@ describe("end of life", () => {
     expect(existsSync(path.dirname(ticket.worktree))).toBe(false);
     expect(repos.app.git(["worktree", "list"])).not.toContain(ticket.worktree);
     expect(repos.app.git(["branch", "--list", ticket.branch])).toContain(ticket.branch);
-  });
-
-  it("puts done and Abandoned Tickets behind a toggle on the dashboard, greyed", async () => {
-    const { lasso } = await lassoWithTicket();
-    const html = dashboardSource();
-    expect(html).toContain("Show done and Abandoned");
-    expect(html).toContain("/api/tickets?all=1");
-    expect(html).toContain(".ticket.ended");
   });
 });

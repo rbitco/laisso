@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { PipelineListing } from "../../../api/views.ts";
 import { api } from "../api.ts";
 import { useEvents } from "../events.ts";
-import { showNotice } from "../notice.ts";
+import { showNotice } from "../notice.tsx";
 import { PipelineList, NewPipeline } from "./PipelineList.tsx";
 import { PipelineEditor } from "./PipelineEditor.tsx";
 import { VersionView } from "./VersionView.tsx";

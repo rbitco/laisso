@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import type { FeedbackView, SessionView, TicketDetail } from "../../../api/views.ts";
-import { duration, relative, sessionProfile } from "../../metro.js";
+import { duration, relative, sessionProfile } from "../../metro.ts";
 import { api } from "../api.ts";
 import { useEvents } from "../events.ts";
-import { showNotice } from "../notice.ts";
+import { showNotice } from "../notice.tsx";
 import { message, ticketRoute } from "./ticket.ts";
 
 export const sessionLabel = (s: SessionView) => s.stage + " #" + s.ordinal + (s.round ? " · Round " + s.round : "");

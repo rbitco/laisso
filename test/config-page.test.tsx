@@ -6,6 +6,8 @@ import { DEFAULT_CONFIG, type Config } from "../src/server/config.ts";
 import type { ActionListing, ConfigFile } from "../src/api/views.ts";
 import { ConfigPage } from "../src/dashboard/app/config/ConfigPage.tsx";
 import { events } from "../src/dashboard/app/events.ts";
+import { Notice, showNotice } from "../src/dashboard/app/notice.tsx";
+import { ProfileDrawerHost } from "../src/dashboard/app/profiles/drawer.tsx";
 
 // The Config page as a person uses it (ADR 0012): what it shows, what Save sends, and what it says back.
 
@@ -56,8 +58,17 @@ async function showPage(config: Config = DEFAULT_CONFIG, actions: ActionListing[
   return lasso;
 }
 
+/** What the app draws over every view: the notice line and the profile drawer. */
+const Overlays = () => (
+  <>
+    <Notice />
+    <ProfileDrawerHost />
+  </>
+);
+
 beforeEach(() => {
-  document.body.innerHTML = '<p data-role="notice" hidden></p>';
+  showNotice("");
+  render(<Overlays />);
 });
 afterEach(() => {
   cleanup();

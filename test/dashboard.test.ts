@@ -2,9 +2,9 @@ import { describe, it, expect, afterEach } from "vitest";
 import { readFile, writeFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
-import { startLassoWithRepos, waitFor, claudeFixture, type Lasso, type LassoConfig, type TrackerReply, dashboardSource } from "./harness.ts";
+import { startLassoWithRepos, waitFor, claudeFixture, type Lasso, type LassoConfig, type TrackerReply } from "./harness.ts";
 import { sortForLedger, type TicketView, type TicketDetail, type IntakeResult, type DisplayState } from "../src/api/views.ts";
-import { metroDiagram, metroTrack, sessionsForStage, quickAction, relative, tickIndicator, sessionProfile, profileApplies, profileLine, profileSummary, profileUsers, usedByLine, profileWarnings, MODEL_SUGGESTIONS, stageProfileView, profileIndex, scopeNote, profileScopes, overridableRepos, scopedProfile, profileRoute, ticketProfileView, ledgerStageText, pipelineLine } from "../src/dashboard/metro.js";
+import { metroDiagram, metroTrack, sessionsForStage, quickAction, relative, tickIndicator, sessionProfile, profileApplies, profileLine, profileSummary, profileUsers, usedByLine, profileWarnings, MODEL_SUGGESTIONS, stageProfileView, profileIndex, scopeNote, profileScopes, overridableRepos, scopedProfile, profileRoute, ticketProfileView, ledgerStageText, pipelineLine } from "../src/dashboard/metro.ts";
 import type { ConfigFile, PipelineListing, PipelineFile } from "../src/api/views.ts";
 import type { ProfileConfig } from "../src/server/config.ts";
 import type { TickChange, TickStatus } from "../src/server/tick.ts";
@@ -482,28 +482,22 @@ describe("repo overrides in the profile drawer", () => {
 });
 
 describe("the dashboard page", () => {
-  it("serves the built page and its bundle, and the page carries every Ledger row element the spec lists", async () => {
+  it("serves the built page, a React root and its bundle, and nothing else at an unknown asset", async () => {
     const { lasso } = await lassoWithTicket();
     const page = await lasso.page("/");
     expect(page.headers.get("content-type")).toContain("text/html");
-    const bundle = (await page.text()).match(/<script type="module" crossorigin src="(\/assets\/[^"]+\.js)">/)![1];
+    const html = await page.text();
+    // The page is only Vite's entry: the React root and the bundle; the Ledger, header and views are components (test/app.test.tsx, test/ledger.test.tsx).
+    expect(html).toContain('<div id="root"></div>');
+    const bundle = html.match(/<script type="module" crossorigin src="(\/assets\/[^"]+\.js)">/)![1]!;
     const script = await lasso.page(bundle);
     expect(script.headers.get("content-type")).toContain("text/javascript");
-    expect(await script.text()).toContain("Unsaved changes");
+    expect(await script.text()).toContain("Show done and Abandoned");
+    const styles = html.match(/<link rel="stylesheet" crossorigin href="(\/assets\/[^"]+\.css)">/)![1]!;
+    const css = await lasso.page(styles);
+    expect(css.headers.get("content-type")).toContain("text/css");
+    expect(await css.text()).toContain(".ticket.ended");
     expect((await lasso.page("/assets/missing.js")).status).toBe(404);
-    const html = dashboardSource();
-    expect(html).toMatch(/import \{[^}]*\btickIndicator\b[^}]*\} from '\.\/metro\.js'/);
-    // The header's Tick dot replaces the old tick-status text.
-    expect(html).toContain('data-role="tick-dot"');
-    const dot = html.match(/<span [^>]*data-role="tick-dot"[^>]*>/)![0];
-    expect(dot).toContain('role="img"');
-    // No tooltip until the first status or error arrives.
-    expect(dot).not.toContain("title=");
-    expect(html).not.toContain("tick-status");
-    // Ledger rows: pill, reference over repo, title over why, mini track with the Stage name, rings, last activity, quick action.
-    for (const role of ["pill", "ref", "why", "track", "rings", "last", "quick"]) expect(html).toContain(`'data-role': '${role}'`);
-    // The Ticket page and its sidebar are React (test/ticket-page.test.tsx); the page keeps their sections.
-    for (const role of ["detail", "side"]) expect(html).toContain(`data-role="${role}"`);
   });
 });
 

@@ -1,8 +1,8 @@
 import { useState, type FormEvent } from "react";
 import type { PipelineFile, PipelineListing } from "../../../api/views.ts";
-import { pipelineLine } from "../../metro.js";
+import { pipelineLine } from "../../metro.ts";
 import { api } from "../api.ts";
-import { showNotice } from "../notice.ts";
+import { showNotice } from "../notice.tsx";
 import { pipelineHref } from "./href.ts";
 
 /** What a blank Pipeline starts as: one Stage that leaves commits behind. */
