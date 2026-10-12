@@ -223,10 +223,9 @@ describe("the other exits", () => {
     await expect(pull(lasso, ticket.id, "retry")).rejects.toThrow("is abandoned");
   });
 
-  it("serves the Flag box, gauges and editor in the dashboard shell", async () => {
+  it("serves the Ledger's mini rings in the dashboard shell; the Ticket page's Flag box, gauges and editor are in test/ticket-page.test.tsx", async () => {
     const { lasso } = await lassoWithTicket();
     const html = dashboardSource();
-    for (const role of ["flagbox", "gauges", "budget-editor", "rings"]) expect(html).toContain(`'data-role': '${role}'`);
-    expect(html).toContain("/extend");
+    expect(html).toContain("'data-role': 'rings'");
   });
 });

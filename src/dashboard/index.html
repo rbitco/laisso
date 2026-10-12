@@ -420,10 +420,10 @@
   </div>
 </main>
 <script type="module">
-import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, relative, tickIndicator, sessionProfile, ticketProfileView, ledgerStageText } from './metro.js';
+import { metroTrack, quickAction, duration, relative, tickIndicator, ledgerStageText } from './metro.js';
 import { showConfig } from './app/config/mount.tsx';
 import { showPipelines } from './app/pipelines/mount.tsx';
-import { openProfileDrawer } from './app/profiles/drawer.tsx';
+import { showTicket, hideTicket } from './app/ticket/mount.tsx';
 import { events } from './app/events.ts';
 (function () {
   const $ = (sel) => document.querySelector(sel);
@@ -520,14 +520,10 @@ import { events } from './app/events.ts';
     return el('span', { class: 'rings', 'data-role': 'rings', title: GAUGES.map(([k, name, text]) => name + ' ' + text(b[k])).join(' · ') }, GAUGES.map(([k]) => ring(b[k], 18)));
   }
 
-  /** Pull a Trigger on a Ticket; Mark done met with a missing artifact offers to advance anyway through `onOverride`. */
-  async function pullTrigger(t, action, body, onOverride) {
+  /** Pull a Ledger row's quick action on a Ticket. */
+  async function pullTrigger(t, action) {
     if (action === 'check') { await api('/api/check-now', { method: 'POST' }); return; }
-    try { await api('/api/tickets/' + encodeURIComponent(t.id) + '/' + action, { method: 'POST', body: JSON.stringify(body || {}) }); }
-    catch (e) {
-      if (e.status === 409 && e.body && e.body.override && onOverride) { onOverride(e.body); return; }
-      throw e;
-    }
+    await api('/api/tickets/' + encodeURIComponent(t.id) + '/' + action, { method: 'POST', body: '{}' });
   }
 
   // A Ledger row: status pill, reference over repo, title over the why line, the mini Metro track with the Stage
@@ -543,7 +539,7 @@ import { events } from './app/events.ts';
       button.addEventListener('click', async (ev) => {
         ev.stopPropagation();
         button.disabled = true; button.classList.add('busy');
-        try { await pullTrigger(t, action.action, {}); await refreshLedger(); }
+        try { await pullTrigger(t, action.action); await refreshLedger(); }
         catch (e) { showNotice(e.message); button.disabled = false; button.classList.remove('busy'); }
       });
       quick.appendChild(button);
@@ -563,7 +559,7 @@ import { events } from './app/events.ts';
 
   const listTickets = () => api(showEnded.checked ? '/api/tickets?all=1' : '/api/tickets');
   const failing = (e) => showNotice(e.message);
-  showEnded.addEventListener('change', () => { if (!ledger.hidden) refreshLedger().catch(failing); else if (!side.hidden && currentTicket) refreshSide(currentTicket).catch(failing); });
+  showEnded.addEventListener('change', () => { if (!ledger.hidden) refreshLedger().catch(failing); else if (!detail.hidden) route(); });
 
   async function refreshLedger() {
     // The API serves rows in Ledger order: attention first, newest activity within a group. Done and Abandoned
@@ -577,403 +573,22 @@ import { events } from './app/events.ts';
     for (const t of tickets) ledger.appendChild(ticketRow(t));
   }
 
-  // With a detail open the Ledger collapses to this sidebar: one compact line per Ticket, the open one marked.
-  let currentTicket = null;
-  async function refreshSide(id) { drawSide(await listTickets(), id); }
-  function drawSide(tickets, id) {
-    const back = el('div', { class: 'back' }, [el('a', { class: 'back-link', href: '#', text: '← all Tickets' }), el('span', { class: 'muted', text: tickets.length + ' shown' })]);
-    side.replaceChildren(back, ...tickets.map((t) => {
-      const item = el('div', { class: 'qitem' + (t.id === id ? ' sel' : '') + (t.state === 'active' ? '' : ' ended'), 'data-id': t.id }, [
-        el('span', { class: 'dot ' + t.display.state }),
-        el('div', { style: 'min-width:0' }, [el('div', { class: 'ref', text: (t.reference || t.shortId) + ' · ' + t.repo + ' · ' + t.stage.label }), el('div', { class: 'title', text: t.title })]),
-      ]);
-      item.addEventListener('click', () => { location.hash = t.id; });
-      return item;
-    }));
-  }
-
-  // The four ring gauges; any of them opens the inline Ticket-layer editor (Extend). A starred value is set on the Ticket.
-  function gauges(t, openEditor) {
-    return el('div', { class: 'gauges', 'data-role': 'gauges' }, GAUGES.map(([k, name, text]) => {
-      const g = t.budget[k];
-      const share = g.limit > 0 ? g.used / g.limit : 1;
-      const node = el('div', { class: 'gauge' + (share >= 1 ? ' over' : share >= 0.7 ? ' warn' : ''), 'data-gauge': k, title: 'set ' + (g.source === 'ticket' ? 'on this Ticket' : g.source === 'pipeline' ? 'by the Pipeline' : 'globally') + '; click to extend' },
-        [ring(g, 56), el('span', { class: 'value', text: text(g) + (g.source === 'ticket' ? '*' : '') }), el('span', { text: name })]);
-      node.addEventListener('click', openEditor);
-      return node;
-    }));
-  }
-
-  function budgetEditor(t) {
-    const form = el('form', { class: 'editor', 'data-role': 'budget-editor' });
-    form.hidden = true;
-    const fields = GAUGES.map(([k, name]) => {
-      const g = t.budget[k];
-      const input = el('input', { name: k, placeholder: k === 'wallTime' ? g.limitText : String(g.limit), value: t.budget.ticket[k] === null ? '' : String(t.budget.ticket[k]) });
-      return [k, input, el('label', {}, [name + (k === 'spend' ? ' (USD)' : k === 'wallTime' ? ' (30m, 1h)' : ''), input])];
-    });
-    const save = el('button', { class: 'primary', type: 'submit', text: 'Save' });
-    const cancel = el('button', { type: 'button', text: 'Cancel' });
-    cancel.addEventListener('click', () => { form.hidden = true; });
-    form.replaceChildren(...fields.map((f) => f[2]), el('div', { class: 'row' }, [save, cancel, el('span', { class: 'why', text: 'blank falls back to the Pipeline or global value; a running Session keeps the wall time it started with' })]));
-    form.addEventListener('submit', async (ev) => {
-      ev.preventDefault();
-      const body = {};
-      for (const [k, input] of fields) {
-        const raw = input.value.trim();
-        if (raw !== '' && k !== 'wallTime' && !/^\d+(\.\d+)?$/.test(raw)) { showNotice(k + ' must be a number'); input.focus(); return; }
-        body[k] = raw === '' ? null : k === 'wallTime' ? raw : Number(raw);
-      }
-      save.disabled = true;
-      try { await api('/api/tickets/' + encodeURIComponent(t.id) + '/extend', { method: 'POST', body: JSON.stringify(body) }); showDetail(t.id); }
-      catch (e) { showNotice(e.message); save.disabled = false; }
-    });
-    return form;
-  }
-
-  // The Flag box: why, when, the last word from the Runner, and the six exits below it.
-  function flagBox(t) {
-    const last = t.session && t.session.finalMessage;
-    return el('div', { class: 'flagbox', 'data-role': 'flagbox' }, [
-      el('div', {}, [el('span', { class: 'reason', text: t.flag.reason }), ' ', el('span', { class: 'meta muted', text: 'Flagged ' + relative(t.flag.at) })]),
-      el('div', { text: t.flag.detail || '' }),
-      last ? el('div', { class: 'last', text: last }) : el('span'),
-    ]);
-  }
-
-  function copyChip(label, value) {
-    const chip = el('button', { type: 'button', text: label, title: value });
-    chip.addEventListener('click', async () => {
-      try { await navigator.clipboard.writeText(value); chip.textContent = 'copied'; }
-      catch (e) { chip.textContent = value; }
-      setTimeout(() => { chip.textContent = label; }, 1500);
-    });
-    return chip;
-  }
-
-  // Done and Abandon remove the worktree; the path stays on the Ticket as history.
-  function worktreeGone(t) { return t.state !== 'active'; }
-  function worktreeChip(t) {
-    return worktreeGone(t) ? el('span', { class: 'muted', text: 'worktree removed', title: t.worktree }) : copyChip('worktree', t.worktree);
-  }
-
-  // Each showDetail is a generation; a pane whose generation has passed stops polling and never re-renders.
-  let detailGen = 0;
-  // The running Session whose output is on screen; "stdout" events for it read more.
-  let watchedStdout = null;
-
-  const sessionLabel = (s) => s.stage + ' #' + s.ordinal + (s.round ? ' · Round ' + s.round : '');
-
-  /** The Feedback a Round addressed: one line per item, with the evidence it was addressed or "open". */
-  function feedbackList(items) {
-    if (!items || !items.length) return el('span');
-    return el('div', { class: 'feedback', 'data-role': 'feedback' }, [
-      el('h4', { text: 'Feedback' }),
-      ...items.map((f) => el('div', { class: 'row' }, [
-        el('span', { class: 'pill ' + (f.addressed ? 'succeeded' : 'flagged'), text: f.addressed ? 'addressed' : 'open' }),
-        el('span', { class: 'kind', text: f.kind }),
-        f.url ? el('a', { href: f.url, target: '_blank', rel: 'noopener', text: f.summary }) : el('span', { text: f.summary }),
-        el('span', { class: 'meta', text: f.addressed || '' }),
-      ])),
-    ]);
-  }
-
-  function sessionPane(t, s, gen) {
-    const pane = el('section', { class: 'session', 'data-role': 'session' });
-    const outcome = s.running ? 'running' : (s.outcome || 'unknown');
-    const profile = sessionProfile(s);
-    const head = el('div', { class: 'head' }, [
-      el('span', { class: 'pill ' + outcome, text: outcome + (s.endedReason ? ' · ' + s.endedReason : '') }),
-      el('strong', { text: sessionLabel(s) }),
-      el('span', { class: 'meta', text: s.mode + ' · ' + s.startedBy }),
-      el('span', Object.assign({ class: 'meta', 'data-role': 'duration', text: duration(s.durationMs) }, s.running ? { 'data-since': s.startedAt } : {})),
-      el('span', { class: 'meta', text: s.costUsd === null ? '' : '$' + s.costUsd.toFixed(2) }),
-      profile ? el('span', { class: 'meta', 'data-role': 'profile', text: profile.text, title: profile.title }) : el('span'),
-      el('span', { class: 'meta', text: 'started ' + relative(s.startedAt) }),
-    ]);
-    if (s.running && s.mode === 'headless') {
-      const stop = el('button', { class: 'stop', type: 'button', text: 'Stop' });
-      stop.addEventListener('click', async () => {
-        stop.disabled = true;
-        try { await api('/api/tickets/' + encodeURIComponent(t.id) + '/sessions/' + s.id + '/stop', { method: 'POST' }); showDetail(t.id); }
-        catch (e) { showNotice(e.message); stop.disabled = false; }
-      });
-      head.appendChild(stop);
-    }
-    if (s.mode === 'terminal') {
-      const opened = s.openedAt ? 'terminal opened ' + relative(s.openedAt) : 'not opened yet';
-      if (s.running && t.triggers.some((x) => x.action === 'terminal')) {
-        const reopen = el('button', { class: 'stop', type: 'button', text: 'Open terminal' });
-        reopen.addEventListener('click', async () => {
-          reopen.disabled = true;
-          try { await api('/api/tickets/' + encodeURIComponent(t.id) + '/terminal', { method: 'POST', body: '{}' }); showDetail(t.id); }
-          catch (e) { showNotice(e.message); reopen.disabled = false; }
-        });
-        head.appendChild(reopen);
-      }
-      pane.replaceChildren(head, el('div', { class: 'hint', text: opened + '. Lasso tracks this Session by its id only: the row ends when you mark the Stage done or skip it.' }),
-        el('div', { class: 'paths' }, [worktreeChip(t), copyChip('session id', s.id), s.runnerSessionId ? copyChip('runner session', s.runnerSessionId) : el('span'), s.transcriptPath ? copyChip('transcript', s.transcriptPath) : el('span')]));
-      return pane;
-    }
-    const final = el('div', { class: 'final' + (s.outcome === 'succeeded' ? ' ok' : ''), text: s.finalMessage || '' });
-    final.hidden = !s.finalMessage;
-    // A built-in action has no output; an Action from config is a command, and its output reads like a Runner's.
-    if (s.mode === 'action' && !s.stdoutPath) {
-      pane.replaceChildren(head, el('div', { class: 'hint', text: 'Lasso performed this Stage itself; there is no Runner output.' }), final);
-      return pane;
-    }
-    const out = el('pre', { text: '' });
-    const paths = el('div', { class: 'paths' }, [
-      worktreeChip(t),
-      s.stdoutPath ? copyChip('stdout', s.stdoutPath) : el('span'),
-      s.runnerSessionId ? copyChip('runner session', s.runnerSessionId) : el('span'),
-      s.transcriptPath ? copyChip('transcript', s.transcriptPath) : el('span'),
-    ]);
-    pane.replaceChildren(head, feedbackList(s.feedback), out, final, paths);
-
-    // Read from where the last read stopped; a "stdout" event while a read is out asks for one more after it.
-    let offset = 0, reading = false, again = false;
-    async function tail() {
-      if (reading) { again = true; return; }
-      reading = true;
-      try {
-        const chunk = await api('/api/tickets/' + encodeURIComponent(t.id) + '/sessions/' + s.id + '/stdout?offset=' + offset);
-        if (gen !== detailGen) return;
-        if (chunk.text) showOutput(out, chunk.text);
-        offset = chunk.offset;
-      } catch (e) {
-        if (gen === detailGen) showOutput(out, '\n[stdout unavailable: ' + e.message + ']');
-      } finally { reading = false; }
-      if (again && gen === detailGen) { again = false; tail(); }
-    }
-    watchedStdout = s.running ? { session: s.id, gen, read: tail } : null;
-    tail();
-    return pane;
-  }
-
-  // Runner output keeps only its newest OUTPUT_TAIL characters on the page: appending to one big text node
-  // re-laid out megabytes every second. The whole log stays at the stdout path.
-  const OUTPUT_TAIL = 200000;
-  function showOutput(out, text) {
-    const pinned = out.scrollTop + out.clientHeight >= out.scrollHeight - 24;
-    if (text.length > OUTPUT_TAIL) { text = text.slice(-OUTPUT_TAIL); out.replaceChildren(); out.dataset.shown = 0; out.dataset.trimmed = ''; }
-    out.append(text);
-    let shown = Number(out.dataset.shown || 0) + text.length;
-    while (shown > OUTPUT_TAIL) {
-      const first = out.firstChild, excess = shown - OUTPUT_TAIL;
-      if (first.length <= excess) { out.removeChild(first); shown -= first.length; } else { first.deleteData(0, excess); shown = OUTPUT_TAIL; }
-      out.dataset.trimmed = '';
-    }
-    out.dataset.shown = shown;
-    if (pinned) out.scrollTop = out.scrollHeight;
-  }
-
-  const OUTCOME_COLOUR = { succeeded: 'var(--good)', failed: 'var(--crit)', exhausted: 'var(--crit)', interrupted: 'var(--amber)' };
-
-  // The Sessions timeline, newest first, action Stages included; a station click narrows it to one Stage.
-  function timeline(t, focus, onFocus) {
-    const sessions = sessionsForStage(t.sessions, focus);
-    const head = el('div', { class: 'head' }, [el('h3', { text: 'Sessions' + (focus ? ' · ' + focus : '') })]);
-    if (focus) {
-      const all = el('button', { type: 'button', class: 'sm', 'data-role': 'stage-filter', text: 'All Stages' });
-      all.addEventListener('click', () => onFocus(null));
-      head.appendChild(all);
-    }
-    const list = el('ul', { class: 'timeline' }, sessions.map((s) => el('li', { style: '--c:' + (s.running ? 'var(--run)' : OUTCOME_COLOUR[s.outcome] || 'var(--muted)') }, [
-      el('span', { class: 'when', text: relative(s.startedAt) }),
-      el('span', { class: 'pill ' + (s.running ? 'running' : s.outcome || ''), text: s.running ? 'running' : (s.outcome || '?') }),
-      el('span', { text: sessionLabel(s) }),
-      el('span', { class: 'muted', text: s.mode + ' · ' + s.startedBy + (s.endedReason ? ' · ' + s.endedReason : '') + ' · ' + duration(s.durationMs) + (s.costUsd === null ? '' : ' · $' + s.costUsd.toFixed(2)) }),
-    ])));
-    return el('div', { class: 'panel', 'data-role': 'timeline' }, [head, sessions.length ? list : el('span', { class: 'muted', text: focus ? 'no Sessions of ' + focus + ' yet' : 'no Sessions yet' })]);
-  }
-
-  // The levers on this Ticket. Mark done met with a missing artifact offers to advance anyway, inline;
-  // Extend opens the Budget editor; Abandon asks for a second click; Check PR now runs a tick.
-  function triggerBar(t, openEditor) {
-    const bar = el('div', { class: 'triggers', 'data-role': 'triggers' });
-    const buttons = t.triggers.map((trigger) => {
-      const primary = trigger.action === 'terminal' || trigger.action === 'start' || trigger.action === 'retry';
-      const button = el('button', { type: 'button', text: trigger.label, class: 'sm' + (primary ? ' primary' : ''), 'data-action': trigger.action });
-      // A lever on show that cannot be pulled (Resume on another Runner) stays disabled and says why below.
-      if (trigger.unavailable) { button.disabled = true; button.dataset.unavailable = '1'; button.title = trigger.unavailable; return button; }
-      if (trigger.action === 'extend') button.addEventListener('click', openEditor);
-      else if (trigger.action === 'abandon') button.addEventListener('click', () => {
-        if (button.dataset.armed) { pull('abandon', {}); return; }
-        button.dataset.armed = '1'; button.textContent = 'Abandon for sure?';
-        setTimeout(() => { delete button.dataset.armed; button.textContent = trigger.label; }, 4000);
-      });
-      else button.addEventListener('click', () => pull(trigger.action, {}));
-      return button;
-    });
-    // Check PR now belongs to the repeating Stage: a tick there fetches Feedback and opens a Round (spec: the title bar).
-    if (t.state === 'active' && t.pr && t.stage.repeat) {
-      const check = el('button', { type: 'button', class: 'sm', 'data-role': 'check-pr', text: 'Check PR now' });
-      check.addEventListener('click', () => pull('check', {}));
-      buttons.push(check);
-    }
-    // "retry with…" on a Flagged Runner Stage: pick a profile in the drawer, which sets the Stage's override and retries.
-    const stageProfile = (t.profiles || []).find((p) => p.stage === t.stage.name);
-    if (t.flag && stageProfile && t.triggers.some((x) => x.action === 'retry')) {
-      const retryWith = el('button', { type: 'button', class: 'sm', 'data-action': 'retry-with', 'data-role': 'retry-with', text: 'retry with…' });
-      retryWith.addEventListener('click', () => openProfileDrawer(stageProfile.profile, {
-        scope: t.repo,
-        context: 'Retry Stage ' + t.stage.name + ' of Ticket ' + (t.reference || t.shortId) + ' under another profile; it stays this Stage\'s override until cleared',
-        extra: (name) => ({ role: 'retry-with-choice', choices: [
-          { role: 'profile-retry', primary: true, label: 'Retry ' + t.stage.name + ' with ' + name, act: async () => { await pullTrigger(t, 'retry', { profile: name }); showDetail(t.id); } },
-        ] }),
-      }));
-      buttons.push(retryWith);
-    }
-    const why = t.triggers.filter((x) => x.unavailable).map((x) => el('div', { class: 'why', 'data-role': 'unavailable', text: x.label + ' is unavailable: ' + x.unavailable }));
-    bar.replaceChildren(...buttons, ...why);
-    async function pull(action, body) {
-      for (const b of buttons) b.disabled = true;
-      const pressed = buttons.find((b) => b.dataset.action === action || (action === 'check' && b.dataset.role === 'check-pr'));
-      if (pressed) pressed.classList.add('busy');
-      const idle = () => { for (const b of buttons) { b.disabled = !!b.dataset.unavailable; b.classList.remove('busy'); } };
-      try {
-        await pullTrigger(t, action, body, (problem) => {
-          idle();
-          const anyway = el('button', { type: 'button', class: 'sm', text: 'Advance anyway' });
-          anyway.addEventListener('click', () => { anyway.disabled = true; pull(action, { override: true }); });
-          bar.replaceChildren(...buttons, ...why, el('div', { class: 'override', 'data-role': 'override' }, [
-            el('span', { text: 'artifact ' + problem.artifact + ' is missing: ' + problem.detail }), anyway]));
-        });
-        await showDetail(t.id);
-      } catch (e) {
-        idle();
-        showNotice(e.message);
-      }
-    }
-    return bar;
-  }
-
-  // Which station the timeline is narrowed to, per Ticket, so a refresh keeps it.
-  const focusByTicket = {};
-
-  // The Metro flow diagram in its panel; a station click narrows the timeline and marks the station.
-  function flowPanel(t, onFocus) {
-    const panel = el('div', { class: 'flow', 'data-role': 'flow' });
-    const drawing = el('div');
-    const legend = el('div', { class: 'legend', text: 'Filled stations are done, the ringed station is current, a stop sign is Flagged, ticks are action Stages. The orbit above a repeating Stage is PR feedback with Rounds used of Budget on its badge; a small orbit counts attempts. Click a station to filter Sessions.' });
-    panel.replaceChildren(drawing, legend);
-    panel.draw = (focus) => {
-      drawing.innerHTML = metroDiagram(t, focus);
-      for (const node of drawing.querySelectorAll('[data-stage]')) node.addEventListener('click', () => onFocus(node.dataset.stage === focus ? null : node.dataset.stage));
-    };
-    return panel;
-  }
-
-  function titleBar(t, openEditor) {
-    const crumbs = el('div', { class: 'eyebrow' }, [el('span', { text: (t.reference || t.shortId) + ' · ' + t.repo + ' · ' + t.branch })]);
-    if (t.pr) crumbs.append(' · ', el('a', { href: t.pr, target: '_blank', rel: 'noopener', 'data-role': 'pr-link', text: 'PR' }));
-    const left = el('div', { style: 'min-width:0' }, [crumbs, el('h2', { text: t.title }), el('div', { class: 'why', text: t.display.why + (t.mirrorPending ? ' · tracker labels not written yet' : '') })]);
-    const right = el('div', { class: 'right' }, [el('span', { class: 'pill ' + t.display.state, text: t.display.label })]);
-    // A Flagged Ticket's exits live in its Flag box (spec: the Flag box); otherwise the triggers stand in the title bar.
-    if (!t.flag) right.appendChild(triggerBar(t, openEditor));
-    return el('div', { class: 'titlebar', 'data-role': 'titlebar' }, [left, right]);
-  }
-
-  async function showDetail(id) {
-    const gen = ++detailGen;
-    let t, list;
-    // The Ticket and the sidebar arrive together, so the page changes once rather than in steps.
-    try { [t, list] = await Promise.all([api('/api/tickets/' + encodeURIComponent(id)), listTickets()]); }
-    catch (e) { showNotice(e.message); location.hash = ''; return; }
-    if (gen !== detailGen) return;
-    currentTicket = t.id;
-    const editor = budgetEditor(t);
-    const openEditor = () => { editor.hidden = false; editor.querySelector('input').focus(); };
-    let timelineNode = null;
-    const onFocus = (stage) => {
-      focusByTicket[t.id] = stage;
-      flow.draw(stage);
-      const next = timeline(t, stage, onFocus);
-      timelineNode.replaceWith(next);
-      timelineNode = next;
-    };
-    const flow = flowPanel(t, onFocus);
-    const focus = focusByTicket[t.id] && t.stages.some((s) => s.name === focusByTicket[t.id]) ? focusByTicket[t.id] : null;
-    flow.draw(focus);
-    timelineNode = timeline(t, focus, onFocus);
-    const children = [titleBar(t, openEditor), flow];
-    if (t.flag) { const box = flagBox(t); box.append(triggerBar(t, openEditor)); children.push(box); }
-    const left = el('div', { class: 'stack' });
-    if (t.session) left.appendChild(sessionPane(t, t.session, gen));
-    else left.appendChild(el('div', { class: 'panel muted', text: 'No Session yet.' }));
-    const profiles = stageProfilesPanel(t);
-    if (profiles) left.appendChild(profiles);
-    left.appendChild(el('dl', {}, [
-      el('dt', { text: 'worktree' }), el('dd', { text: worktreeGone(t) ? t.worktree + ' (removed)' : t.worktree }),
-      el('dt', { text: 'pipeline' }), pipelineCell(t),
-      el('dt', { text: 'id' }), el('dd', { text: t.id }),
-    ]));
-    const right = el('div', { class: 'stack' }, [
-      el('div', { class: 'panel' }, [el('h3', { text: 'Budget' }), gauges(t, openEditor), editor]),
-      timelineNode,
-    ]);
-    children.push(el('div', { class: 'dgrid' }, [left, right]));
-    detail.replaceChildren(...children);
-    drawSide(list, t.id);
-    ledger.hidden = true; ledgerTools.hidden = true; pipelinesPanel.hidden = true; configPanel.hidden = true; detail.hidden = false;
-    side.hidden = false; layout.classList.add('open');
-  }
-
-  // Each Runner Stage of an active Ticket that isn't done, with the profile its next Session runs under (LASSO-75). The
-  // button opens the profile drawer on the Ticket's repo; "Use <profile> for this Ticket's <stage>" sets the Stage's
-  // override, which wins over the Pipeline's choice from the next Session until "Clear override". Null when none.
-  function stageProfilesPanel(t) {
-    if (t.state !== 'active') return null;
-    const rows = (t.profiles || []).filter((p) => t.stages.findIndex((s) => s.name === p.stage) >= t.stage.index);
-    if (!rows.length) return null;
-    return el('div', { class: 'panel', 'data-role': 'stage-profiles' }, [
-      el('h3', { text: 'Agent Profiles' }),
-      el('div', { class: 'stage-profiles' }, rows.map((p) => el('div', {}, [el('div', { class: 'stage-name', text: p.stage }), ticketStageProfileButton(t, p)]))),
-      el('div', { class: 'why', text: 'an override applies from the Stage\'s next Session, retries and Rounds included; a running Session keeps its own' }),
-    ]);
-  }
-  function ticketStageProfileButton(t, p) {
-    const v = ticketProfileView(p);
-    const button = el('button', { type: 'button', class: 'pf-pickbtn', 'data-role': 'ticket-stage-profile', 'data-stage': p.stage }, [
-      el('span', { class: 'pf-pickname' }, [v.label + '  ✎', ...(v.overridden ? [el('span', { class: 'pf-overridden', 'data-role': 'overridden', text: 'overridden' })] : [])]),
-      el('span', { class: 'pf-summary', 'data-role': 'stage-profile-headless', text: 'headless  ' + v.headless }),
-      el('span', { class: 'pf-summary', 'data-role': 'stage-profile-human', text: 'human     ' + v.human }),
-    ]);
-    const route = '/api/tickets/' + encodeURIComponent(t.id) + '/stages/' + encodeURIComponent(p.stage) + '/profile';
-    // The drawer closes once either choice is written.
-    const chose = (init) => async () => { await api(route, init); showDetail(t.id); };
-    button.addEventListener('click', () => openProfileDrawer(v.name, {
-      scope: t.repo,
-      context: 'Stage ' + p.stage + ' of Ticket ' + (t.reference || t.shortId),
-      extra: (name) => ({ role: 'ticket-profile-choice', why: 'this Ticket only; applies from the Stage\'s next Session', choices: [
-        { role: 'profile-use', primary: true, label: 'Use ' + name + ' for this Ticket\'s ' + p.stage, act: chose({ method: 'PUT', body: JSON.stringify({ profile: name }) }) },
-        { role: 'profile-clear', label: 'Clear override', hidden: !v.overridden, act: chose({ method: 'DELETE' }) },
-      ] }),
-      onChange: () => showDetail(t.id),
-    }));
-    return button;
-  }
-
-  // The Pipeline a Ticket runs: its Version, linked read-only, and a note when the file has moved on (ADR 0009).
-  const DRIFT_NOTE = { changed: 'Pipeline has changed', deleted: 'Pipeline deleted', broken: 'Pipeline file does not load' };
-  function pipelineCell(t) {
-    if (t.pipelineVersion === null) return el('dd', { text: t.pipeline });
-    const link = el('a', { href: '#pipelines/' + encodeURIComponent(t.pipeline) + '/v' + t.pipelineVersion, text: t.pipeline + ' v' + t.pipelineVersion });
-    const note = DRIFT_NOTE[t.pipelineDrift];
-    return el('dd', { 'data-role': 'pipeline-version' }, note ? [link, el('span', { class: 'drift', text: ' · ' + note })] : [link]);
-  }
-
   function decodeName(part) { try { return decodeURIComponent(part); } catch { return part; } }
   function route() {
     const hash = location.hash.replace(/^#/, '');
-    detailGen++;
     const view = hash === 'config' ? 'config' : hash === 'pipelines' || hash.startsWith('pipelines/') ? 'pipelines' : hash ? 'detail' : 'ledger';
     for (const a of document.querySelectorAll('nav.views a')) a.classList.toggle('on', (a.getAttribute('href').slice(1) || 'ledger') === (view === 'detail' ? 'ledger' : view));
     // A Ticket's page swaps itself in once its data is here, rather than showing the last one meanwhile.
-    if (view === 'detail') { showDetail(hash); return; }
+    if (view === 'detail') {
+      showTicket(detail, side, decodeName(hash), showEnded.checked, () => {
+        ledger.hidden = true; ledgerTools.hidden = true; pipelinesPanel.hidden = true; configPanel.hidden = true; detail.hidden = false;
+        side.hidden = false; layout.classList.add('open');
+      });
+      return;
+    }
+    hideTicket();
     ledger.hidden = view !== 'ledger'; ledgerTools.hidden = view !== 'ledger'; detail.hidden = view !== 'detail'; pipelinesPanel.hidden = view !== 'pipelines'; configPanel.hidden = view !== 'config';
-    side.hidden = true; layout.classList.remove('open'); currentTicket = null;
+    side.hidden = true; layout.classList.remove('open');
     if (view === 'pipelines') {
       const rest = hash.startsWith('pipelines/') ? decodeName(hash.slice('pipelines/'.length)) : null;
       const m = rest && /^(.+)\/v(\d+)$/.exec(rest);
@@ -1055,31 +670,11 @@ import { events } from './app/events.ts';
   window.addEventListener('hashchange', route);
   route();
 
-  // A Ticket's page is redrawn when it changes, unless the user is partway through something on it.
-  function busyOnDetail() {
-    if (detail.querySelector('[data-role="override"], [data-armed], button.busy')) return true;
-    const editor = detail.querySelector('[data-role="budget-editor"]');
-    if (editor && !editor.hidden) return true;
-    const focused = document.activeElement;
-    return !!(focused && detail.contains(focused) && /^(INPUT|TEXTAREA|SELECT)$/.test(focused.tagName));
-  }
-
-  // Changes arrive from /api/events and are acted on together after a short pause, so a burst redraws once.
-  const owed = { list: false, tickets: new Set() };
+  // Ticket changes arrive from /api/events and are acted on together after a short pause, so a burst redraws the
+  // Ledger once. The Ticket page listens for its own.
   let owedTimer = null;
-  function settleOwed() {
-    owedTimer = null;
-    const { list, tickets } = owed;
-    owed.list = false; owed.tickets = new Set();
-    if (!ledger.hidden) { if (list) refreshLedger().catch(failing); return; }
-    if (detail.hidden || !currentTicket) return;
-    if (tickets.has(currentTicket) && !busyOnDetail()) showDetail(currentTicket);
-    else if (list) refreshSide(currentTicket).catch(failing);
-  }
-  function owe(ticket) {
-    owed.list = true;
-    if (ticket) owed.tickets.add(ticket);
-    owedTimer ??= setTimeout(settleOwed, 100);
+  function owe() {
+    owedTimer ??= setTimeout(() => { owedTimer = null; if (!ledger.hidden) refreshLedger().catch(failing); }, 100);
   }
 
   // Server-Sent Events: the server names what changed and the page re-reads it. EventSource reconnects on its
@@ -1093,19 +688,14 @@ import { events } from './app/events.ts';
       everOpen = true;
     });
     source.addEventListener('tick', (ev) => showTick(JSON.parse(ev.data)));
-    source.addEventListener('ticket', (ev) => owe(JSON.parse(ev.data).ticket));
-    source.addEventListener('stdout', (ev) => {
-      const { session } = JSON.parse(ev.data);
-      if (watchedStdout && watchedStdout.session === session && watchedStdout.gen === detailGen) watchedStdout.read();
-    });
+    source.addEventListener('ticket', owe);
     source.addEventListener('error', lostLasso);
   }
   listen();
 
-  // The clock: countdowns and running durations move on screen without asking the server.
+  // The clock: the Tick countdown and the Ledger's last activity move on screen without asking the server.
   setInterval(() => {
     drawTick();
-    for (const node of document.querySelectorAll('[data-role="duration"][data-since]')) node.textContent = duration(Date.now() - new Date(node.dataset.since).getTime());
     for (const node of document.querySelectorAll('[data-role="last"][title]')) node.textContent = relative(node.title);
   }, 1000);
 })();

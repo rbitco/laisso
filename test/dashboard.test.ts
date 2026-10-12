@@ -316,9 +316,6 @@ describe("the Session header", () => {
     // Unset fields read as the defaults they fell back to; no model shows the name alone.
     expect(sessionProfile({ ...ended, profile: { name: "blank", runner: "pi", model: null, effort: null, permission: null, args: [] } })).toEqual({ text: "blank", title: "runner pi · effort default · permission default · args none" });
 
-    const html = dashboardSource();
-    expect(html).toMatch(/import \{[^}]*\bsessionProfile\b[^}]*\} from '\.\/metro\.js'/);
-    expect(html).toContain("'data-role': 'profile'");
   });
 
   it("shows only the Runner for a Session from before profiles, and nothing for one with neither", async () => {
@@ -485,7 +482,7 @@ describe("repo overrides in the profile drawer", () => {
 });
 
 describe("the dashboard page", () => {
-  it("serves the built page and its bundle, and the page carries every Ledger row and detail element the spec lists", async () => {
+  it("serves the built page and its bundle, and the page carries every Ledger row element the spec lists", async () => {
     const { lasso } = await lassoWithTicket();
     const page = await lasso.page("/");
     expect(page.headers.get("content-type")).toContain("text/html");
@@ -505,12 +502,8 @@ describe("the dashboard page", () => {
     expect(html).not.toContain("tick-status");
     // Ledger rows: pill, reference over repo, title over why, mini track with the Stage name, rings, last activity, quick action.
     for (const role of ["pill", "ref", "why", "track", "rings", "last", "quick"]) expect(html).toContain(`'data-role': '${role}'`);
-    // Detail: title bar with PR link, pill and triggers, the Metro flow, the Flag box, the Session pane, gauges, the timeline, and the collapsed Ledger sidebar.
-    for (const role of ["titlebar", "pr-link", "check-pr", "triggers", "flow", "flagbox", "session", "gauges", "timeline", "stage-filter"]) expect(html).toContain(`'data-role': '${role}'`);
-    expect(html).toContain('data-role="side"');
-    expect(html).toContain("[data-stage]");
-    expect(html).toContain("All Stages");
-    expect(html).toContain("Check PR now");
+    // The Ticket page and its sidebar are React (test/ticket-page.test.tsx); the page keeps their sections.
+    for (const role of ["detail", "side"]) expect(html).toContain(`data-role="${role}"`);
   });
 });
 
@@ -533,19 +526,5 @@ describe("a Ticket's profile override on the dashboard", () => {
     const after = await row();
     expect(ledgerStageText(after)).toBe(`${after.stage.label} · ${after.stage.index + 1}/${after.stages.length} · ${name}*`);
     expect(ticketProfileView({ ...first, headless: null, human: null, problem: "gone" })).toMatchObject({ headless: "gone", human: "gone" });
-  });
-
-  it("is on the page: the Ticket's profile buttons, the drawer's override buttons, retry with… and an unavailable Resume", async () => {
-    const { lasso } = await lassoWithTicket();
-    const html = dashboardSource();
-    for (const name of ["ticketProfileView", "ledgerStageText"]) expect(html).toMatch(new RegExp(`import \\{[^}]*\\b${name}\\b[^}]*\\} from '\\./metro\\.js'`));
-    for (const role of ["stage-profiles", "ticket-stage-profile", "overridden", "retry-with", "unavailable"]) expect(html).toContain(`'data-role': '${role}'`);
-    // The drawer's choices for a Ticket, passed to the React drawer.
-    for (const role of ["ticket-profile-choice", "profile-use", "profile-clear", "retry-with-choice", "profile-retry"]) expect(html).toContain(`role: '${role}'`);
-    expect(html).toContain("'Use ' + name + ' for this Ticket\\'s ' + p.stage");
-    expect(html).toContain("label: 'Clear override', hidden: !v.overridden");
-    expect(html).toContain("text: 'retry with…'");
-    expect(html).toContain("context: 'Stage ' + p.stage + ' of Ticket '");
-    expect(html).toContain("' is unavailable: '");
   });
 });

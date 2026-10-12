@@ -1,0 +1,268 @@
+import { useEffect, useRef, useState } from "react";
+import type { FeedbackView, SessionView, TicketDetail } from "../../../api/views.ts";
+import { duration, relative, sessionProfile } from "../../metro.js";
+import { api } from "../api.ts";
+import { useEvents } from "../events.ts";
+import { showNotice } from "../notice.ts";
+import { message, ticketRoute } from "./ticket.ts";
+
+export const sessionLabel = (s: SessionView) => s.stage + " #" + s.ordinal + (s.round ? " · Round " + s.round : "");
+
+/** Done and Abandon remove the worktree; the path stays on the Ticket as history. */
+export const worktreeGone = (t: TicketDetail) => t.state !== "active";
+
+/** A button showing a path or id's name; a press copies it, or shows it where the clipboard is refused. */
+function CopyChip({ label, value }: { label: string; value: string }) {
+  const [shown, setShown] = useState(label);
+  useEffect(() => {
+    if (shown === label) return;
+    const timer = setTimeout(() => setShown(label), 1500);
+    return () => clearTimeout(timer);
+  }, [shown, label]);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setShown("copied");
+    } catch {
+      setShown(value);
+    }
+  };
+  return (
+    <button type="button" title={value} onClick={() => void copy()}>
+      {shown}
+    </button>
+  );
+}
+
+const WorktreeChip = ({ ticket: t }: { ticket: TicketDetail }) =>
+  worktreeGone(t) ? (
+    <span className="muted" title={t.worktree}>
+      worktree removed
+    </span>
+  ) : (
+    <CopyChip label="worktree" value={t.worktree} />
+  );
+
+/** The Feedback a Round addressed: one line per item, with the evidence it was addressed or "open". */
+function FeedbackList({ items }: { items: FeedbackView[] }) {
+  if (!items.length) return null;
+  return (
+    <div className="feedback" data-role="feedback">
+      <h4>Feedback</h4>
+      {items.map((f) => (
+        <div key={f.kind + f.id} className="row">
+          <span className={"pill " + (f.addressed ? "succeeded" : "flagged")}>{f.addressed ? "addressed" : "open"}</span>
+          <span className="kind">{f.kind}</span>
+          {f.url ? (
+            <a href={f.url} target="_blank" rel="noopener">
+              {f.summary}
+            </a>
+          ) : (
+            <span>{f.summary}</span>
+          )}
+          <span className="meta">{f.addressed || ""}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** How long a Session has run: ticking each second while it runs, else as the server measured it. */
+function Duration({ session: s }: { session: SessionView }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!s.running) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [s.running]);
+  return (
+    <span className="meta" data-role="duration">
+      {duration(s.running ? now - new Date(s.startedAt).getTime() : s.durationMs)}
+    </span>
+  );
+}
+
+/**
+ * The latest Session: its header, Stop or Open terminal while it runs, its output, its last word, and the paths to
+ * copy. `refresh` follows a Stop or Open terminal that went through.
+ */
+export function SessionPane({ ticket: t, session: s, refresh }: { ticket: TicketDetail; session: SessionView; refresh: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  const outcome = s.running ? "running" : s.outcome || "unknown";
+  const profile = sessionProfile(s);
+  const post = async (route: string, body?: string) => {
+    setBusy(true);
+    try {
+      await api(route, { method: "POST", body });
+      await refresh();
+    } catch (error) {
+      showNotice(message(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const sessionRoute = ticketRoute(t.id) + "/sessions/" + s.id;
+
+  const head = (
+    <div className="head">
+      <span className={"pill " + outcome}>{outcome + (s.endedReason ? " · " + s.endedReason : "")}</span>
+      <strong>{sessionLabel(s)}</strong>
+      <span className="meta">{s.mode + " · " + s.startedBy}</span>
+      <Duration session={s} />
+      <span className="meta">{s.costUsd === null ? "" : "$" + s.costUsd.toFixed(2)}</span>
+      {profile ? (
+        <span className="meta" data-role="profile" title={profile.title}>
+          {profile.text}
+        </span>
+      ) : (
+        <span />
+      )}
+      <span className="meta">{"started " + relative(s.startedAt)}</span>
+      {s.running && s.mode === "headless" && (
+        <button className="stop" type="button" disabled={busy} onClick={() => void post(sessionRoute + "/stop")}>
+          Stop
+        </button>
+      )}
+      {s.mode === "terminal" && s.running && t.triggers.some((x) => x.action === "terminal") && (
+        <button className="stop" type="button" disabled={busy} onClick={() => void post(ticketRoute(t.id) + "/terminal", "{}")}>
+          Open terminal
+        </button>
+      )}
+    </div>
+  );
+
+  if (s.mode === "terminal") {
+    const opened = s.openedAt ? "terminal opened " + relative(s.openedAt) : "not opened yet";
+    return (
+      <section className="session" data-role="session">
+        {head}
+        <div className="hint">{opened + ". Lasso tracks this Session by its id only: the row ends when you mark the Stage done or skip it."}</div>
+        <div className="paths">
+          <WorktreeChip ticket={t} />
+          <CopyChip label="session id" value={s.id} />
+          {s.runnerSessionId ? <CopyChip label="runner session" value={s.runnerSessionId} /> : <span />}
+          {s.transcriptPath ? <CopyChip label="transcript" value={s.transcriptPath} /> : <span />}
+        </div>
+      </section>
+    );
+  }
+  const final = (
+    <div className={"final" + (s.outcome === "succeeded" ? " ok" : "")} hidden={!s.finalMessage}>
+      {s.finalMessage || ""}
+    </div>
+  );
+  // A built-in action has no output; an Action from config is a command, and its output reads like a Runner's.
+  if (s.mode === "action" && !s.stdoutPath) {
+    return (
+      <section className="session" data-role="session">
+        {head}
+        <div className="hint">Lasso performed this Stage itself; there is no Runner output.</div>
+        {final}
+      </section>
+    );
+  }
+  return (
+    <section className="session" data-role="session">
+      {head}
+      <FeedbackList items={s.feedback} />
+      <Output ticket={t.id} session={s.id} running={s.running} />
+      {final}
+      <div className="paths">
+        <WorktreeChip ticket={t} />
+        {s.stdoutPath ? <CopyChip label="stdout" value={s.stdoutPath} /> : <span />}
+        {s.runnerSessionId ? <CopyChip label="runner session" value={s.runnerSessionId} /> : <span />}
+        {s.transcriptPath ? <CopyChip label="transcript" value={s.transcriptPath} /> : <span />}
+      </div>
+    </section>
+  );
+}
+
+/**
+ * A Session's output, read from where the last read stopped: once on show, again on each "stdout" event for it while
+ * it runs, and once more as it ends to catch the last of it. An event while a read is out asks for one more after it.
+ */
+function Output({ ticket, session, running }: { ticket: string; session: string; running: boolean }) {
+  const out = useRef<HTMLPreElement>(null);
+  const tail = useRef<() => void>(() => {});
+  useEffect(() => {
+    let live = true;
+    let offset = 0;
+    let reading = false;
+    let again = false;
+    const read = async () => {
+      if (reading) {
+        again = true;
+        return;
+      }
+      reading = true;
+      try {
+        const chunk = await api<{ text: string; offset: number }>(ticketRoute(ticket) + "/sessions/" + session + "/stdout?offset=" + offset);
+        if (!live) return;
+        if (chunk.text) showOutput(out.current!, chunk.text);
+        offset = chunk.offset;
+      } catch (error) {
+        if (live) showOutput(out.current!, "\n[stdout unavailable: " + message(error) + "]");
+      } finally {
+        reading = false;
+      }
+      if (again && live) {
+        again = false;
+        void read();
+      }
+    };
+    tail.current = () => void read();
+    void read();
+    return () => {
+      live = false;
+      tail.current = () => {};
+    };
+  }, [ticket, session]);
+  const wasRunning = useRef(running);
+  useEffect(() => {
+    if (wasRunning.current && !running) tail.current();
+    wasRunning.current = running;
+  }, [running]);
+  useEvents(["stdout"], (event) => {
+    if (running && parse(event)?.session === session) tail.current();
+  });
+  return <pre ref={out} />;
+}
+
+const parse = (event: MessageEvent<string>): { session?: string; ticket?: string } | null => {
+  try {
+    return JSON.parse(event.data);
+  } catch {
+    return null;
+  }
+};
+
+// Runner output keeps only its newest OUTPUT_TAIL characters on the page: appending to one big text node re-laid out
+// megabytes every second. The whole log stays at the stdout path.
+const OUTPUT_TAIL = 200000;
+
+/** Appends text to the output, trimming its oldest text past OUTPUT_TAIL and saying so, and follows the end if it was there. */
+export function showOutput(out: HTMLPreElement, text: string): void {
+  const pinned = out.scrollTop + out.clientHeight >= out.scrollHeight - 24;
+  if (text.length > OUTPUT_TAIL) {
+    text = text.slice(-OUTPUT_TAIL);
+    out.replaceChildren();
+    out.dataset.shown = "0";
+    out.dataset.trimmed = "";
+  }
+  out.append(text);
+  let shown = Number(out.dataset.shown || 0) + text.length;
+  while (shown > OUTPUT_TAIL) {
+    const first = out.firstChild as Text;
+    const excess = shown - OUTPUT_TAIL;
+    if (first.length <= excess) {
+      out.removeChild(first);
+      shown -= first.length;
+    } else {
+      first.deleteData(0, excess);
+      shown = OUTPUT_TAIL;
+    }
+    out.dataset.trimmed = "";
+  }
+  out.dataset.shown = String(shown);
+  if (pinned) out.scrollTop = out.scrollHeight;
+}

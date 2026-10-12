@@ -5,6 +5,7 @@ import { stageProfileView } from "../../metro.js";
 import { api } from "../api.ts";
 import { showNotice } from "../notice.ts";
 import { openProfileDrawer } from "../profiles/drawer.tsx";
+import { ProfileButton } from "../profiles/ProfileButton.tsx";
 import { firstLine, RailStage, StagesHead } from "./Rail.tsx";
 import { actionKeys, addStage, FieldError, moveStage, paramsOf, pipelinePatch, removeStage, stageTitle, type ActionDraft, type Card, type Params, type PipelineDraft, type RunnerDraft, draftOf } from "./stages.ts";
 
@@ -366,14 +367,13 @@ function StageProfileButton({ card, draft, pipeline, pipelineProfile, config, on
     });
   };
   return (
-    <button type="button" className="pf-pickbtn" data-role="stage-profile" title="resolved from config.yaml's global profiles; a repo's own default_profile or override may differ" onClick={open}>
-      <span className="pf-pickname">{v.label + "  ✎" + (draft.profile !== saved ? "  (unsaved)" : "")}</span>
-      <span className="pf-summary" data-role="stage-profile-headless">
-        {"headless  " + v.headless}
-      </span>
-      <span className="pf-summary" data-role="stage-profile-human">
-        {"human     " + v.human}
-      </span>
-    </button>
+    <ProfileButton
+      label={v.label + "  ✎" + (draft.profile !== saved ? "  (unsaved)" : "")}
+      headless={v.headless}
+      human={v.human}
+      role="stage-profile"
+      title="resolved from config.yaml's global profiles; a repo's own default_profile or override may differ"
+      onClick={open}
+    />
   );
 }

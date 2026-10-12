@@ -11,14 +11,14 @@ export function events(): EventSource {
   return source;
 }
 
-/** Calls `react` on each of the named events while the component is mounted. */
-export function useEvents(kinds: string[], react: () => void): void {
+/** Calls `react` with each of the named events while the component is mounted; `event.data` is the event's JSON. */
+export function useEvents(kinds: string[], react: (event: MessageEvent<string>) => void): void {
   const latest = useRef(react);
   latest.current = react;
   const key = kinds.join(" ");
   useEffect(() => {
     const target = events();
-    const listener = () => latest.current();
+    const listener = (event: Event) => latest.current(event as MessageEvent<string>);
     const names = key.split(" ");
     for (const kind of names) target.addEventListener(kind, listener);
     return () => {
