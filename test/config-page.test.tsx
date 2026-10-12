@@ -32,6 +32,7 @@ function fakeLasso(config: Config, actions: ActionListing[] = []) {
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
   vi.stubGlobal("fetch", async (route: string, init: RequestInit = {}) => {
     if (route === "/api/actions") return json(actions);
+    if (route === "/api/pipelines") return json([]);
     if (route !== "/api/config") return json({ error: "not found" }, 404);
     if (init.method === "PATCH") {
       patches.push(JSON.parse(String(init.body)));

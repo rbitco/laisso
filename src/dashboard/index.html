@@ -420,8 +420,9 @@
   </div>
 </main>
 <script type="module">
-import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, relative, tickIndicator, sessionProfile, MODEL_SUGGESTIONS, profileApplies, profileMode, profileLine, profileSummary, profileUsers, usedByLine, profileWarnings, stageProfileView, ticketProfileView, ledgerStageText, profileIndex, scopeNote, profileScopes, overridableRepos, scopedProfile, profileRoute } from './metro.js';
+import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, relative, tickIndicator, sessionProfile, stageProfileView, ticketProfileView, ledgerStageText } from './metro.js';
 import { showConfig } from './app/config/mount.tsx';
+import { openProfileDrawer } from './app/profiles/drawer.tsx';
 import { events } from './app/events.ts';
 (function () {
   const $ = (sel) => document.querySelector(sel);
@@ -817,11 +818,9 @@ import { events } from './app/events.ts';
       retryWith.addEventListener('click', () => openProfileDrawer(stageProfile.profile, {
         scope: t.repo,
         context: 'Retry Stage ' + t.stage.name + ' of Ticket ' + (t.reference || t.shortId) + ' under another profile; it stays this Stage\'s override until cleared',
-        extra: (name) => {
-          const go = el('button', { type: 'button', class: 'primary', 'data-role': 'profile-retry', text: 'Retry ' + t.stage.name + ' with ' + name });
-          go.addEventListener('click', () => drawerAct(profileDrawer, go, () => pullTrigger(t, 'retry', { profile: name }), () => { closeProfileDrawer(); showDetail(t.id); }));
-          return [el('div', { class: 'bar', 'data-role': 'retry-with-choice' }, [go])];
-        },
+        extra: (name) => ({ role: 'retry-with-choice', choices: [
+          { role: 'profile-retry', primary: true, label: 'Retry ' + t.stage.name + ' with ' + name, act: async () => { await pullTrigger(t, 'retry', { profile: name }); showDetail(t.id); } },
+        ] }),
       }));
       buttons.push(retryWith);
     }
@@ -941,18 +940,15 @@ import { events } from './app/events.ts';
       el('span', { class: 'pf-summary', 'data-role': 'stage-profile-human', text: 'human     ' + v.human }),
     ]);
     const route = '/api/tickets/' + encodeURIComponent(t.id) + '/stages/' + encodeURIComponent(p.stage) + '/profile';
-    const chose = () => { closeProfileDrawer(); showDetail(t.id); };
+    // The drawer closes once either choice is written.
+    const chose = (init) => async () => { await api(route, init); showDetail(t.id); };
     button.addEventListener('click', () => openProfileDrawer(v.name, {
       scope: t.repo,
       context: 'Stage ' + p.stage + ' of Ticket ' + (t.reference || t.shortId),
-      extra: (name) => {
-        const use = el('button', { type: 'button', class: 'primary', 'data-role': 'profile-use', text: 'Use ' + name + ' for this Ticket\'s ' + p.stage });
-        use.addEventListener('click', () => drawerAct(profileDrawer, use, () => api(route, { method: 'PUT', body: JSON.stringify({ profile: name }) }), chose));
-        const clear = el('button', { type: 'button', 'data-role': 'profile-clear', text: 'Clear override' });
-        clear.hidden = !v.overridden;
-        clear.addEventListener('click', () => drawerAct(profileDrawer, clear, () => api(route, { method: 'DELETE' }), chose));
-        return [el('div', { class: 'bar', 'data-role': 'ticket-profile-choice' }, [use, clear, el('span', { class: 'why', text: 'this Ticket only; applies from the Stage\'s next Session' })])];
-      },
+      extra: (name) => ({ role: 'ticket-profile-choice', why: 'this Ticket only; applies from the Stage\'s next Session', choices: [
+        { role: 'profile-use', primary: true, label: 'Use ' + name + ' for this Ticket\'s ' + p.stage, act: chose({ method: 'PUT', body: JSON.stringify({ profile: name }) }) },
+        { role: 'profile-clear', label: 'Clear override', hidden: !v.overridden, act: chose({ method: 'DELETE' }) },
+      ] }),
       onChange: () => showDetail(t.id),
     }));
     return button;
@@ -1402,274 +1398,27 @@ import { events } from './app/events.ts';
         el('span', { class: 'pf-summary', 'data-role': 'stage-profile-human', text: 'human     ' + v.human }),
       );
     };
+    // The drawer asks before dropping unsaved profile edits, and closes once a choice is made.
     const choose = (name) => {
-      if (profileDrawer && profileDrawer.dirty && !confirm('Drop the unsaved changes to ' + profileDrawer.name + '?')) return;
       chosen = name;
       draw();
       profiles.touched();
-      closeProfileDrawer();
     };
     button.addEventListener('click', (ev) => {
       ev.preventDefault();
       const stage = nameInput.value.trim() || 'the new Stage';
       openProfileDrawer(stageProfileView(chosen, profiles.chosen(), profiles.config).name, {
         context: 'Stage ' + stage + ' of Pipeline ' + profiles.pipeline,
-        extra: (name) => {
-          const use = el('button', { type: 'button', class: 'primary', 'data-role': 'profile-use', text: 'Use ' + name + ' for ' + stage });
-          const inherit = el('button', { type: 'button', 'data-role': 'profile-inherit', text: 'Inherit instead' });
-          use.addEventListener('click', () => choose(name));
-          inherit.addEventListener('click', () => choose(null));
-          return [el('div', { class: 'bar', 'data-role': 'stage-profile-choice' }, [use, inherit, el('span', { class: 'why', text: 'sets this Stage in the editor; the Pipeline\'s Save writes it' })])];
-        },
+        extra: (name) => ({ role: 'stage-profile-choice', why: 'sets this Stage in the editor; the Pipeline\'s Save writes it', choices: [
+          { role: 'profile-use', primary: true, label: 'Use ' + name + ' for ' + stage, act: () => choose(name) },
+          { role: 'profile-inherit', label: 'Inherit instead', act: () => choose(null) },
+        ] }),
         onChange: (config) => profiles.changed(config),
       });
     });
     profiles.redraws.push(draw);
     draw();
     return { node: button, chosen: () => chosen };
-  }
-
-  // Config's Settings and its read-only group are React (ADR 0012); its Agent Profiles group is still drawn here.
-  async function drawProfiles(host, cfg) {
-    let pipelines;
-    try { pipelines = await api('/api/pipelines'); } catch (e) { showNotice(e.message); return; }
-    host.replaceChildren(profilesCard(cfg, pipelines));
-  }
-
-  // The Agent Profiles, one tile each: name, default marker, repo overrides ("overridden in app") or the repos a
-  // repo-only profile lives in ("only in app"), what each mode runs, and the Stages that run it. A repo-only tile
-  // shows its first repo's definition. A click opens the profile drawer; a save there redraws this sheet in place,
-  // so the settings form above keeps its edits.
-  function profilesCard(cfg, pipelines) {
-    const card = el('div', { class: 'sheet', style: 'padding:16px', 'data-role': 'config-profiles' });
-    const draw = (config) => {
-      const rows = profileIndex(config).map((entry) => {
-        const name = entry.name;
-        const note = scopeNote(entry);
-        const used = usedByLine(profileUsers(name, pipelines, config.default_profile));
-        const row = el('a', { 'data-profile': name, tabindex: '0', role: 'button', 'aria-label': 'edit Agent Profile ' + name }, [
-          el('b', {}, [name, ...(entry.global && name === config.default_profile ? [el('span', { class: 'chip is-default', text: 'default' })] : []), ...(note ? [el('span', { class: 'chip', 'data-role': 'profile-scope', text: note })] : [])]),
-          el('span', { class: 'pf-summary', text: profileSummary(scopedProfile(config, name, entry.global ? null : entry.repos[0])) }),
-          el('span', { class: 'why', title: used, text: used }),
-        ]);
-        const open = () => openProfileDrawer(name, { onChange: draw });
-        row.addEventListener('click', open);
-        row.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); open(); } });
-        return row;
-      });
-      card.replaceChildren(rows.length ? el('div', { class: 'pf-list', 'data-role': 'profile-list' }, rows) : el('div', { class: 'why', text: 'None yet. Open a Stage\'s profile to make one.' }));
-    };
-    draw(cfg);
-    return card;
-  }
-
-  // The profile drawer: every profile on the left with + New (repo-only ones marked), one profile's editor on the
-  // right under scope tabs: "global", then each repo with its own definition, and "Override for repo…", which copies
-  // the global profile into a repo's profiles:. Each tab edits that scope's definition; removing a repo's override
-  // returns that repo to the global one.
-  // openProfileDrawer(name, opts) opens it on that profile (default_profile when name is null). opts, all optional:
-  //   scope: the repo whose tab to start on; without it (as from a Stage) the global tab, or for a profile only
-  //     repos define, the first of them;
-  //   context: a line under the title saying where it was opened from (a Stage, a Ticket);
-  //   extra(name, config, scope): nodes placed under the editor, such as "Use <profile> for <stage>";
-  //   onChange(config): called with the new config after each save, default change or delete.
-  // closeProfileDrawer() closes it; so do Close and Escape.
-  let profileDrawer = null;
-  function closeProfileDrawer() {
-    if (profileDrawer) profileDrawer.node.remove();
-    profileDrawer = null;
-  }
-  document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && profileDrawer) closeProfileDrawer(); });
-  async function openProfileDrawer(name, opts = {}) {
-    closeProfileDrawer();
-    const d = { node: el('aside', { class: 'pf-drawer', 'data-role': 'profile-drawer', role: 'dialog', 'aria-label': 'Agent Profiles' }), opts, config: null, pipelines: [], name: null, scope: null, draft: null, dirty: false };
-    profileDrawer = d;
-    document.body.appendChild(d.node);
-    try { [d.config, d.pipelines] = await Promise.all([api('/api/config').then((c) => c.config), api('/api/pipelines')]); }
-    catch (e) { d.node.replaceChildren(el('section', {}, [el('p', { class: 'notice', text: e.message }), el('button', { type: 'button', class: 'sm', text: 'Close' })])); d.node.querySelector('button').addEventListener('click', closeProfileDrawer); return; }
-    if (profileDrawer !== d) return;
-    pickProfile(d, name, opts.scope ?? null);
-  }
-  // Opens one profile on one scope's tab. A name config lacks falls back to default_profile, then the first profile;
-  // a scope the profile lacks falls back to its global tab, then its first repo's.
-  function pickProfile(d, name, scope = null) {
-    const index = profileIndex(d.config);
-    const entry = index.find((e) => e.name === name) || index.find((e) => e.global && e.name === d.config.default_profile) || index[0] || null;
-    const scopes = entry ? profileScopes(entry) : [];
-    d.name = entry ? entry.name : null;
-    d.scope = scopes.some((s) => s.repo === scope) ? scope : scopes.length ? scopes[0].repo : null;
-    d.draft = entry ? structuredClone(scopedProfile(d.config, d.name, d.scope)) : null;
-    d.dirty = false;
-    drawProfileDrawer(d);
-  }
-  // A profile as the API takes it: blanks left out, and fields that do nothing on its Runner dropped.
-  function cleanProfile(p) {
-    const out = { runner: p.runner };
-    const block = (b, into) => {
-      if (b.model && b.model.trim()) into.model = b.model.trim();
-      if (b.effort) into.effort = b.effort;
-      if (b.permission && profileApplies(p.runner, 'permission')) into.permission = b.permission;
-      if (b.args && b.args.length) into.args = b.args;
-      return into;
-    };
-    block(p, out);
-    if (p.skills_dir && p.skills_dir.trim() && profileApplies(p.runner, 'skills_dir')) out.skills_dir = p.skills_dir.trim();
-    for (const mode of ['headless', 'human']) { const b = block(p[mode] || {}, {}); if (Object.keys(b).length) out[mode] = b; }
-    return out;
-  }
-  // Runs one drawer action, showing a refusal in the drawer itself; `then` gets what the API answered.
-  async function drawerAct(d, button, act, then) {
-    const error = d.node.querySelector('[data-role="profile-error"]');
-    button.disabled = true; button.classList.add('busy'); error.hidden = true;
-    try { const res = await act(); if (profileDrawer === d) then(res); }
-    catch (e) { error.textContent = e.message; error.hidden = false; button.disabled = false; button.classList.remove('busy'); if (e.body && e.body.confirm) { button.dataset.confirm = '1'; button.textContent = 'Delete anyway'; } }
-  }
-  function savedConfig(d, config, name, scope = null) {
-    d.config = config;
-    if (d.opts.onChange) d.opts.onChange(config);
-    pickProfile(d, name, scope);
-  }
-  function drawProfileDrawer(d) {
-    const config = d.config;
-    const index = profileIndex(config);
-    const leave = () => !d.dirty || confirm('Drop the unsaved changes to ' + d.name + '?');
-    const nav = el('nav', { 'data-role': 'profile-nav' }, [el('div', { class: 'eyebrow', text: 'profiles' }), ...index.map((e) => {
-      const n = e.name;
-      const a = el('a', { class: n === d.name ? 'on' : '', 'data-profile': n }, [
-        el('span', {}, [n, ...(e.global && n === config.default_profile ? [el('span', { class: 'default', text: 'default' })] : []), ...(e.global ? [] : [el('span', { class: 'pf-scope', text: scopeNote(e) })])]),
-        el('span', { class: 'why', text: profileLine(scopedProfile(config, n, e.global ? null : e.repos[0]), 'headless').split(' · ').slice(0, 2).join(' · ') }),
-      ]);
-      a.addEventListener('click', () => { if (n !== d.name && leave()) pickProfile(d, n); });
-      return a;
-    })]);
-    // + New copies the open tab's draft into the same scope: a global profile, or one only that repo has.
-    const where = d.scope === null ? '' : ' in repo ' + d.scope;
-    const add = el('button', { type: 'button', class: 'sm', 'data-role': 'profile-new', text: '+ New', title: (d.name ? 'a new profile, copied from ' + d.name : 'a new profile') + where });
-    add.addEventListener('click', () => {
-      const name = (prompt((d.name ? 'Name for a copy of ' + d.name + ' (e.g. ' + d.name + '-high)' : 'Name for the new profile') + where) || '').trim();
-      if (!name) return;
-      const profile = d.draft ? cleanProfile(d.draft) : { runner: 'claude' };
-      const scope = d.name ? d.scope : null;
-      drawerAct(d, add, () => api(profileRoute(name, scope), { method: 'PUT', body: JSON.stringify({ profile, create: true }) }), (res) => savedConfig(d, res.config, name, scope));
-    });
-    nav.appendChild(add);
-    const close = el('button', { type: 'button', class: 'sm', 'data-role': 'profile-close', text: 'Close' });
-    close.addEventListener('click', () => { if (leave()) closeProfileDrawer(); });
-    const error = el('p', { class: 'notice', 'data-role': 'profile-error', hidden: '' });
-    if (!d.name) {
-      d.node.replaceChildren(nav, el('section', { 'data-role': 'profile-editor' }, [el('div', { class: 'bar' }, [el('h2', { text: 'Agent Profiles' }), el('span', { style: 'flex:1' }), close]), error, el('p', { class: 'empty', text: 'No profiles yet: + New makes one.' })]));
-      return;
-    }
-    const name = d.name;
-    const scope = d.scope;
-    const entry = index.find((e) => e.name === name);
-    const repoCfg = scope === null ? null : config.repos[scope];
-    // The default this tab sets: config's default_profile on the global tab, the repo's own on a repo's tab.
-    const isDefault = scope === null ? name === config.default_profile : repoCfg.default_profile === name;
-    const makeDefault = el('button', { type: 'button', class: 'sm', 'data-role': 'profile-default', text: scope === null ? 'Make default' : 'Make ' + scope + '\'s default' });
-    makeDefault.hidden = isDefault;
-    makeDefault.addEventListener('click', () => drawerAct(d, makeDefault, () => scope === null
-      ? api('/api/config', { method: 'PATCH', body: JSON.stringify({ default_profile: name }) })
-      : api('/api/repos/' + encodeURIComponent(scope), { method: 'PATCH', body: JSON.stringify({ default_profile: name }) }), (res) => savedConfig(d, res.config, name, scope)));
-    const head = el('div', { class: 'bar' }, [el('h2', { text: name }), ...(isDefault ? [el('span', { class: 'default', text: scope === null ? 'default profile' : scope + '\'s default profile' })] : []), makeDefault, el('span', { style: 'flex:1' }), close]);
-    // Scope tabs: global, then each repo with its own definition; "Override for repo…" copies the saved global one into a repo.
-    const tabs = el('div', { class: 'pf-tabs', role: 'tablist', 'data-role': 'profile-scopes' }, profileScopes(entry).map((t) => {
-      const tab = el('button', { type: 'button', role: 'tab', class: 'sm' + (t.repo === scope ? ' on' : ''), 'aria-selected': String(t.repo === scope), 'data-role': 'profile-scope-tab', 'data-scope': t.repo === null ? '' : t.repo, text: t.label });
-      tab.addEventListener('click', () => { if (t.repo !== scope && leave()) pickProfile(d, name, t.repo); });
-      return tab;
-    }));
-    const repos = overridableRepos(entry, config);
-    if (repos.length) {
-      const override = el('select', { class: 'sm', 'data-role': 'profile-override', 'aria-label': 'Override for repo', title: 'copy the global ' + name + ' into a repo\'s profiles:, to edit for that repo alone' }, [el('option', { value: '', text: 'Override for repo…' }), ...repos.map((r) => el('option', { value: r, text: r }))]);
-      override.addEventListener('change', () => {
-        const repo = override.value;
-        if (!repo) return;
-        if (!leave()) { override.value = ''; return; }
-        drawerAct(d, override, () => api(profileRoute(name, repo), { method: 'PUT', body: JSON.stringify({ profile: config.profiles[name], create: true }) }), (res) => savedConfig(d, res.config, name, repo));
-      });
-      tabs.appendChild(override);
-    }
-    const scopeLine = scope === null
-      ? (entry.repos.length ? scopeNote(entry) + ': ' + (entry.repos.length > 1 ? 'those repos run their own' : 'that repo runs its own') : 'every repo runs this definition')
-      : entry.global ? 'repo ' + scope + '\'s own ' + name + ': it replaces the global one whole for ' + scope + '\'s Tickets' : 'only repo ' + scope + ' has ' + name;
-    const users = profileUsers(name, d.pipelines, scope === null ? config.default_profile : repoCfg.default_profile || config.default_profile);
-    const usedBy = el('div', { class: 'why', 'data-role': 'used-by', text: (scope === null ? '' : 'in ' + scope + ', ') + usedByLine(users) });
-    const warnings = el('ul', { class: 'pf-warn', 'data-role': 'profile-warnings' });
-    const fieldsBox = el('div', { 'data-role': 'profile-fields', style: 'display:grid;gap:12px' });
-    const touched = () => {
-      d.dirty = true;
-      const list = profileWarnings(cleanProfile(d.draft));
-      warnings.replaceChildren(...list.map((w) => el('li', { text: '⚠ ' + w })));
-      warnings.hidden = !list.length;
-    };
-    const drawFields = () => { fieldsBox.replaceChildren(...profileFields(d.draft, () => { touched(); }, () => { touched(); drawFields(); })); };
-    drawFields();
-    touched(); d.dirty = false;
-    const saveButton = el('button', { type: 'button', class: 'primary', 'data-role': 'profile-save', text: 'Save' });
-    saveButton.addEventListener('click', () => drawerAct(d, saveButton, () => api(profileRoute(name, scope), { method: 'PUT', body: JSON.stringify({ profile: cleanProfile(d.draft) }) }), (res) => savedConfig(d, res.config, name, scope)));
-    // On a repo's tab over a global profile, removing the override returns the repo to the global one.
-    const override = scope !== null && entry.global;
-    const remove = el('button', { type: 'button', 'data-role': 'profile-delete', text: override ? 'Remove override' : 'Delete', title: override ? scope + ' goes back to the global ' + name : '' });
-    if (isDefault && !override) { remove.disabled = true; remove.title = scope === null ? 'the default profile; make another the default first' : scope + '\'s default profile; make another its default first'; }
-    remove.addEventListener('click', () => {
-      if (!remove.dataset.armed) { remove.dataset.armed = '1'; remove.textContent = override ? 'Remove for sure' : 'Delete for sure'; return; }
-      // Refused while in use, the message lists what names it and the next press deletes anyway.
-      const confirmed = remove.dataset.confirm === '1';
-      drawerAct(d, remove, () => api(profileRoute(name, scope) + (confirmed ? '?confirm=1' : ''), { method: 'DELETE' }), (res) => savedConfig(d, res.config, name, null));
-    });
-    const extra = d.opts.extra ? d.opts.extra(name, config, scope) || [] : [];
-    d.node.replaceChildren(nav, el('section', { 'data-role': 'profile-editor' }, [
-      head,
-      ...(d.opts.context ? [el('div', { class: 'why', 'data-role': 'profile-context', text: d.opts.context })] : []),
-      tabs,
-      el('div', { class: 'why', 'data-role': 'profile-scope-line', text: scopeLine }),
-      usedBy, error, fieldsBox, warnings,
-      ...extra,
-      el('div', { class: 'bar' }, [saveButton, remove, el('span', { class: 'why', text: 'blank keeps the Runner\'s default; saved to config.yaml, used from the next Session' })]),
-    ]));
-  }
-  // The editor's fields, writing into the draft as they change; a runner change redraws them (n/a fields come and go).
-  function profileFields(p, onInput, onRunner) {
-    const listId = 'pf-models-' + p.runner;
-    if (!document.getElementById(listId)) document.body.appendChild(el('datalist', { id: listId }, (MODEL_SUGGESTIONS[p.runner] || []).map((m) => el('option', { value: m }))));
-    const choice = (fieldName, choices, value, blank, write) => {
-      const s = el('select', { name: fieldName }, [el('option', { value: '', text: blank }), ...choices.map((c) => el('option', { value: c, text: c }))]);
-      s.value = value || '';
-      s.addEventListener('change', () => { write(s.value || undefined); onInput(); });
-      return s;
-    };
-    const text = (fieldName, value, placeholder, write, list) => {
-      const i = el('input', Object.assign({ name: fieldName, value: value || '', placeholder }, list ? { list } : {}));
-      i.addEventListener('input', () => { write(i.value.trim() || undefined); onInput(); });
-      return i;
-    };
-    const na = (label, role, why) => el('label', { class: 'pf-na', 'data-role': role }, [label, el('span', { text: why })]);
-    // One set of model, effort, permission and args: the shared ones, or a mode block whose blanks inherit them.
-    const blockFields = (b, mode) => {
-      const shared = profileMode({ ...p, headless: undefined, human: undefined }, mode);
-      const inherit = (v) => 'inherits ' + v;
-      return [
-        field('model', text('model', b.model, mode ? inherit(p.model || 'default') : 'Runner default', (v) => { b.model = v; }, listId)),
-        field('effort', choice('effort', ['low', 'medium', 'high', 'xhigh', 'max'], b.effort, mode ? inherit(p.effort || 'default') : 'Runner default', (v) => { b.effort = v; })),
-        profileApplies(p.runner, 'permission')
-          ? field('permission', choice('permission', ['auto', 'edits', 'full'], b.permission, mode ? inherit(shared.permission + (shared.baseline ? ' (default)' : '')) : 'default per mode', (v) => { b.permission = v; }))
-          : na('permission', 'permission-na', 'n/a on Pi'),
-        field('args', text('args', (b.args || []).join(' '), mode ? 'added after the shared args' : '--flag value', (v) => { b.args = v ? v.split(/\s+/) : undefined; })),
-      ];
-    };
-    const runner = choice('runner', ['claude', 'codex', 'pi'], p.runner, 'pick one', (v) => { p.runner = v || 'claude'; });
-    runner.firstChild.remove();
-    runner.addEventListener('change', onRunner);
-    const skills = profileApplies(p.runner, 'skills_dir') ? field('skills_dir', text('skills_dir', p.skills_dir, '~/.agents/skills', (v) => { p.skills_dir = v; })) : na('skills_dir', 'skills-dir-na', 'n/a: Codex only');
-    p.headless = p.headless || {};
-    p.human = p.human || {};
-    return [
-      el('div', { class: 'fields' }, [field('runner', runner), ...blockFields(p, null), skills]),
-      el('div', { class: 'pf-modes' }, [['headless', 'mode-headless', 'headless only'], ['human', 'mode-human', 'human only']].map(([mode, role, title]) => el('div', { 'data-role': role }, [
-        el('div', { class: 'eyebrow', text: title }),
-        el('div', { class: 'fields' }, blockFields(p[mode], mode)),
-      ]))),
-    ];
   }
 
   function decodeName(part) { try { return decodeURIComponent(part); } catch { return part; } }
@@ -1687,7 +1436,7 @@ import { events } from './app/events.ts';
       const m = rest && /^(.+)\/v(\d+)$/.exec(rest);
       showPipelines(m ? m[1] : rest, m ? Number(m[2]) : null);
     }
-    else if (view === 'config') showConfig(configPanel, drawProfiles);
+    else if (view === 'config') showConfig(configPanel);
     else refreshLedger().catch(failing);
   }
 

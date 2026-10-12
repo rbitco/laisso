@@ -385,25 +385,7 @@ stages:
     expect(["claude", "codex", "pi"].map((r) => profileApplies(r, "skills_dir"))).toEqual([false, true, false]);
     expect(MODEL_SUGGESTIONS.claude).toEqual(["fable", "opus", "sonnet", "haiku"]);
   });
-
-  it("are on the page: the Config list and every part of the drawer", async () => {
-    const { lasso } = await lassoWithTicket();
-    const html = dashboardSource();
-    for (const name of ["profileSummary", "profileUsers", "usedByLine", "profileWarnings", "profileApplies", "MODEL_SUGGESTIONS"]) expect(html).toMatch(new RegExp(`import \\{[^}]*\\b${name}\\b[^}]*\\} from '\\./metro\\.js'`));
-    // The Config list: one line per profile with the default marker, summary and used-by.
-    for (const role of ["config-profiles", "profile-list"]) expect(html).toContain(`'data-role': '${role}'`);
-    expect(html).toContain("'data-profile': name");
-    expect(html).toContain("class: 'default', text: 'default'");
-    // The drawer: the list with + New, the editor with its mode sections, n/a fields, used-by, warnings, default, save, delete and errors.
-    for (const role of ["profile-drawer", "profile-nav", "profile-new", "profile-editor", "profile-fields", "used-by", "profile-warnings", "profile-default", "profile-save", "profile-delete", "profile-error", "profile-close"]) expect(html).toContain(`'data-role': '${role}'`);
-    expect(html).toContain("['headless', 'mode-headless', 'headless only'], ['human', 'mode-human', 'human only']");
-    expect(html).toContain("na('permission', 'permission-na', 'n/a on Pi')");
-    expect(html).toContain("na('skills_dir', 'skills-dir-na', 'n/a: Codex only')");
-    expect(html).toContain("function openProfileDrawer(name, opts = {})");
-    // Saves go through the profile routes (profileRoute, per scope) and the config patch.
-    expect(html).toContain("api(profileRoute(name, scope)");
-    expect(html).toContain("JSON.stringify({ default_profile: name })");
-  });
+  // The Config tiles and the drawer itself are React components, tested in profile-drawer.test.tsx.
 });
 
 describe("the profile picker in the Pipeline editor", () => {
@@ -449,10 +431,12 @@ stages:
     const html = dashboardSource();
     expect(html).toMatch(/import \{[^}]*\bstageProfileView\b[^}]*\} from '\.\/metro\.js'/);
     // The Stage card's button, with its two summary lines, opens the drawer with the Stage as context and two choices.
-    for (const role of ["stage-profile", "stage-profile-headless", "stage-profile-human", "stage-profile-choice", "profile-use", "profile-inherit", "pipeline-profile"]) expect(html).toContain(`'data-role': '${role}'`);
+    for (const role of ["stage-profile", "stage-profile-headless", "stage-profile-human", "pipeline-profile"]) expect(html).toContain(`'data-role': '${role}'`);
+    expect(html).toContain("import { openProfileDrawer } from './app/profiles/drawer.tsx';");
     expect(html).toContain("context: 'Stage ' + stage + ' of Pipeline ' + profiles.pipeline");
-    expect(html).toContain("text: 'Use ' + name + ' for ' + stage");
-    expect(html).toContain("text: 'Inherit instead'");
+    for (const role of ["stage-profile-choice", "profile-use", "profile-inherit"]) expect(html).toContain(`role: '${role}'`);
+    expect(html).toContain("label: 'Use ' + name + ' for ' + stage");
+    expect(html).toContain("label: 'Inherit instead'");
     // The Pipeline dropdown's blank names the default it falls back to; both save through the Pipeline patch.
     expect(html).toContain("'config default (' + (profiles.config.default_profile || 'none') + ')'");
     expect(html).toContain("if (profile.chosen() !== s.profile) patch.profile = profile.chosen();");
@@ -506,21 +490,8 @@ describe("repo overrides in the profile drawer", () => {
     expect(scopedProfile(saved.config, "claude-opus", null)).toEqual({ runner: "claude", model: "opus" });
   });
 
-  it("are on the page: scope tabs, Override for repo…, repo-only markers, and the repo routes", async () => {
-    const { lasso } = await lassoWithTicket();
+  it("opens from a Stage on the global tab: the Stage passes no scope", () => {
     const html = dashboardSource();
-    for (const name of ["profileIndex", "scopeNote", "profileScopes", "overridableRepos", "scopedProfile", "profileRoute"]) expect(html).toMatch(new RegExp(`import \\{[^}]*\\b${name}\\b[^}]*\\} from '\\./metro\\.js'`));
-    for (const role of ["profile-scopes", "profile-scope-tab", "profile-override", "profile-scope-line", "profile-scope"]) expect(html).toContain(`'data-role': '${role}'`);
-    expect(html).toContain("text: 'Override for repo…'");
-    expect(html).toContain("role: 'tab'");
-    expect(html).toContain("text: override ? 'Remove override' : 'Delete'");
-    // The override copies the saved global profile; saves and deletes go to the open tab's scope; a repo's default through its own route.
-    expect(html).toContain("api(profileRoute(name, repo), { method: 'PUT', body: JSON.stringify({ profile: config.profiles[name], create: true }) })");
-    expect(html).toContain("api(profileRoute(name, scope), { method: 'PUT', body: JSON.stringify({ profile: cleanProfile(d.draft) }) })");
-    expect(html).toContain("api('/api/repos/' + encodeURIComponent(scope), { method: 'PATCH', body: JSON.stringify({ default_profile: name }) })");
-    // Opened with no scope, as from a Stage, the drawer starts on the global tab.
-    expect(html).toContain("pickProfile(d, name, opts.scope ?? null);");
-    expect(html).toContain("d.scope = scopes.some((s) => s.repo === scope) ? scope : scopes.length ? scopes[0].repo : null;");
     const fromStage = html.slice(html.indexOf("openProfileDrawer(stageProfileView("), html.indexOf("onChange: (config) => profiles.changed(config)"));
     expect(fromStage).toContain("context: 'Stage '");
     expect(fromStage).not.toContain("scope:");
@@ -582,9 +553,11 @@ describe("a Ticket's profile override on the dashboard", () => {
     const { lasso } = await lassoWithTicket();
     const html = dashboardSource();
     for (const name of ["ticketProfileView", "ledgerStageText"]) expect(html).toMatch(new RegExp(`import \\{[^}]*\\b${name}\\b[^}]*\\} from '\\./metro\\.js'`));
-    for (const role of ["stage-profiles", "ticket-stage-profile", "overridden", "profile-use", "profile-clear", "retry-with", "profile-retry", "unavailable"]) expect(html).toContain(`'data-role': '${role}'`);
+    for (const role of ["stage-profiles", "ticket-stage-profile", "overridden", "retry-with", "unavailable"]) expect(html).toContain(`'data-role': '${role}'`);
+    // The drawer's choices for a Ticket, passed to the React drawer.
+    for (const role of ["ticket-profile-choice", "profile-use", "profile-clear", "retry-with-choice", "profile-retry"]) expect(html).toContain(`role: '${role}'`);
     expect(html).toContain("'Use ' + name + ' for this Ticket\\'s ' + p.stage");
-    expect(html).toContain("text: 'Clear override'");
+    expect(html).toContain("label: 'Clear override', hidden: !v.overridden");
     expect(html).toContain("text: 'retry with…'");
     expect(html).toContain("context: 'Stage ' + p.stage + ' of Ticket '");
     expect(html).toContain("' is unavailable: '");
