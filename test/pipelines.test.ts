@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { startLassoWithRepos, startLasso, waitFor, claudeFixture, runCli, type Lasso } from "./harness.ts";
+import { startLassoWithRepos, startLasso, waitFor, claudeFixture, runCli, type Lasso, dashboardSource } from "./harness.ts";
 import type { TicketDetail, IntakeResult } from "../src/api/views.ts";
 import type { PipelineFile, PipelineListing, ConfigFile, PipelineVersionView, ActionListing } from "../src/api/views.ts";
 import type { TickChange } from "../src/server/tick.ts";
@@ -530,14 +530,13 @@ describe("config Actions in the Pipeline editor", () => {
 describe("the dashboard", () => {
   it("carries the Pipeline and config editors", async () => {
     const lasso = await lassoWith();
-    const html = await (await lasso.page("/")).text();
+    const html = dashboardSource();
     expect(html).toContain('data-role="pipelines"');
     expect(html).toContain('data-role="config"');
     expect(html).toContain('href="#pipelines"');
     expect(html).toContain('href="#config"');
-    // Action Stages pick from config's Actions; the config panel lists them read-only.
+    // Action Stages pick from config's Actions.
     expect(html).toContain("api('/api/actions')");
     expect(html).toContain("'data-role': 'action-stage'");
-    expect(html).toContain("'data-role': 'config-actions'");
   });
 });

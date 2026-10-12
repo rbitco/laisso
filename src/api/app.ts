@@ -19,7 +19,7 @@ import type { Queue } from "../session/queue.ts";
 import { Intake, IntakeError, type IntakeRequest } from "../intake/intake.ts";
 import { PipelineError, type Pipeline } from "../pipeline/load.ts";
 import { PipelineFiles } from "../pipeline/files.ts";
-import { dashboardHtml, metroScript } from "../dashboard/page.ts";
+import type { Dashboard } from "../dashboard/page.ts";
 import { ticketView, ticketDetail, sessionView, sortForLedger, pipelineListing, pipelineFileView, pipelineVersionView, actionListings, type ViewContext, type IntakeResult, type ConfigFile } from "./views.ts";
 import { readFileSync } from "node:fs";
 import { isPlainObject } from "../fields.ts";
@@ -41,6 +41,7 @@ export interface AppDeps {
   budgets: Budgets;
   queue: Queue;
   changes: Changes;
+  dashboard: Dashboard;
   version: string;
 }
 
@@ -92,7 +93,7 @@ export function createApp(deps: AppDeps): Hono {
   app.get("/api/tick", (c) => c.json(deps.tick.status()));
 
   // The dashboard's push channel (Server-Sent Events). Each event names what changed, never the data:
-  // "ticket" {ticket}, "stdout" {ticket, session}, "tick" {the tick status}. The page re-reads what it
+  // "ticket" {ticket}, "stdout" {ticket, session}, "tick" {the tick status}, "config" {} after an edit through /api. The page re-reads what it
   // shows through the ordinary routes, and after a reconnect re-reads everything, as it may have missed some.
   app.get("/api/events", (c) =>
     streamSSE(c, async (stream) => {
@@ -104,14 +105,14 @@ export function createApp(deps: AppDeps): Hono {
         gathered.clear();
         for (const change of batch) {
           if (stream.aborted || stream.closed) return;
-          const data = change.kind === "tick" ? deps.tick.status() : change.kind === "stdout" ? { ticket: change.ticket, session: change.session } : { ticket: change.ticket };
+          const data = change.kind === "tick" ? deps.tick.status() : change.kind === "config" ? {} : change.kind === "stdout" ? { ticket: change.ticket, session: change.session } : { ticket: change.ticket };
           await stream.writeSSE({ event: change.kind, data: JSON.stringify(data) });
         }
       };
       let finish!: () => void;
       const finished = new Promise<void>((resolve) => (finish = resolve));
       const unsubscribe = deps.changes.subscribe((change) => {
-        gathered.set(change.kind === "tick" ? "tick" : change.kind === "stdout" ? `stdout:${change.session}` : `ticket:${change.ticket}`, change);
+        gathered.set(change.kind === "tick" || change.kind === "config" ? change.kind : change.kind === "stdout" ? `stdout:${change.session}` : `ticket:${change.ticket}`, change);
         timer ??= setTimeout(() => void flush().catch(finish), EVENT_GATHER_MS);
       }, () => finish());
       stream.onAbort(() => finish());
@@ -265,6 +266,7 @@ export function createApp(deps: AppDeps): Hono {
     const { text, config } = patchConfigText(before, deps.home.configFile, patch);
     replaceFile(deps.home.configFile, text);
     applyLive(deps.config, config);
+    deps.changes.emit({ kind: "config" });
     return c.json(configFile(text, RESTART_KEYS.filter((key) => was[key] !== config[key])));
   });
 
@@ -273,6 +275,7 @@ export function createApp(deps: AppDeps): Hono {
   const writeConfig = (text: string, config: Config): ConfigFile => {
     replaceFile(deps.home.configFile, text);
     applyLive(deps.config, config);
+    deps.changes.emit({ kind: "config" });
     return configFile(text);
   };
   app.put("/api/profiles/:name", async (c) => {
@@ -340,8 +343,11 @@ export function createApp(deps: AppDeps): Hono {
       return named;
     });
 
-  app.get("/", (c) => c.html(dashboardHtml()));
-  app.get("/metro.js", (c) => c.body(metroScript(), 200, { "content-type": "text/javascript; charset=utf-8" }));
+  // The built dashboard (ADR 0012): its page and the files Vite bundled beside it.
+  app.get("*", (c, next) => {
+    const file = deps.dashboard.file(c.req.path);
+    return file ? c.body(new Uint8Array(file.body), 200, { "content-type": file.type }) : next();
+  });
 
   app.notFound((c) => (c.req.path.startsWith("/api/") ? c.json({ error: "not found" }, 404) : c.text("not found", 404)));
 

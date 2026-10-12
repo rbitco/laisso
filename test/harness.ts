@@ -74,6 +74,14 @@ export interface StartOptions {
   env?: Record<string, string>;
 }
 
+/**
+ * The dashboard page's source, for the checks that read its script: the served page is Vite's bundle (ADR 0012),
+ * minified, so those checks read what was written instead.
+ */
+export function dashboardSource(): string {
+  return readFileSync(path.join(REPO_ROOT, "src", "dashboard", "index.html"), "utf8");
+}
+
 export async function makeHome(config: LassoConfig = {}): Promise<{ home: string; pathDir: string }> {
   const root = await mkdtemp(path.join(tmpdir(), "lasso-test-"));
   const home = path.join(root, "home");

@@ -91,4 +91,16 @@ describe("the event stream", () => {
     expect(await stopped).toBe(0);
     expect(Date.now() - started).toBeLessThan(1000);
   });
+
+  it("names config after an edit through the API, so an open Config page reads it again", async () => {
+    const lasso = await lassoWith();
+    const stream = listen(lasso);
+    await stream.seen("hello", (e) => e.event === "hello");
+    await lasso.api("/api/config", { method: "PATCH", body: JSON.stringify({ concurrency: 4 }) });
+    await stream.seen("config after a settings save", (e) => e.event === "config");
+    const before = stream.events.length;
+    await lasso.api("/api/profiles/claude-haiku", { method: "PUT", body: JSON.stringify({ profile: { runner: "claude", model: "haiku" }, create: true }) });
+    await stream.seen("config after a profile save", (e) => e.event === "config" && stream.events.indexOf(e) >= before);
+    stream.close();
+  });
 });

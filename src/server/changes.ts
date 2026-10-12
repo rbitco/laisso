@@ -1,5 +1,5 @@
-/** Something the dashboard shows has changed: a Ticket (its row, Sessions or Feedback), a Session's stdout, or the tick. */
-export type Change = { kind: "ticket"; ticket: string } | { kind: "stdout"; ticket: string; session: string } | { kind: "tick" };
+/** Something the dashboard shows has changed: a Ticket (its row, Sessions or Feedback), a Session's stdout, the tick, or config.yaml through /api. */
+export type Change = { kind: "ticket"; ticket: string } | { kind: "stdout"; ticket: string; session: string } | { kind: "tick" } | { kind: "config" };
 
 /**
  * The one place writes announce themselves, so the dashboard can be pushed

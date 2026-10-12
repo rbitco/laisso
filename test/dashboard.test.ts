@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { readFile, writeFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
-import { startLassoWithRepos, waitFor, claudeFixture, type Lasso, type LassoConfig, type TrackerReply } from "./harness.ts";
+import { startLassoWithRepos, waitFor, claudeFixture, type Lasso, type LassoConfig, type TrackerReply, dashboardSource } from "./harness.ts";
 import { sortForLedger, type TicketView, type TicketDetail, type IntakeResult, type DisplayState } from "../src/api/views.ts";
 import { metroDiagram, metroTrack, sessionsForStage, quickAction, relative, tickIndicator, sessionProfile, profileApplies, profileLine, profileSummary, profileUsers, usedByLine, profileWarnings, MODEL_SUGGESTIONS, stageProfileView, profileIndex, scopeNote, profileScopes, overridableRepos, scopedProfile, profileRoute, ticketProfileView, ledgerStageText } from "../src/dashboard/metro.js";
 import type { ConfigFile, PipelineListing, PipelineFile } from "../src/api/views.ts";
@@ -306,8 +306,8 @@ describe("the Session header", () => {
     // Unset fields read as the defaults they fell back to; no model shows the name alone.
     expect(sessionProfile({ ...ended, profile: { name: "blank", runner: "pi", model: null, effort: null, permission: null, args: [] } })).toEqual({ text: "blank", title: "runner pi · effort default · permission default · args none" });
 
-    const html = await (await lasso.page("/")).text();
-    expect(html).toMatch(/import \{[^}]*\bsessionProfile\b[^}]*\} from '\/metro\.js'/);
+    const html = dashboardSource();
+    expect(html).toMatch(/import \{[^}]*\bsessionProfile\b[^}]*\} from '\.\/metro\.js'/);
     expect(html).toContain("'data-role': 'profile'");
   });
 
@@ -388,8 +388,8 @@ stages:
 
   it("are on the page: the Config list and every part of the drawer", async () => {
     const { lasso } = await lassoWithTicket();
-    const html = await (await lasso.page("/")).text();
-    for (const name of ["profileSummary", "profileUsers", "usedByLine", "profileWarnings", "profileApplies", "MODEL_SUGGESTIONS"]) expect(html).toMatch(new RegExp(`import \\{[^}]*\\b${name}\\b[^}]*\\} from '/metro\\.js'`));
+    const html = dashboardSource();
+    for (const name of ["profileSummary", "profileUsers", "usedByLine", "profileWarnings", "profileApplies", "MODEL_SUGGESTIONS"]) expect(html).toMatch(new RegExp(`import \\{[^}]*\\b${name}\\b[^}]*\\} from '\\./metro\\.js'`));
     // The Config list: one line per profile with the default marker, summary and used-by.
     for (const role of ["config-profiles", "profile-list"]) expect(html).toContain(`'data-role': '${role}'`);
     expect(html).toContain("'data-profile': name");
@@ -446,8 +446,8 @@ stages:
 
   it("is on the page: the Stage profile button, its drawer choices, and the Pipeline dropdown", async () => {
     const { lasso } = await lassoWithTicket();
-    const html = await (await lasso.page("/")).text();
-    expect(html).toMatch(/import \{[^}]*\bstageProfileView\b[^}]*\} from '\/metro\.js'/);
+    const html = dashboardSource();
+    expect(html).toMatch(/import \{[^}]*\bstageProfileView\b[^}]*\} from '\.\/metro\.js'/);
     // The Stage card's button, with its two summary lines, opens the drawer with the Stage as context and two choices.
     for (const role of ["stage-profile", "stage-profile-headless", "stage-profile-human", "stage-profile-choice", "profile-use", "profile-inherit", "pipeline-profile"]) expect(html).toContain(`'data-role': '${role}'`);
     expect(html).toContain("context: 'Stage ' + stage + ' of Pipeline ' + profiles.pipeline");
@@ -508,8 +508,8 @@ describe("repo overrides in the profile drawer", () => {
 
   it("are on the page: scope tabs, Override for repo…, repo-only markers, and the repo routes", async () => {
     const { lasso } = await lassoWithTicket();
-    const html = await (await lasso.page("/")).text();
-    for (const name of ["profileIndex", "scopeNote", "profileScopes", "overridableRepos", "scopedProfile", "profileRoute"]) expect(html).toMatch(new RegExp(`import \\{[^}]*\\b${name}\\b[^}]*\\} from '/metro\\.js'`));
+    const html = dashboardSource();
+    for (const name of ["profileIndex", "scopeNote", "profileScopes", "overridableRepos", "scopedProfile", "profileRoute"]) expect(html).toMatch(new RegExp(`import \\{[^}]*\\b${name}\\b[^}]*\\} from '\\./metro\\.js'`));
     for (const role of ["profile-scopes", "profile-scope-tab", "profile-override", "profile-scope-line", "profile-scope"]) expect(html).toContain(`'data-role': '${role}'`);
     expect(html).toContain("text: 'Override for repo…'");
     expect(html).toContain("role: 'tab'");
@@ -528,14 +528,17 @@ describe("repo overrides in the profile drawer", () => {
 });
 
 describe("the dashboard page", () => {
-  it("serves the Metro module, and the page carries every Ledger row and detail element the spec lists", async () => {
+  it("serves the built page and its bundle, and the page carries every Ledger row and detail element the spec lists", async () => {
     const { lasso } = await lassoWithTicket();
-    const script = await lasso.page("/metro.js");
+    const page = await lasso.page("/");
+    expect(page.headers.get("content-type")).toContain("text/html");
+    const bundle = (await page.text()).match(/<script type="module" crossorigin src="(\/assets\/[^"]+\.js)">/)![1];
+    const script = await lasso.page(bundle);
     expect(script.headers.get("content-type")).toContain("text/javascript");
-    expect(await script.text()).toContain("export function metroDiagram");
-    const html = await (await lasso.page("/")).text();
-    expect(html).toContain("from '/metro.js'");
-    expect(html).toMatch(/import \{[^}]*\btickIndicator\b[^}]*\} from '\/metro\.js'/);
+    expect(await script.text()).toContain("Unsaved changes");
+    expect((await lasso.page("/assets/missing.js")).status).toBe(404);
+    const html = dashboardSource();
+    expect(html).toMatch(/import \{[^}]*\btickIndicator\b[^}]*\} from '\.\/metro\.js'/);
     // The header's Tick dot replaces the old tick-status text.
     expect(html).toContain('data-role="tick-dot"');
     const dot = html.match(/<span [^>]*data-role="tick-dot"[^>]*>/)![0];
@@ -577,8 +580,8 @@ describe("a Ticket's profile override on the dashboard", () => {
 
   it("is on the page: the Ticket's profile buttons, the drawer's override buttons, retry with… and an unavailable Resume", async () => {
     const { lasso } = await lassoWithTicket();
-    const html = await (await lasso.page("/")).text();
-    for (const name of ["ticketProfileView", "ledgerStageText"]) expect(html).toMatch(new RegExp(`import \\{[^}]*\\b${name}\\b[^}]*\\} from '/metro\\.js'`));
+    const html = dashboardSource();
+    for (const name of ["ticketProfileView", "ledgerStageText"]) expect(html).toMatch(new RegExp(`import \\{[^}]*\\b${name}\\b[^}]*\\} from '\\./metro\\.js'`));
     for (const role of ["stage-profiles", "ticket-stage-profile", "overridden", "profile-use", "profile-clear", "retry-with", "profile-retry", "unavailable"]) expect(html).toContain(`'data-role': '${role}'`);
     expect(html).toContain("'Use ' + name + ' for this Ticket\\'s ' + p.stage");
     expect(html).toContain("text: 'Clear override'");

@@ -26,6 +26,7 @@ import { PipelineVersions } from "../store/versions.ts";
 import { Tick } from "./tick.ts";
 import { Changes } from "./changes.ts";
 import { createApp } from "../api/app.ts";
+import { Dashboard, DashboardMissing } from "../dashboard/page.ts";
 
 const VERSION = (createRequire(import.meta.url)("../../package.json") as { version: string }).version;
 
@@ -35,6 +36,16 @@ export interface ServeOptions {
 
 /** The one foreground lasso process (ADR 0008). Resolves with the exit code once it has shut down. */
 export async function serve(opts: ServeOptions): Promise<number> {
+  let dashboard: Dashboard;
+  try {
+    dashboard = new Dashboard();
+  } catch (error) {
+    if (error instanceof DashboardMissing) {
+      console.error(error.message);
+      return 1;
+    }
+    throw error;
+  }
   const home = resolveHome();
   const defaults = ensureHome(home);
   // Before config or any Pipeline is read: tracker.transition moves into config (ADR 0010), runners into profiles (ADR 0011).
@@ -104,7 +115,7 @@ export async function serve(opts: ServeOptions): Promise<number> {
   const tick = new Tick(config.tick, log, async () => [...(await mirror.retryPending()), ...(await actions.runDue()), ...(await review.poll()), ...(await runs.startRunnable()), ...(await teardown.sweep())], () => changes.emit({ kind: "tick" }));
   const overrides = new Overrides({ config, home, tickets, progress, log });
   const exits = new Exits({ tickets, sessions, log, progress, runs, terminal, budgets, tick, teardown, overrides });
-  const app = createApp({ config, home, tick, tickets, versions, sessions, feedback, runs, progress, terminal, exits, overrides, budgets, queue, changes, version: VERSION });
+  const app = createApp({ config, home, tick, tickets, versions, sessions, feedback, runs, progress, terminal, exits, overrides, budgets, queue, changes, dashboard, version: VERSION });
 
   if (defaults.wroteConfig) log.info("config.written", { file: home.configFile });
   if (defaults.wrotePipeline) log.info("pipeline.written", { name: "default" });

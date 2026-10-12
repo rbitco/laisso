@@ -7,13 +7,17 @@ tracker, and shows every Ticket on a local dashboard. The spec is
 
 ## Run
 
-Node 24 or later (the code runs as TypeScript directly; nothing is compiled).
+Node 24 or later. The server runs as TypeScript directly; only the
+dashboard is built, by Vite, into `dist/dashboard/` (ADR 0012). Lasso
+refuses to start until it is built.
 
 ```sh
 pnpm install
-pnpm start            # starts lasso on http://localhost:7433
+pnpm start            # builds the dashboard, then starts lasso on http://localhost:7433
 pnpm start -- status  # the ledger, as a client of the running process
 pnpm start -- check   # run a tick now and print what changed
+pnpm build            # build the dashboard alone
+pnpm dev              # serve the dashboard from source, forwarding /api to a running lasso (LASSO_PORT, default 7433)
 ```
 
 Everything Lasso owns lives under `~/.lasso` (`LASSO_HOME` overrides it):

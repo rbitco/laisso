@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { startLassoWithRepos, waitFor, claudeFixture, type Lasso, type LassoConfig } from "./harness.ts";
+import { startLassoWithRepos, waitFor, claudeFixture, type Lasso, type LassoConfig, dashboardSource } from "./harness.ts";
 import type { TicketDetail, TicketView, IntakeResult } from "../src/api/views.ts";
 import type { TickChange } from "../src/server/tick.ts";
 
@@ -225,7 +225,7 @@ describe("the other exits", () => {
 
   it("serves the Flag box, gauges and editor in the dashboard shell", async () => {
     const { lasso } = await lassoWithTicket();
-    const html = await (await lasso.page("/")).text();
+    const html = dashboardSource();
     for (const role of ["flagbox", "gauges", "budget-editor", "rings"]) expect(html).toContain(`'data-role': '${role}'`);
     expect(html).toContain("/extend");
   });

@@ -420,7 +420,9 @@
   </div>
 </main>
 <script type="module">
-import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, relative, tickIndicator, sessionProfile, MODEL_SUGGESTIONS, profileApplies, profileMode, profileLine, profileSummary, profileUsers, usedByLine, profileWarnings, stageProfileView, ticketProfileView, ledgerStageText, profileIndex, scopeNote, profileScopes, overridableRepos, scopedProfile, profileRoute } from '/metro.js';
+import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, relative, tickIndicator, sessionProfile, MODEL_SUGGESTIONS, profileApplies, profileMode, profileLine, profileSummary, profileUsers, usedByLine, profileWarnings, stageProfileView, ticketProfileView, ledgerStageText, profileIndex, scopeNote, profileScopes, overridableRepos, scopedProfile, profileRoute } from './metro.js';
+import { showConfig } from './app/config/mount.tsx';
+import { events } from './app/events.ts';
 (function () {
   const $ = (sel) => document.querySelector(sel);
   const layout = $('[data-role="layout"]');
@@ -1427,82 +1429,11 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
     return { node: button, chosen: () => chosen };
   }
 
-  // Config, in three groups by how each saves: settings saved with the form's Save; Agent Profiles, which save from
-  // their drawer at once; and Actions and repos, which are read-only here and edited in config.yaml by hand.
-  async function showConfig() {
-    let c;
-    let actions;
+  // Config's Settings and its read-only group are React (ADR 0012); its Agent Profiles group is still drawn here.
+  async function drawProfiles(host, cfg) {
     let pipelines;
-    try { [c, actions, pipelines] = await Promise.all([api('/api/config'), api('/api/actions'), api('/api/pipelines')]); } catch (e) { showNotice(e.message); return; }
-    const cfg = c.config;
-    const num = (key, value) => el('input', { name: key, value: String(value), inputmode: 'decimal' });
-    const inputs = {
-      rounds: num('rounds', cfg.budget.rounds), attempts: num('attempts', cfg.budget.attempts), wallTime: el('input', { name: 'wallTime', value: cfg.budget.wallTime, placeholder: '30m' }), spend: num('spend', cfg.budget.spend),
-      tick: num('tick', cfg.tick), concurrency: num('concurrency', cfg.concurrency), retention: num('retention', cfg.retention), port: num('port', cfg.port),
-      branch_prefix: el('input', { name: 'branch_prefix', value: cfg.branch_prefix, placeholder: 'none' }),
-    };
-    const FLAG_LABEL = { enabled: 'Send notifications', flagged: 'A Ticket is Flagged', human: 'A human Stage is ready for you', gate: 'A Stage finished and the next waits for Start' };
-    const flags = ['enabled', 'flagged', 'human', 'gate'].map((k) => [k, ...check(FLAG_LABEL[k], k, cfg.notifications[k])]);
-    // With notifications off, the kinds below it have nothing to say; they keep their values for when it is back on.
-    const syncFlags = () => { for (const [k, input, label] of flags) if (k !== 'enabled') { input.disabled = !flags[0][1].checked; label.style.opacity = input.disabled ? '0.5' : ''; } };
-    flags[0][1].addEventListener('change', syncFlags);
-    syncFlags();
-    const button = el('button', { class: 'primary', type: 'submit', text: 'Save changes' });
-    const form = el('form', { class: 'sheet', 'data-role': 'config-fields' });
-    const bar = saveBar(form, button, 'Port and check interval apply after a restart; everything else at once.');
-    form.replaceChildren(
-      setting('Budget defaults', 'What every Ticket may use unless its Pipeline or a Stage sets its own.', el('div', { class: 'fields' }, [field('Rounds per repeating Stage', inputs.rounds), field('Attempts per Stage', inputs.attempts), field('Time per Session', inputs.wallTime), field('Spend per Ticket (USD)', inputs.spend)])),
-      setting('Server', 'How often Lasso checks for work, how much it runs at once, and how long it keeps finished Tickets.', el('div', { class: 'fields' }, [field('Check every (seconds)', inputs.tick), field('Sessions at once', inputs.concurrency), field('Keep finished Tickets (days)', inputs.retention), field('Branch prefix', inputs.branch_prefix), field('Port', inputs.port)])),
-      setting('Notifications', 'Desktop notifications for the moments that need you.', el('div', { class: 'fields checks' }, flags.map((f) => f[2]))),
-      bar.node,
-    );
-    form.addEventListener('submit', (ev) => {
-      ev.preventDefault();
-      let restart = [];
-      save(button, async () => {
-        const patch = { budget: {}, notifications: {} };
-        changed(patch.budget, 'rounds', cfg.budget.rounds, numberOrNull(inputs.rounds, 'rounds'));
-        changed(patch.budget, 'attempts', cfg.budget.attempts, numberOrNull(inputs.attempts, 'attempts'));
-        changed(patch.budget, 'wallTime', cfg.budget.wallTime, inputs.wallTime.value.trim() || null);
-        changed(patch.budget, 'spend', cfg.budget.spend, numberOrNull(inputs.spend, 'spend'));
-        for (const k of ['tick', 'concurrency', 'retention', 'port']) changed(patch, k, cfg[k], numberOrNull(inputs[k], k));
-        changed(patch, 'branch_prefix', cfg.branch_prefix || null, inputs.branch_prefix.value.trim() || null);
-        for (const [k, input] of flags) changed(patch.notifications, k, cfg.notifications[k], input.checked);
-        prune(patch);
-        if (!Object.keys(patch).length) { showNotice('nothing changed'); return false; }
-        restart = (await api('/api/config', { method: 'PATCH', body: JSON.stringify(patch) })).restart;
-      }, () => { showNotice(restart.length ? 'saved; ' + restart.join(' and ') + ' apply after a restart' : 'saved'); showConfig(); });
-    });
-    const groupTitle = (title, how) => el('h3', { class: 'group-title' }, [title, el('span', { text: how })]);
-    configPanel.replaceChildren(el('div', { class: 'ed' }, [
-      editorHead('Config', c.file, []),
-      groupTitle('Settings', 'Saved with Save changes'),
-      form,
-      groupTitle('Agent Profiles', 'Each saves from its editor as you go'),
-      profilesCard(cfg, pipelines),
-      groupTitle('From config.yaml', 'Read-only here; edit the file by hand'),
-      el('div', { class: 'sheet readonly' }, [actionsCard(actions), reposCard(cfg.repos)]),
-    ]));
-  }
-
-  // One row of a Config sheet: its name and what it is for on the left, its contents on the right.
-  function setting(title, about, body, attrs = {}) {
-    return el('section', Object.assign({ class: 'setting' }, attrs), [el('div', {}, [el('h3', { text: title }), el('p', { class: 'about', text: about })]), el('div', { class: 'cfg-body' }, [body].flat())]);
-  }
-
-  function reposCard(repos) {
-    const rows = Object.entries(repos).map(([n, r]) => el('tr', {}, [
-      el('td', {}, [el('strong', { text: n })]),
-      el('td', { text: r.tracker + ' ' + r.project }),
-      el('td', { text: r.pipeline }),
-      el('td', { text: r.default_profile || 'global default' }),
-      el('td', { class: 'path', text: r.path }),
-    ]));
-    const table = el('table', { class: 'repos' }, [
-      el('thead', {}, [el('tr', {}, ['Repo', 'Tracker', 'Pipeline', 'Agent Profile', 'Path'].map((h) => el('th', { text: h })))]),
-      el('tbody', {}, rows),
-    ]);
-    return setting('Repos', 'The repos Lasso takes Tickets for, and the Pipeline each starts on.', rows.length ? table : el('div', { class: 'note', text: 'None yet. Add one under repos: in config.yaml.' }), { 'data-role': 'config-repos' });
+    try { pipelines = await api('/api/pipelines'); } catch (e) { showNotice(e.message); return; }
+    host.replaceChildren(profilesCard(cfg, pipelines));
   }
 
   // The Agent Profiles, one tile each: name, default marker, repo overrides ("overridden in app") or the repos a
@@ -1741,15 +1672,6 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
     ];
   }
 
-  // The Actions config.yaml defines, read-only: they run shell commands, so they are edited in the file.
-  function actionsCard(actions) {
-    const rows = actions.map((a) => el('div', { class: 'action-def', 'data-action': a.name }, [
-      el('h4', {}, [a.name, el('span', { class: 'chip', text: a.repo ? 'repo ' + a.repo : 'global' }), el('span', { class: 'chip', text: 'params: ' + (a.params.join(', ') || 'none') }), el('span', { class: 'chip', text: 'timeout ' + a.timeout })]),
-      el('pre', { text: a.run }),
-    ]));
-    return setting('Actions', 'Shell commands an action Stage runs. A repo\'s own Action replaces a global one with the same name.', rows.length ? rows : el('div', { class: 'note', text: 'None yet. Add one under actions: in config.yaml.' }), { 'data-role': 'config-actions' });
-  }
-
   function decodeName(part) { try { return decodeURIComponent(part); } catch { return part; } }
   function route() {
     const hash = location.hash.replace(/^#/, '');
@@ -1765,7 +1687,7 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
       const m = rest && /^(.+)\/v(\d+)$/.exec(rest);
       showPipelines(m ? m[1] : rest, m ? Number(m[2]) : null);
     }
-    else if (view === 'config') showConfig();
+    else if (view === 'config') showConfig(configPanel, drawProfiles);
     else refreshLedger().catch(failing);
   }
 
@@ -1872,19 +1794,19 @@ import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, rela
   // own after a restart; anything missed meanwhile is caught by re-reading everything once it is back.
   let everOpen = false;
   function listen() {
-    const events = new EventSource('/api/events');
-    events.addEventListener('hello', (ev) => {
+    const source = events();
+    source.addEventListener('hello', (ev) => {
       showTick(JSON.parse(ev.data));
       if (everOpen) route();
       everOpen = true;
     });
-    events.addEventListener('tick', (ev) => showTick(JSON.parse(ev.data)));
-    events.addEventListener('ticket', (ev) => owe(JSON.parse(ev.data).ticket));
-    events.addEventListener('stdout', (ev) => {
+    source.addEventListener('tick', (ev) => showTick(JSON.parse(ev.data)));
+    source.addEventListener('ticket', (ev) => owe(JSON.parse(ev.data).ticket));
+    source.addEventListener('stdout', (ev) => {
       const { session } = JSON.parse(ev.data);
       if (watchedStdout && watchedStdout.session === session && watchedStdout.gen === detailGen) watchedStdout.read();
     });
-    events.addEventListener('error', lostLasso);
+    source.addEventListener('error', lostLasso);
   }
   listen();
 
