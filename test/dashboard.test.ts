@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { startLassoWithRepos, waitFor, claudeFixture, type Lasso, type LassoConfig, type TrackerReply, dashboardSource } from "./harness.ts";
 import { sortForLedger, type TicketView, type TicketDetail, type IntakeResult, type DisplayState } from "../src/api/views.ts";
-import { metroDiagram, metroTrack, sessionsForStage, quickAction, relative, tickIndicator, sessionProfile, profileApplies, profileLine, profileSummary, profileUsers, usedByLine, profileWarnings, MODEL_SUGGESTIONS, stageProfileView, profileIndex, scopeNote, profileScopes, overridableRepos, scopedProfile, profileRoute, ticketProfileView, ledgerStageText } from "../src/dashboard/metro.js";
+import { metroDiagram, metroTrack, sessionsForStage, quickAction, relative, tickIndicator, sessionProfile, profileApplies, profileLine, profileSummary, profileUsers, usedByLine, profileWarnings, MODEL_SUGGESTIONS, stageProfileView, profileIndex, scopeNote, profileScopes, overridableRepos, scopedProfile, profileRoute, ticketProfileView, ledgerStageText, pipelineLine } from "../src/dashboard/metro.js";
 import type { ConfigFile, PipelineListing, PipelineFile } from "../src/api/views.ts";
 import type { ProfileConfig } from "../src/server/config.ts";
 import type { TickChange, TickStatus } from "../src/server/tick.ts";
@@ -240,6 +240,16 @@ describe("the Metro drawings from API data", () => {
     expect(relative(new Date(now - 3 * 60_000).toISOString(), now)).toBe("3m ago");
     expect(relative(new Date(now - 2 * 3_600_000).toISOString(), now)).toBe("2h ago");
     expect(relative(null, now)).toBe("never");
+  });
+
+  it("draw a Pipeline's Stages as a small line: a ring per Runner or human Stage, a square per action Stage", () => {
+    const line = pipelineLine([{ kind: "runner" }, { kind: "action" }, { kind: "runner" }]);
+    expect(line).toContain('viewBox="0 0 33 12"');
+    expect(line.match(/<circle /g)).toHaveLength(2);
+    expect(line.match(/<rect /g)).toHaveLength(1);
+    expect(line).toContain('<rect x="16" y="3"');
+    expect(line).toContain('<circle cx="28" cy="6"');
+    expect(pipelineLine([])).toContain('viewBox="0 0 5 12"');
   });
 });
 

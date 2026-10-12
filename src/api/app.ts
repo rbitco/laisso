@@ -20,7 +20,7 @@ import { Intake, IntakeError, type IntakeRequest } from "../intake/intake.ts";
 import { PipelineError, type Pipeline } from "../pipeline/load.ts";
 import { PipelineFiles } from "../pipeline/files.ts";
 import type { Dashboard } from "../dashboard/page.ts";
-import { ticketView, ticketDetail, sessionView, sortForLedger, pipelineListing, pipelineFileView, pipelineVersionView, actionListings, type ViewContext, type IntakeResult, type ConfigFile } from "./views.ts";
+import { ticketView, ticketDetail, sessionView, sortForLedger, pipelineListing, pipelineFileView, pipelineVersionView, actionListings, type LiveVersionView, type ViewContext, type IntakeResult, type ConfigFile } from "./views.ts";
 import { readFileSync } from "node:fs";
 import { isPlainObject } from "../fields.ts";
 import { replaceFile } from "../atomic-write.ts";
@@ -93,7 +93,7 @@ export function createApp(deps: AppDeps): Hono {
   app.get("/api/tick", (c) => c.json(deps.tick.status()));
 
   // The dashboard's push channel (Server-Sent Events). Each event names what changed, never the data:
-  // "ticket" {ticket}, "stdout" {ticket, session}, "tick" {the tick status}, "config" {} after an edit through /api. The page re-reads what it
+  // "ticket" {ticket}, "stdout" {ticket, session}, "tick" {the tick status}, "config" {} and "pipeline" {pipeline} after an edit through /api. The page re-reads what it
   // shows through the ordinary routes, and after a reconnect re-reads everything, as it may have missed some.
   app.get("/api/events", (c) =>
     streamSSE(c, async (stream) => {
@@ -105,14 +105,14 @@ export function createApp(deps: AppDeps): Hono {
         gathered.clear();
         for (const change of batch) {
           if (stream.aborted || stream.closed) return;
-          const data = change.kind === "tick" ? deps.tick.status() : change.kind === "config" ? {} : change.kind === "stdout" ? { ticket: change.ticket, session: change.session } : { ticket: change.ticket };
+          const data = change.kind === "tick" ? deps.tick.status() : change.kind === "config" ? {} : change.kind === "pipeline" ? { pipeline: change.pipeline } : change.kind === "stdout" ? { ticket: change.ticket, session: change.session } : { ticket: change.ticket };
           await stream.writeSSE({ event: change.kind, data: JSON.stringify(data) });
         }
       };
       let finish!: () => void;
       const finished = new Promise<void>((resolve) => (finish = resolve));
       const unsubscribe = deps.changes.subscribe((change) => {
-        gathered.set(change.kind === "tick" || change.kind === "config" ? change.kind : change.kind === "stdout" ? `stdout:${change.session}` : `ticket:${change.ticket}`, change);
+        gathered.set(change.kind === "tick" || change.kind === "config" ? change.kind : change.kind === "pipeline" ? `pipeline:${change.pipeline}` : change.kind === "stdout" ? `stdout:${change.session}` : `ticket:${change.ticket}`, change);
         timer ??= setTimeout(() => void flush().catch(finish), EVENT_GATHER_MS);
       }, () => finish());
       stream.onAbort(() => finish());
@@ -225,7 +225,7 @@ export function createApp(deps: AppDeps): Hono {
     return source ? c.json(pipelineFileView(source)) : c.json({ error: `no Pipeline named ${c.req.param("name")}` }, 404);
   });
   // Versions (ADR 0009): read-only, and readable after the file is gone.
-  app.get("/api/pipelines/:name/versions", (c) => c.json(deps.versions.live(c.req.param("name")).map((v) => ({ version: v.version, createdAt: v.created_at, live: v.live }))));
+  app.get("/api/pipelines/:name/versions", (c) => c.json(deps.versions.live(c.req.param("name")).map((v): LiveVersionView => ({ version: v.version, createdAt: v.created_at, live: v.live }))));
   app.get("/api/pipelines/:name/versions/:version", (c) => {
     const name = c.req.param("name");
     const version = Number(c.req.param("version"));
@@ -233,16 +233,23 @@ export function createApp(deps: AppDeps): Hono {
     const pipeline = row ? deps.versions.get(name, version) : null;
     return row && pipeline ? c.json(pipelineVersionView(row, pipeline, pipelines.read(name) === null)) : c.json({ error: `no Version ${c.req.param("version")} of Pipeline ${name}` }, 404);
   });
+  // Each write is announced by name, so an open Pipelines page reads its list again.
+  const pipelineChanged = (pipeline: string) => deps.changes.emit({ kind: "pipeline", pipeline });
   app.put("/api/pipelines/:name", async (c) => {
     const body = ((await c.req.json().catch(() => null)) ?? {}) as { text?: unknown; create?: unknown };
-    return c.json(pipelineFileView(pipelines.write(c.req.param("name"), body.text, { create: body.create === true })));
+    const written = pipelines.write(c.req.param("name"), body.text, { create: body.create === true });
+    pipelineChanged(written.name);
+    return c.json(pipelineFileView(written));
   });
   app.patch("/api/pipelines/:name", async (c) => {
     const patch = await c.req.json().catch(() => null);
-    return c.json(pipelineFileView(pipelines.patch(c.req.param("name"), patch)));
+    const written = pipelines.patch(c.req.param("name"), patch);
+    pipelineChanged(written.name);
+    return c.json(pipelineFileView(written));
   });
   app.delete("/api/pipelines/:name", (c) => {
     if (!pipelines.remove(c.req.param("name"))) return c.json({ error: `no Pipeline named ${c.req.param("name")}` }, 404);
+    pipelineChanged(c.req.param("name"));
     return c.json({ ok: true });
   });
 

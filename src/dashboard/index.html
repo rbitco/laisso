@@ -422,6 +422,7 @@
 <script type="module">
 import { metroDiagram, metroTrack, sessionsForStage, quickAction, duration, relative, tickIndicator, sessionProfile, stageProfileView, ticketProfileView, ledgerStageText } from './metro.js';
 import { showConfig } from './app/config/mount.tsx';
+import { showPipelines, adoptOldStagesForm } from './app/pipelines/mount.tsx';
 import { openProfileDrawer } from './app/profiles/drawer.tsx';
 import { events } from './app/events.ts';
 (function () {
@@ -963,8 +964,6 @@ import { events } from './app/events.ts';
     return el('dd', { 'data-role': 'pipeline-version' }, note ? [link, el('span', { class: 'drift', text: ' · ' + note })] : [link]);
   }
 
-  const BLANK_PIPELINE = 'stages:\n  - name: implement\n    prompt: Do the work.\n    artifact: commits-on-branch\n';
-
   function field(label, input, wide) { return el('label', { class: wide ? 'wide' : '' }, [label, input]); }
   function check(label, name, on) {
     const input = el('input', { type: 'checkbox', name });
@@ -999,90 +998,6 @@ import { events } from './app/events.ts';
     const idle = () => { button.disabled = false; button.classList.remove('busy'); };
     try { if ((await act()) !== false) then(); else idle(); }
     catch (e) { showNotice(e.message); if (e.input) e.input.focus(); idle(); }
-  }
-
-  // Pipelines: the list on the left, each with its Stages drawn as a line; one Pipeline's editor on the right.
-  async function showPipelines(name, version) {
-    let list;
-    try { list = await api('/api/pipelines'); } catch (e) { showNotice(e.message); return; }
-    const side = el('div', { class: 'plist' }, list.map((p) => el('a', { href: '#pipelines/' + encodeURIComponent(p.name), class: p.name === name ? 'current' : '', title: p.problem ? '' : p.stages.map((s) => s.label).join(' → ') }, p.problem
-      ? [el('strong', { text: p.name }), el('span', { class: 'why drift', text: 'does not load' })]
-      : [el('strong', { text: p.name }), miniLine(p.stages), el('span', { class: 'count', text: p.stages.length + ' Stage' + (p.stages.length === 1 ? '' : 's') })])));
-    const body = !name ? el('p', { class: 'empty', text: list.length ? 'Pick a Pipeline to edit it, or make a new one.' : 'No Pipelines yet. Make one to get started.' }) : version ? await versionView(name, version) : await pipelineEditor(name);
-    pipelinesPanel.replaceChildren(el('div', { class: 'pipelines-grid' }, [el('div', { class: 'plist-wrap' }, [side, newPipelineForm(list)]), body]));
-  }
-
-  // A Pipeline's Stages as a little line of stations: a ring for a Runner or human Stage, a square for an action Stage.
-  function miniLine(stages) {
-    let x = 5;
-    const pts = stages.map((s) => { const p = { s, x }; x += s.kind === 'action' ? 9 : 14; return p; });
-    const w = (pts.length ? pts[pts.length - 1].x : 0) + 5;
-    let svg = `<svg viewBox="0 0 ${w} 12" width="${w}" height="12" aria-hidden="true"><line x1="5" y1="6" x2="${w - 5}" y2="6" stroke="var(--line)" stroke-width="2"/>`;
-    for (const { s, x: cx } of pts) svg += s.kind === 'action' ? `<rect x="${cx - 3}" y="3" width="6" height="6" rx="1.5" fill="var(--muted)"/>` : `<circle cx="${cx}" cy="6" r="3.6" fill="var(--bg)" stroke="var(--run)" stroke-width="2"/>`;
-    const box = el('span');
-    box.innerHTML = svg + '</svg>';
-    return box;
-  }
-
-  function newPipelineForm(list) {
-    const nameInput = el('input', { name: 'name', placeholder: 'new-pipeline' });
-    const copy = el('select', { name: 'copy' }, [el('option', { value: '', text: 'A blank Pipeline' }), ...list.map((p) => el('option', { value: p.name, text: 'A copy of ' + p.name }))]);
-    const create = el('button', { class: 'primary', type: 'submit', text: 'Create' });
-    const cancel = el('button', { type: 'button', class: 'quiet', text: 'Cancel' });
-    const form = el('form', { 'data-role': 'new-pipeline', hidden: '' }, [el('div', { class: 'fields' }, [field('Name', nameInput), field('Start from', copy)]), el('div', { class: 'bar', style: 'margin-top:10px' }, [create, cancel])]);
-    const open = el('button', { type: 'button', class: 'quiet', text: '+ New Pipeline' });
-    open.addEventListener('click', () => { form.hidden = false; open.hidden = true; nameInput.focus(); });
-    cancel.addEventListener('click', () => { form.hidden = true; open.hidden = false; });
-    form.addEventListener('submit', (ev) => {
-      ev.preventDefault();
-      const name = nameInput.value.trim();
-      save(create, async () => {
-        const text = copy.value ? (await api('/api/pipelines/' + encodeURIComponent(copy.value))).text : BLANK_PIPELINE;
-        await api('/api/pipelines/' + encodeURIComponent(name), { method: 'PUT', body: JSON.stringify({ text, create: true }) });
-      }, () => { location.hash = 'pipelines/' + encodeURIComponent(name); });
-    });
-    return el('div', { style: 'display:grid' }, [open, form]);
-  }
-
-  // A page head: the thing's name over the file it lives in, with its buttons on the right.
-  function editorHead(title, file, buttons) {
-    return el('div', { class: 'ed-head' }, [el('div', { style: 'min-width:0' }, [el('h2', { text: title }), el('span', { class: 'path', text: file })]), el('div', { class: 'bar' }, buttons)]);
-  }
-
-  async function pipelineEditor(name) {
-    let p;
-    try { p = await api('/api/pipelines/' + encodeURIComponent(name)); } catch (e) { return el('p', { class: 'notice', text: e.message }); }
-    const panel = el('div', { class: 'ed', 'data-role': 'pipeline-editor' });
-    const asText = el('button', { type: 'button', class: 'quiet', text: 'Edit as text' });
-    const remove = el('button', { type: 'button', class: 'danger', text: 'Delete' });
-    const head = editorHead(p.name, p.file, [asText, remove]);
-    remove.addEventListener('click', () => {
-      if (remove.textContent !== 'Click again to delete') { remove.textContent = 'Click again to delete'; setTimeout(() => { remove.textContent = 'Delete'; }, 4000); return; }
-      save(remove, () => api('/api/pipelines/' + encodeURIComponent(name), { method: 'DELETE' }), () => { location.hash = 'pipelines'; });
-    });
-    const actions = await api('/api/actions').catch(() => []);
-    const config = await api('/api/config').then((c) => c.config).catch(() => ({ profiles: {}, default_profile: null, budget: {} }));
-    // What the Pipeline and Stage cards share about profiles: config as last read (a drawer save refreshes it),
-    // the Pipeline dropdown's choice, each card's redraw, run when either changes, and touched(), which marks the form unsaved.
-    const profiles = { config, pipeline: name, chosen: () => null, redraws: [], touched: () => {}, changed(next) { if (next) this.config = next; for (const r of this.redraws) r(); } };
-    const structured = p.pipeline ? stagesForm(p, actions, profiles) : el('div', { class: 'card problem' }, [el('div', { class: 'why', text: 'This file does not load: ' + p.problem + '. Fix it as text.' })]);
-    const raw = rawForm(p);
-    raw.hidden = !!p.pipeline;
-    asText.addEventListener('click', () => { raw.hidden = !raw.hidden; structured.hidden = !raw.hidden; asText.textContent = raw.hidden ? 'Edit as text' : 'Edit as fields'; });
-    if (!p.pipeline) { structured.hidden = false; asText.hidden = true; }
-    panel.replaceChildren(head, await liveVersions(name), structured, raw);
-    return panel;
-  }
-
-  // The Versions of this Pipeline that active Tickets still run; they keep running them whatever is saved here.
-  async function liveVersions(name) {
-    let versions = [];
-    try { versions = await api('/api/pipelines/' + encodeURIComponent(name) + '/versions'); } catch { /* the editor still works without it */ }
-    const box = el('div', { class: 'info-strip', 'data-role': 'live-versions' });
-    if (!versions.length) { box.hidden = true; return box; }
-    const links = versions.map((v) => el('a', { href: '#pipelines/' + encodeURIComponent(name) + '/v' + v.version, text: 'v' + v.version + ' (' + v.live + ' Ticket' + (v.live === 1 ? '' : 's') + ')' }));
-    box.replaceChildren(el('h3', { text: 'Versions in use' }), ...links, el('div', { class: 'why', text: 'Tickets under way keep the Version they started with. Saving here changes new Tickets only.' }));
-    return box;
   }
 
   // One Stage drawn on the line without its fields: a station, then a head naming the Stage and its kind.
@@ -1121,45 +1036,6 @@ import { events } from './app/events.ts';
     return el('div', { class: 'stages-head' }, [el('h3', { text: 'Stages' }), el('div', { class: 'legend' }, [key('Runner', 'var(--run)'), key('Human', 'var(--amber)'), key('Action', 'var(--muted)', true), ...(onExpand ? [expand] : [])])]);
   }
 
-  // One frozen Version, read-only: nothing here saves.
-  async function versionView(name, version) {
-    let v;
-    try { v = await api('/api/pipelines/' + encodeURIComponent(name) + '/versions/' + version); } catch (e) { return el('p', { class: 'notice', text: e.message }); }
-    const ro = (label, value, wide) => el('div', { class: 'ro' + (wide ? ' wide' : '') }, [label, el('span', { text: value })]);
-    const yes = (b) => (b ? 'yes' : 'no');
-    const budget = (b) => ['rounds', 'attempts', 'wallTime'].filter((k) => b[k] !== undefined).map((k) => k + ' ' + b[k]).join(', ') || 'defaults';
-    const stages = v.pipeline.stages.map((s, i) => {
-      const kind = s.kind === 'action' ? 'action' : s.human ? 'human' : 'runner';
-      const shell = s.kind === 'action'
-        ? railStage(kind, s.name, [el('div', { class: 'fields' }, [ro('action', s.action), ...Object.entries(s.with).map(([key, value]) => ro(key, value))])], true)
-        : railStage(kind, s.name, [el('div', { class: 'fgroup' }, [el('h4', { text: 'Settings' }), el('div', { class: 'fields' }, [
-          ro('profile', s.profile || (v.pipeline.profile ? 'Pipeline\'s (' + v.pipeline.profile + ')' : 'config default')), ro('artifact', s.artifact || 'none'), ro('skills', s.skills.join(', ') || 'none'),
-          ro('advances on its own', yes(s.advance)), ro('repeats on Feedback', yes(s.repeat === 'feedback')), ro('budget', budget(s.budget)),
-          el('div', { class: 'ro wide' }, ['prompt', el('pre', { text: s.prompt || '(none)' })]),
-        ])])], false);
-      shell.station.textContent = String(i + 1);
-      shell.label(s.name, kind, s.kind === 'action' ? s.action : s.artifact ? 'artifact ' + s.artifact : '', s.kind === 'action' ? '' : firstLine(s.prompt));
-      return shell;
-    });
-    const back = v.deleted ? el('span', { class: 'drift', text: 'Pipeline deleted' }) : el('a', { href: '#pipelines/' + encodeURIComponent(name), text: 'Open the current Pipeline' });
-    const head = editorHead(name + ' v' + version, 'Read-only. Frozen ' + relative(v.createdAt) + ', ' + v.live + ' active Ticket' + (v.live === 1 ? '' : 's') + '.', [back]);
-    const settings = el('section', { class: 'sheet pipe-settings' }, [el('h3', { text: 'Pipeline settings' }), el('div', { class: 'fields' }, [ro('Agent Profile', v.pipeline.profile || 'config default'), ro('Spend limit per Ticket (USD)', v.pipeline.budget.spend === undefined ? 'global default' : String(v.pipeline.budget.spend))])]);
-    const toggleAll = () => { const open = stages.some((s) => !s.isOpen()); for (const s of stages) s.setOpen(open); return open; };
-    return el('div', { class: 'ed', 'data-role': 'pipeline-version' }, [head, el('div', { class: 'pipe-form' }, [settings, stagesHead(toggleAll), el('div', { class: 'rail' }, stages.map((s) => s.node))])]);
-  }
-
-  function rawForm(p) {
-    const area = el('textarea', { class: 'raw', name: 'text', spellcheck: 'false' });
-    area.value = p.text;
-    const button = el('button', { class: 'primary', type: 'submit', text: 'Save text' });
-    const form = el('form', { class: 'pipe-form', 'data-role': 'pipeline-text' }, [area, el('div', { class: 'savebar' }, [button, el('span', { class: 'why', text: 'Saves the whole file, comments included. Refused unless it parses.' })])]);
-    form.addEventListener('submit', (ev) => {
-      ev.preventDefault();
-      save(button, () => api('/api/pipelines/' + encodeURIComponent(p.name), { method: 'PUT', body: JSON.stringify({ text: area.value }) }), () => { showNotice('saved ' + p.name); showPipelines(p.name); });
-    });
-    return form;
-  }
-
   // A save bar for a form: the button, whether anything waits to be saved, and a note. markDirty() flips it to unsaved.
   function saveBar(form, button, note) {
     const state = el('span', { class: 'state', text: 'No unsaved changes' });
@@ -1169,7 +1045,18 @@ import { events } from './app/events.ts';
     return { node: el('div', { class: 'savebar' }, [button, state, el('span', { class: 'why', text: note })]), markDirty };
   }
 
-  function stagesForm(p, actions, profiles) {
+  // The Stage editor, which the React Pipelines page mounts (app/pipelines/StagesForm.tsx) until LASSO-80 moves it to
+  // React. Each build reads Actions and config afresh; `saved` has the page read the file again after a Save.
+  adoptOldStagesForm(async (p, saved) => {
+    const actions = await api('/api/actions').catch(() => []);
+    const config = await api('/api/config').then((c) => c.config).catch(() => ({ profiles: {}, default_profile: null, budget: {} }));
+    // What the Pipeline and Stage cards share about profiles: config as last read (a drawer save refreshes it),
+    // the Pipeline dropdown's choice, each card's redraw, run when either changes, and touched(), which marks the form unsaved.
+    const profiles = { config, pipeline: p.name, chosen: () => null, redraws: [], touched: () => {}, changed(next) { if (next) this.config = next; for (const r of this.redraws) r(); } };
+    return stagesForm(p, actions, profiles, saved);
+  });
+
+  function stagesForm(p, actions, profiles, saved) {
     const pipeline = p.pipeline;
     const defaults = profiles.config.budget || {};
     // Each configured Action's params, by name; a global one stands ahead of a repo's own of the same name.
@@ -1275,7 +1162,7 @@ import { events } from './app/events.ts';
         if (kept.some((c) => c.fresh) || order.join('\n') !== pipeline.stages.map((s) => s.name).join('\n')) patch.order = order;
         if (!Object.keys(patch).length) { showNotice('nothing changed'); return false; }
         await api('/api/pipelines/' + encodeURIComponent(p.name), { method: 'PATCH', body: JSON.stringify(patch) });
-      }, () => { showNotice('saved ' + p.name); showPipelines(p.name); });
+      }, () => { showNotice('saved ' + p.name); saved(); });
     });
     return form;
   }
@@ -1285,7 +1172,7 @@ import { events } from './app/events.ts';
   const BLANK_ACTION = { kind: 'action', name: '', action: '', with: {} };
 
   // params: each Action config.yaml defines, by name, with the params a Stage supplies under with: (ADR 0010).
-  // profiles: the editor's shared profile context (pipelineEditor), so the profile button resolves what a Stage inherits.
+  // profiles: the editor's shared profile context (adoptOldStagesForm above), so the profile button resolves what a Stage inherits.
   // A card starts closed to one summary line, except a new Stage, which opens ready to fill in.
   function stageCard(s, pipeline, fresh, params = {}, profiles) {
     if (s.kind === 'action') {
@@ -1434,7 +1321,7 @@ import { events } from './app/events.ts';
     if (view === 'pipelines') {
       const rest = hash.startsWith('pipelines/') ? decodeName(hash.slice('pipelines/'.length)) : null;
       const m = rest && /^(.+)\/v(\d+)$/.exec(rest);
-      showPipelines(m ? m[1] : rest, m ? Number(m[2]) : null);
+      showPipelines(pipelinesPanel, m ? m[1] : rest, m ? Number(m[2]) : null);
     }
     else if (view === 'config') showConfig(configPanel);
     else refreshLedger().catch(failing);

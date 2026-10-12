@@ -103,4 +103,21 @@ describe("the event stream", () => {
     await stream.seen("config after a profile save", (e) => e.event === "config" && stream.events.indexOf(e) >= before);
     stream.close();
   });
+
+  it("names each Pipeline created, edited or deleted through the API, so an open Pipelines page reads its list again", async () => {
+    const lasso = await lassoWith();
+    const stream = listen(lasso);
+    await stream.seen("hello", (e) => e.event === "hello");
+    const after = (n: number) => (e: Event) => stream.events.indexOf(e) >= n;
+    let before = stream.events.length;
+    await lasso.api("/api/pipelines/two", { method: "PUT", body: JSON.stringify({ text: PIPELINE, create: true }) });
+    await stream.seen("pipeline after a create", (e) => after(before)(e) && e.event === "pipeline" && e.data.pipeline === "two");
+    before = stream.events.length;
+    await lasso.api("/api/pipelines/two", { method: "PATCH", body: JSON.stringify({ stages: { implement: { prompt: "Do it well." } } }) });
+    await stream.seen("pipeline after a patch", (e) => after(before)(e) && e.event === "pipeline" && e.data.pipeline === "two");
+    before = stream.events.length;
+    await lasso.api("/api/pipelines/two", { method: "DELETE" });
+    await stream.seen("pipeline after a delete", (e) => after(before)(e) && e.event === "pipeline" && e.data.pipeline === "two");
+    stream.close();
+  });
 });

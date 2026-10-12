@@ -206,6 +206,13 @@ export interface PipelineFile {
   problem: string | null;
 }
 
+/** A Version of a Pipeline that active Tickets still run, and how many. */
+export interface LiveVersionView {
+  version: number;
+  createdAt: string;
+  live: number;
+}
+
 /** A frozen Version of a Pipeline, read-only, with how many active Tickets run it. */
 export interface PipelineVersionView {
   name: string;

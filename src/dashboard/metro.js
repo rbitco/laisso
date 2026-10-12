@@ -153,6 +153,20 @@ export function metroTrack(t) {
 }
 
 /**
+ * The Pipelines list's small line of a Pipeline's Stages: a ring for a Runner or human Stage, a square for an action Stage.
+ * @param {Array<{ kind: string }>} stages
+ * @returns {string}
+ */
+export function pipelineLine(stages) {
+  let x = 5;
+  const pts = stages.map((s) => { const p = { s, x }; x += s.kind === 'action' ? 9 : 14; return p; });
+  const w = (pts.length ? pts[pts.length - 1].x : 0) + 5;
+  let o = `<svg viewBox="0 0 ${w} 12" width="${w}" height="12" aria-hidden="true"><line x1="5" y1="6" x2="${w - 5}" y2="6" stroke="var(--line)" stroke-width="2"/>`;
+  for (const { s, x: cx } of pts) o += s.kind === 'action' ? `<rect x="${cx - 3}" y="3" width="6" height="6" rx="1.5" fill="var(--muted)"/>` : `<circle cx="${cx}" cy="6" r="3.6" fill="var(--bg)" stroke="var(--run)" stroke-width="2"/>`;
+  return o + '</svg>';
+}
+
+/**
  * The detail's Metro flow diagram: a thick track, station circles for done, current and ahead
  * Stages, action Stages as ticks, a red octagon for Flagged, the PR feedback orbit with its
  * Rounds badge, a small orbit counting attempts, a pulsing ring while running, and no
