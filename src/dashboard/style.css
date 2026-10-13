@@ -27,7 +27,9 @@
 [hidden] { display: none !important; }
 body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 ui-sans-serif, system-ui, sans-serif; }
 header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); }
-header h1 { font-size: 16px; margin: 0 16px 0 0; letter-spacing: 0.04em; }
+header h1 { font-size: 16px; margin: 0 16px 0 0; letter-spacing: 0.04em; display: flex; align-items: center; gap: 8px; }
+/* A dev build's mark, so a dev clone's dashboard is never taken for the installed Lasso's. */
+.dev-badge { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; padding: 1px 7px; border-radius: 999px; color: var(--amber); background: var(--amber-bg); border: 1px solid var(--amber); }
 form[data-role="intake"] { display: flex; gap: 8px; flex: 1 1 320px; }
 form[data-role="intake"] input { flex: 1; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; }
 button { font: inherit; padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--pill); color: inherit; cursor: pointer; }

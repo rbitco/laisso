@@ -26,12 +26,23 @@ refuses to start until it is built.
 
 ```sh
 pnpm install
-pnpm start            # builds the dashboard, then starts lasso on http://localhost:7433
-pnpm start -- status  # the ledger, as a client of the running process
-pnpm start -- check   # run a tick now and print what changed
-pnpm build            # build the dashboard alone
-pnpm dev              # serve the dashboard from source, forwarding /api to a running lasso (LASSO_PORT, default 7433)
+pnpm start               # builds the dashboard, then starts lasso on http://localhost:7434
+pnpm start status        # the ledger, as a client of the running process
+pnpm start check         # run a tick now and print what changed
+pnpm start --port 7500   # any lasso command and options follow pnpm start
+pnpm build               # build the dashboard alone
+pnpm dev                 # serve the dashboard from source, forwarding /api to the dev lasso (port 7434)
 ```
+
+A clone keeps out of the installed Lasso's way: `pnpm start` and `pnpm dev`
+use the Lasso home `~/.lasso-dev` on port 7434, where an installed `lasso`
+uses `~/.lasso` on 7433, so both can run at once. Set `LASSO_HOME` or
+`LASSO_PORT` to override either, such as `LASSO_HOME=~/.lasso` to point dev
+at the real home on purpose. `LASSO_PORT` only sets the port in a new
+home's `config.yaml`; an existing one keeps its `port:`. A dev build
+(version `0.0.0-dev`) shows a "dev" badge in the dashboard header and
+"(dev)" in the tab title, and `lasso status` starts with the version and
+Lasso home that answered.
 
 The package `@rbitco/lasso` ships prebuilt JavaScript, since Node will not
 run TypeScript from `node_modules`. `npm pack` typechecks, builds the

@@ -11,7 +11,15 @@ import type { FeedbackRow } from "../store/feedback.ts";
 import { quietWhy } from "../review/review.ts";
 import type { VersionNotice } from "../version-notice.ts";
 
-export type DisplayState = "flagged" | "needs_you" | "holding" | "ready" | "running" | "queued" | "quiet" | "done" | "abandoned";
+/** /api/health: which Lasso answered. The version and Lasso home tell an installed Lasso from a dev clone's. */
+export interface Health {
+  ok: true;
+  pid: number;
+  version: string;
+  home: string;
+}
+
+export type DisplayState ="flagged" | "needs_you" | "holding" | "ready" | "running" | "queued" | "quiet" | "done" | "abandoned";
 
 /** A lever the human can pull on a Ticket right now; the dashboard renders one button per Trigger. Flagged, the six exits. */
 export interface Trigger {

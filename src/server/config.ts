@@ -188,6 +188,18 @@ notifications:
 
 export class ConfigError extends Error {}
 
+/**
+ * The commented config.yaml a new Lasso home starts with, its port taken from LASSO_PORT when that is set: a dev
+ * clone's `pnpm start` sets 7434, so its home listens beside the installed Lasso's on 7433.
+ */
+export function defaultConfigYaml(env: NodeJS.ProcessEnv = process.env): string {
+  const raw = env.LASSO_PORT;
+  if (!raw) return DEFAULT_CONFIG_YAML;
+  const port = Number(raw);
+  if (!/^\d+$/.test(raw) || port < 1 || port > 65535) throw new ConfigError(`LASSO_PORT must be a port number, not ${raw}`);
+  return DEFAULT_CONFIG_YAML.replace(/^port: \d+ */m, (line) => `port: ${port}`.padEnd(line.length));
+}
+
 export function loadConfig(home: LassoHome, overrides: { port?: number } = {}): Config {
   let text: string;
   try {

@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { DEFAULT_CONFIG_YAML } from "./config.ts";
+import { defaultConfigYaml } from "./config.ts";
 import { DEFAULT_PIPELINE_YAML } from "../pipeline/default.ts";
 
 /** The Lasso home: everything Lasso owns lives under it (ADR 0006). */
@@ -30,17 +30,20 @@ export function resolveHome(env: NodeJS.ProcessEnv = process.env): LassoHome {
   };
 }
 
-/** Create the home's directories and write defaults that are absent. Never overwrites. */
-export function ensureHome(home: LassoHome): { wroteConfig: boolean; wrotePipeline: boolean } {
+/**
+ * Create the home's directories and write defaults that are absent. Never overwrites, so LASSO_PORT, which sets a
+ * new config's port, has no effect on a home that already has one.
+ */
+export function ensureHome(home: LassoHome, env: NodeJS.ProcessEnv = process.env): { wroteConfig: boolean; wrotePipeline: boolean } {
   mkdirSync(home.pipelinesDir, { recursive: true });
   mkdirSync(home.ticketsDir, { recursive: true });
-  const wroteConfig = writeIfAbsent(home.configFile, DEFAULT_CONFIG_YAML);
-  const wrotePipeline = writeIfAbsent(path.join(home.pipelinesDir, "default.yaml"), DEFAULT_PIPELINE_YAML);
+  const wroteConfig = writeIfAbsent(home.configFile, () => defaultConfigYaml(env));
+  const wrotePipeline = writeIfAbsent(path.join(home.pipelinesDir, "default.yaml"), () => DEFAULT_PIPELINE_YAML);
   return { wroteConfig, wrotePipeline };
 }
 
-function writeIfAbsent(file: string, content: string): boolean {
+function writeIfAbsent(file: string, content: () => string): boolean {
   if (existsSync(file)) return false;
-  writeFileSync(file, content, { flag: "wx" });
+  writeFileSync(file, content(), { flag: "wx" });
   return true;
 }

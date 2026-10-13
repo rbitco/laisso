@@ -18,7 +18,7 @@
     "node": ">=24"
   },
   "scripts": {
-    "start": "vite build --logLevel warn && node bin/lasso.js",
+    "start": "vite build --logLevel warn && node scripts/start.ts",
     "build": "vite build",
     "bundle": "esbuild bin/lasso.js --bundle --platform=node --format=esm --target=node24 --packages=external --sourcemap --outfile=dist/lasso.js --log-level=warning",
     "prepack": "npm run typecheck && npm run build && npm run bundle",

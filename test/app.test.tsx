@@ -4,7 +4,7 @@ import { render, screen, cleanup, act, waitFor, within } from "@testing-library/
 import { userEvent } from "@testing-library/user-event";
 import { DEFAULT_CONFIG } from "../src/server/config.ts";
 import type { BudgetView } from "../src/budget/budget.ts";
-import type { ConfigFile, IntakeResult, PipelineListing, PipelineVersionView, TicketDetail, VersionView } from "../src/api/views.ts";
+import type { ConfigFile, IntakeResult, PipelineListing, PipelineVersionView, TicketDetail, VersionView, Health } from "../src/api/views.ts";
 import type { Detection } from "../src/intake/detect.ts";
 import type { TickResult, TickStatus } from "../src/server/tick.ts";
 import { App } from "../src/dashboard/app/App.tsx";
@@ -63,6 +63,7 @@ function fakeLasso() {
     branchExisted: false,
     held: null as Promise<void> | null,
     version: { version: "1.2.0", notice: { kind: "none" }, text: null } as VersionView,
+    build: "1.2.3",
   };
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
   vi.stubGlobal("fetch", async (url: string, init: RequestInit = {}) => {
@@ -79,6 +80,7 @@ function fakeLasso() {
       const t = state.tickets.find((x) => x.id === one[1]);
       return t ? json(t) : json({ error: `no Ticket matches ${one[1]}` }, 404);
     }
+    if (url === "/api/health") return json({ ok: true, pid: 1, version: state.build, home: "/Users/me/.lasso", missingTools: [] } satisfies Health);
     if (url === "/api/tick") return json(state.tick);
     if (url === "/api/version") return json(state.version);
     if (url === "/api/check-now") return json({ at: ago(0), changes: state.changes } satisfies TickResult);
@@ -183,6 +185,30 @@ describe("the version notice", () => {
     render(<App />);
     await screen.findByText("Ticket A");
     expect(versionNotice()).toBeNull();
+  });
+});
+
+describe("the dev badge", () => {
+  beforeEach(() => {
+    document.title = "Lasso";
+  });
+
+  it("marks a dev build in the header and the tab title", async () => {
+    const lasso = fakeLasso();
+    lasso.state.build = "0.0.0-dev";
+    render(<App />);
+    const badge = await screen.findByText("dev");
+    expect(badge.closest("h1")).toBeTruthy();
+    expect(document.title).toBe("(dev) Lasso");
+  });
+
+  it("is absent for a release", async () => {
+    const lasso = fakeLasso();
+    render(<App />);
+    await screen.findByText("Ticket A");
+    await waitFor(() => expect(lasso.gets("/api/health")).toBeGreaterThan(0));
+    expect(document.querySelector('[data-role="dev-badge"]')).toBeNull();
+    expect(document.title).toBe("Lasso");
   });
 });
 

@@ -93,7 +93,7 @@ export function createApp(deps: AppDeps): Hono {
     return c.json({ error: error.message }, 500);
   });
 
-  app.get("/api/health", (c) => c.json({ ok: true, pid: process.pid, version: deps.version, missingTools: deps.missingTools ?? [] } satisfies Health));
+  app.get("/api/health", (c) => c.json({ ok: true, pid: process.pid, version: deps.version, home: deps.home.root, missingTools: deps.missingTools ?? [] } satisfies Health));
 
   app.get("/api/version", (c) => {
     const notice = deps.versionNotice();

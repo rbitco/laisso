@@ -6,6 +6,7 @@ import { ConfirmIntake, IntakeForm, type Detected } from "./header/Intake.tsx";
 import { Tick } from "./header/Tick.tsx";
 import { MissingTools } from "./header/Tools.tsx";
 import { VersionNotice } from "./header/VersionNotice.tsx";
+import { DevBadge } from "./header/DevBadge.tsx";
 import { Ledger } from "./ledger/Ledger.tsx";
 import { TicketPage } from "./ticket/TicketPage.tsx";
 import { PipelinesPage } from "./pipelines/PipelinesPage.tsx";
@@ -54,7 +55,10 @@ export function App() {
   return (
     <>
       <header>
-        <h1>LASSO</h1>
+        <h1>
+          LASSO
+          <DevBadge />
+        </h1>
         <IntakeForm text={intakeText} onText={setIntakeText} onDetected={(d) => setIntake((was) => ({ ...d, n: (was?.n ?? 0) + 1 }))} />
         <Tick onChecked={reread} />
         <VersionNotice />

@@ -1,5 +1,5 @@
 import { createClient, type Client } from "./client.ts";
-import type { TicketView, TicketDetail, SessionView, VersionView } from "../api/views.ts";
+import type { Health, TicketView, TicketDetail, SessionView, VersionView } from "../api/views.ts";
 
 export interface StatusOptions {
   portFlag?: number;
@@ -11,18 +11,20 @@ export interface StatusOptions {
 export async function status(opts: StatusOptions): Promise<number> {
   const client = createClient(opts.portFlag);
   try {
+    // Text output leads with which Lasso answered, so an installed Lasso and a dev clone's are never confused, then any version notice.
+    let which = "";
     if (!opts.json) {
       const notice = await versionNotice(client);
-      if (notice) console.log(notice + "\n");
+      which = renderWhich(await client.get<Health>("/api/health")) + "\n" + (notice ? notice + "\n" : "") + "\n";
     }
     if (opts.ticket) {
       const detail = await client.get<TicketDetail>(`/api/tickets/${encodeURIComponent(opts.ticket)}`);
-      console.log(opts.json ? JSON.stringify(detail, null, 2) : renderDetail(detail));
+      console.log(opts.json ? JSON.stringify(detail, null, 2) : which + renderDetail(detail));
       return 0;
     }
     const tickets = await client.get<TicketView[]>(`/api/tickets${opts.all ? "?all=1" : ""}`);
     if (opts.json) console.log(JSON.stringify({ tickets }, null, 2));
-    else console.log(tickets.length ? renderLedger(tickets) : "no active Tickets");
+    else console.log(which + (tickets.length ? renderLedger(tickets) : "no active Tickets"));
     return 0;
   } catch (error) {
     if (error instanceof Error) {
@@ -40,6 +42,10 @@ async function versionNotice(client: Client): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+function renderWhich(h: Health): string {
+  return `lasso ${h.version}  home ${h.home}`;
 }
 
 function renderLedger(tickets: TicketView[]): string {
