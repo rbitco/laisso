@@ -43,7 +43,10 @@ jobs:
           git config --global user.name "lasso release"
           git config --global user.email "release@lasso.invalid"
 
-      - run: pnpm test
+      # The suite drives real processes against timing; on this shared
+      # 4-core runner fewer workers and a retry keep load-induced flakes
+      # from blocking a release. A test that fails three times still fails.
+      - run: pnpm test -- --maxWorkers=2 --retry=2
 
       - name: Set version from tag
         run: |

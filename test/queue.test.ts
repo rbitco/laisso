@@ -78,8 +78,8 @@ describe("the concurrency cap", () => {
     expect((await detailOf(lasso, d.id)).display).toMatchObject({ state: "queued", why: "1 in line; implement starts when a slot frees" });
     expect((await detailOf(lasso, a.id)).display.state).toBe("flagged");
     // A may have been stopped before its fake claude booted; B and C record their launch either way.
-    const calls = await waitFor(async () => { const calls = await lasso.runner.calls(); return calls.length >= 2 ? calls : null; }, "B and C to launch");
-    expect(calls.map((call) => call.env.LASSO_TICKET)).toEqual(expect.arrayContaining([b.id, c.id]));
+    const launched = async () => (await lasso.runner.calls()).map((call) => call.env.LASSO_TICKET);
+    await waitFor(async () => { const ids = await launched(); return ids.includes(b.id) && ids.includes(c.id) ? true : null; }, "B and C to launch");
   });
 
   it("does not count a terminal Session as a slot", async () => {

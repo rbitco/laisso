@@ -428,7 +428,8 @@ export async function startLasso(opts: StartOptions = {}): Promise<Lasso> {
     },
     async destroy() {
       await lasso.stop();
-      await rm(path.dirname(home), { recursive: true, force: true });
+      // A fake a Session spawned may still be writing its calls file as the directory goes.
+      await rm(path.dirname(home), { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     },
   };
   return lasso;

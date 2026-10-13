@@ -199,7 +199,8 @@ describe("the dev badge", () => {
     render(<App />);
     const badge = await screen.findByText("dev");
     expect(badge.closest("h1")).toBeTruthy();
-    expect(document.title).toBe("(dev) Lasso");
+    // The title is set in an effect, which may run after the badge first paints.
+    await waitFor(() => expect(document.title).toBe("(dev) Lasso"));
   });
 
   it("is absent for a release", async () => {

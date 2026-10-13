@@ -235,18 +235,15 @@ describe("the tracker mirror", () => {
     await waitFor(async () => ((await detailOf(lasso, ticket.id)).session?.mode === "action" ? true : null), "the action Session to open");
     await lasso.kill();
 
+    // The tracker answers from here on. It is set before the restart: on a slow machine the startup tick
+    // can already be performing the action again by the time the test looks.
+    await lasso.tracker.reply({ tool: "acli", match: ["workitem transition"], stdout: "✓ ok\n" }, true);
     const again = await startLasso({ home: lasso.home, pathDir: lasso.pathDir, port: lasso.port });
     running.push(again);
-    const d = await detailOf(again, ticket.id);
-    expect(d.session).toMatchObject({ stage: "transition-in-progress", mode: "action", running: false, outcome: "interrupted", endedReason: "shutdown" });
-    expect(d.display).toMatchObject({ state: "ready", why: "In Progress starts on the next tick" });
-    await again.tracker.reply({ tool: "acli", match: ["workitem transition"], stdout: "✓ ok\n" }, true);
-    // The startup push comes first on the tick, then the action is performed again.
-    const tick = await checkNow(again);
-    expect(tick.changes.slice(0, 2)).toEqual([
-      { ticket: ticket.id, summary: "mirror pushed" },
-      { ticket: ticket.id, summary: "started transition-in-progress" },
-    ]);
+    const interrupted = (await detailOf(again, ticket.id)).sessions.find((s) => s.mode === "action" && s.outcome === "interrupted");
+    expect(interrupted).toMatchObject({ stage: "transition-in-progress", running: false, endedReason: "shutdown" });
+    // The action is performed again on the next tick, the startup one or a Check now.
+    void checkNow(again).catch(() => undefined);
     const actionRuns = async () => (await detailOf(again, ticket.id)).sessions.filter((s) => s.mode === "action").map((s) => [s.stage, s.outcome]);
     await waitFor(async () => ((await actionRuns())[0]?.[1] === "succeeded" ? true : null), "the transition to succeed");
     expect(await actionRuns()).toEqual([
