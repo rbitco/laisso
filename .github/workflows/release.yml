@@ -1,0 +1,76 @@
+name: Release
+
+# Pushing a vX.Y.Z tag publishes @rbitco/lasso to the homelab Verdaccio
+# (ADR 0013). The version lives only in the tag: package.json stays
+# 0.0.0-dev in git, since main only takes squash-merged PRs, and is set
+# from the tag here before packing.
+#
+# Self-hosted: npm.matty.rocks is LAN-only, so a GitHub-hosted runner
+# cannot reach it.
+#
+# Run by hand (workflow_dispatch) it is a dry run: everything up to the
+# smoke test, as 0.0.0-dryrun, with nothing published.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: [self-hosted, rbitco]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 8
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Some tests commit in temporary repos.
+      - run: |
+          git config --global user.name "lasso release"
+          git config --global user.email "release@lasso.invalid"
+
+      - run: pnpm test
+
+      - name: Set version from tag
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then VERSION="${GITHUB_REF_NAME#v}"; else VERSION=0.0.0-dryrun; fi
+          npm version "$VERSION" --no-git-tag-version
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      # prepack typechecks, builds the dashboard, then bundles.
+      - run: npm pack
+
+      # Stops the release before anything is published if the tarball
+      # does not install and serve as $VERSION.
+      - run: node scripts/smoke-test.ts "rbitco-lasso-$VERSION.tgz" "$VERSION"
+
+      - name: Publish to npm.matty.rocks
+        if: github.ref_type == 'tag'
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          npmrc="$RUNNER_TEMP/.npmrc"
+          echo "//npm.matty.rocks/:_authToken=${NPM_TOKEN}" > "$npmrc"
+          npm publish "rbitco-lasso-$VERSION.tgz" --userconfig "$npmrc"
+          rm -f "$npmrc"
+
+      - name: GitHub Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" "rbitco-lasso-$VERSION.tgz" --generate-notes

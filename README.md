@@ -15,6 +15,14 @@ npm i -g @rbitco/lasso
 lasso doctor   # which tools Lasso needs, whether each is found and logged in, and what needs it
 ```
 
+A machine without homelab DNS (the work VLAN) uses
+`http://10.30.0.61:4873/` as the registry instead. Only the `@rbitco`
+scope points there; everything else still comes from npmjs.
+
+To upgrade, `npm update -g @rbitco/lasso`, then restart Lasso. The
+dashboard and `lasso status` say when a newer version is published, and
+when one is installed but not yet running.
+
 Lasso also checks PATH at each start, logs a warning per missing tool,
 and lists them in the dashboard header.
 
@@ -54,6 +62,18 @@ tarball holds only `dist/`. To check one installs and serves:
 npm pack
 node scripts/smoke-test.ts rbitco-lasso-0.0.0-dev.tgz 0.0.0-dev
 ```
+
+To cut a release, tag main and push the tag:
+
+```sh
+git fetch origin
+git tag vX.Y.Z origin/main && git push origin vX.Y.Z
+```
+
+`.github/workflows/release.yml` then runs on the homelab runner: tests,
+sets the version from the tag, packs, smoke-tests the tarball, publishes it
+to `npm.matty.rocks` and creates a GitHub Release. package.json stays
+`0.0.0-dev` in git.
 
 Everything Lasso owns lives under `~/.lasso` (`LASSO_HOME` overrides it):
 `config.yaml`, `pipelines/`, `tickets/`, `lasso.db`, `backups/`, `lasso.log`, `lasso.pid`.
