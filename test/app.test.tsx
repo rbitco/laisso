@@ -51,6 +51,9 @@ const DETECTED: Detection = {
 
 const VERSION: PipelineVersionView = { name: "default", version: 2, createdAt: ago(180), live: 1, deleted: false, pipeline: { profile: null, budget: {}, stages: [] } };
 
+/** A Tick status as of now: last tick 10s ago, next in 20s. Built when sent, so a slow machine's delay since setup can't skew the tooltip. */
+const freshTick = (): TickStatus => ({ tickSeconds: 30, lastTick: ago(10), nextTick: new Date(Date.now() + 20_000).toISOString(), running: false });
+
 type Sent = { method: string; route: string; body: unknown };
 
 /** A stand-in for Lasso's /api: Tickets, one Pipeline and its Version 2, config, the Tick, the version notice, and intake; every request it was sent. */
@@ -58,7 +61,7 @@ function fakeLasso() {
   const sent: Sent[] = [];
   const state = {
     tickets: [ticket("A"), ticket("B")],
-    tick: { tickSeconds: 30, lastTick: ago(10), nextTick: new Date(Date.now() + 20_000).toISOString(), running: false } as TickStatus,
+    tick: freshTick(),
     changes: [] as TickResult["changes"],
     branchExisted: false,
     held: null as Promise<void> | null,
@@ -120,7 +123,7 @@ describe("the Tick dot", () => {
     await screen.findByText("Ticket A");
     expect(dot().className).toBe("dot tick-dot");
     expect(dot().hasAttribute("title")).toBe(false);
-    send("hello", lasso.state.tick);
+    send("hello", (lasso.state.tick = freshTick()));
     expect(dot().className).toBe("dot tick-dot idle");
     expect(dot().getAttribute("title")).toBe("last tick 10s ago · next in 20s");
     expect(screen.getByRole("img", { name: "last tick 10s ago · next in 20s" })).toBe(dot());
@@ -135,7 +138,7 @@ describe("the Tick dot", () => {
   it("holds a fast Tick's pulse for one cycle, though the tooltip follows at once", async () => {
     const lasso = fakeLasso();
     render(<App />);
-    send("hello", lasso.state.tick);
+    send("hello", (lasso.state.tick = freshTick()));
     // The Tick ran and ended between two events: a newer lastTick than a still status.
     send("tick", { ...lasso.state.tick, lastTick: ago(0) });
     expect(dot().className).toBe("dot tick-dot running");
@@ -146,7 +149,7 @@ describe("the Tick dot", () => {
   it("moves its countdown each second", async () => {
     const lasso = fakeLasso();
     render(<App />);
-    send("hello", lasso.state.tick);
+    send("hello", (lasso.state.tick = freshTick()));
     expect(dot().title).toBe("last tick 10s ago · next in 20s");
     await waitFor(() => expect(dot().title).toBe("last tick 11s ago · next in 19s"), { timeout: 2000 });
   });
@@ -155,10 +158,10 @@ describe("the Tick dot", () => {
     const lasso = fakeLasso();
     render(<App />);
     await screen.findByText("Ticket A");
-    send("hello", lasso.state.tick);
+    send("hello", (lasso.state.tick = freshTick()));
     expect(lasso.gets("/api/tickets")).toBe(1);
     send("error");
-    send("hello", lasso.state.tick);
+    send("hello", (lasso.state.tick = freshTick()));
     expect(dot().className).toBe("dot tick-dot idle");
     await waitFor(() => expect(lasso.gets("/api/tickets")).toBe(2));
   });
@@ -176,7 +179,7 @@ describe("the version notice", () => {
     send("version");
     expect(await screen.findByText("v1.3.0 installed: restart lasso to use it")).toBeTruthy();
     lasso.state.version = { version: "1.3.0", notice: { kind: "none" }, text: null };
-    send("hello", lasso.state.tick);
+    send("hello", (lasso.state.tick = freshTick()));
     await waitFor(() => expect(versionNotice()).toBeNull());
   });
 
@@ -218,7 +221,7 @@ describe("Check now", () => {
     const lasso = fakeLasso();
     render(<App />);
     await screen.findByText("Ticket A");
-    send("hello", lasso.state.tick);
+    send("hello", (lasso.state.tick = freshTick()));
     lasso.state.changes = [
       { ticket: "A", summary: "APP-A: review started" },
       { ticket: "B", summary: "APP-B: PR merged" },
