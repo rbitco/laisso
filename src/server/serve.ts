@@ -27,6 +27,7 @@ import { Changes } from "./changes.ts";
 import { createApp } from "../api/app.ts";
 import { Dashboard, DashboardMissing } from "../dashboard/page.ts";
 import { findPackageRoot } from "../package-root.ts";
+import { startupToolCheck } from "../tools/startup.ts";
 
 export interface ServeOptions {
   portFlag?: number;
@@ -126,7 +127,8 @@ export async function serve(opts: ServeOptions): Promise<number> {
   const tick = new Tick(config.tick, log, async () => [...(await mirror.retryPending()), ...(await actions.runDue()), ...(await review.poll()), ...(await runs.startRunnable()), ...(await teardown.sweep())], () => changes.emit({ kind: "tick" }));
   const overrides = new Overrides({ config, home, tickets, progress, log });
   const exits = new Exits({ tickets, sessions, log, progress, runs, terminal, budgets, tick, teardown, overrides });
-  const app = createApp({ config, home, tick, tickets, versions, sessions, feedback, runs, progress, terminal, exits, overrides, budgets, queue, changes, dashboard, version: pkg.version });
+  const missingTools = startupToolCheck(config, home, tickets, log);
+  const app = createApp({ config, home, tick, tickets, versions, sessions, feedback, runs, progress, terminal, exits, overrides, budgets, queue, changes, dashboard, version: pkg.version, missingTools });
 
   if (defaults.wroteConfig) log.info("config.written", { file: home.configFile });
   if (defaults.wrotePipeline) log.info("pipeline.written", { name: "default" });

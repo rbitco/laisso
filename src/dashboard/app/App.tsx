@@ -4,6 +4,7 @@ import { Notice, showNotice } from "./notice.tsx";
 import { usePlace, type Place } from "./route.ts";
 import { ConfirmIntake, IntakeForm, type Detected } from "./header/Intake.tsx";
 import { Tick } from "./header/Tick.tsx";
+import { MissingTools } from "./header/Tools.tsx";
 import { Ledger } from "./ledger/Ledger.tsx";
 import { TicketPage } from "./ticket/TicketPage.tsx";
 import { PipelinesPage } from "./pipelines/PipelinesPage.tsx";
@@ -19,7 +20,7 @@ const VIEWS = [
 const LEDGER: Place = { route: { view: "ledger" }, visit: 0 };
 
 /**
- * The dashboard: the header (intake, the Tick dot and Check now, the view links), then the view the hash names. A
+ * The dashboard: the header (intake, the Tick dot and Check now, the view links, any missing tools), then the view the hash names. A
  * Ticket's page swaps in once its data is here, so until then the view before it stays; with a Ticket open the Ledger
  * collapses to a sidebar beside it. When Lasso comes back after a restart, the view shown reads everything again, as
  * it may have missed some changes.
@@ -62,6 +63,7 @@ export function App() {
             </a>
           ))}
         </nav>
+        <MissingTools />
       </header>
       <main>
         <Notice />

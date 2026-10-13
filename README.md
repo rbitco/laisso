@@ -5,6 +5,19 @@ Lasso drives a Ticket through a Pipeline of Stages using a coding-agent Runner
 tracker, and shows every Ticket on a local dashboard. The spec is
 `docs/spec/lasso-v1.md`; the glossary is `CONTEXT.md`; decisions are in `docs/adr`.
 
+## New machine
+
+Node 24 or later, on the homelab LAN.
+
+```sh
+npm config set @rbitco:registry=https://npm.matty.rocks/
+npm i -g @rbitco/lasso
+lasso doctor   # which tools Lasso needs, whether each is found and logged in, and what needs it
+```
+
+Lasso also checks PATH at each start, logs a warning per missing tool,
+and lists them in the dashboard header.
+
 ## Run
 
 Node 24 or later. From a checkout the server runs as TypeScript directly; only the

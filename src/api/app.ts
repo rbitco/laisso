@@ -20,7 +20,7 @@ import { Intake, IntakeError, type IntakeRequest } from "../intake/intake.ts";
 import { PipelineError, type Pipeline } from "../pipeline/load.ts";
 import { PipelineFiles } from "../pipeline/files.ts";
 import type { Dashboard } from "../dashboard/page.ts";
-import { ticketView, ticketDetail, sessionView, sortForLedger, pipelineListing, pipelineFileView, pipelineVersionView, actionListings, type LiveVersionView, type ViewContext, type IntakeResult, type ConfigFile } from "./views.ts";
+import { ticketView, ticketDetail, sessionView, sortForLedger, pipelineListing, pipelineFileView, pipelineVersionView, actionListings, type LiveVersionView, type ViewContext, type IntakeResult, type ConfigFile, type Health, type MissingTool } from "./views.ts";
 import { readFileSync } from "node:fs";
 import { isPlainObject } from "../fields.ts";
 import { replaceFile } from "../atomic-write.ts";
@@ -43,6 +43,8 @@ export interface AppDeps {
   changes: Changes;
   dashboard: Dashboard;
   version: string;
+  /** Needed tools PATH lacked at startup; the dashboard header lists them. */
+  missingTools?: MissingTool[];
 }
 
 /** How long /api/events gathers changes before sending: a burst of writes to one Ticket goes out as one event. */
@@ -88,7 +90,7 @@ export function createApp(deps: AppDeps): Hono {
     return c.json({ error: error.message }, 500);
   });
 
-  app.get("/api/health", (c) => c.json({ ok: true, pid: process.pid, version: deps.version }));
+  app.get("/api/health", (c) => c.json({ ok: true, pid: process.pid, version: deps.version, missingTools: deps.missingTools ?? [] } satisfies Health));
 
   app.get("/api/tick", (c) => c.json(deps.tick.status()));
 

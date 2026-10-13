@@ -3,6 +3,7 @@ import { serve } from "../server/serve.ts";
 import { status } from "./status.ts";
 import { add } from "./add.ts";
 import { check } from "./check.ts";
+import { doctor } from "./doctor.ts";
 
 export const DEFAULT_PORT = 7433;
 
@@ -11,6 +12,7 @@ const USAGE = `usage:
   lasso add <ref | prompt>  intake a tracker reference or a prompt as a Ticket
   lasso status [ticket]     print the Ledger, or one Ticket's detail
   lasso check [ticket]      run a tick now and print what changed
+  lasso doctor              list the tools Lasso needs, whether each is found and logged in
 options:
   --port <n>       port for the server, or the server to talk to
   --json           machine-readable output for client commands
@@ -60,6 +62,8 @@ export async function main(argv: string[]): Promise<number> {
       return status({ portFlag, json: Boolean(values.json), all: Boolean(values.all), ticket: rest[0] });
     case "check":
       return check({ portFlag, json: Boolean(values.json), ticket: rest[0] });
+    case "doctor":
+      return doctor({ json: Boolean(values.json) });
     default:
       console.error(`unknown command: ${command}\n${USAGE}`);
       return 1;

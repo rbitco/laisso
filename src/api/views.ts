@@ -459,3 +459,17 @@ export function sortForLedger(views: TicketView[]): TicketView[] {
     return b.updatedAt.localeCompare(a.updatedAt);
   });
 }
+
+/** A tool Lasso needs that PATH lacked at startup, and what needs it. */
+export interface MissingTool {
+  name: string;
+  reasons: string[];
+}
+
+/** /api/health: who answered, and what the startup tool check found missing. */
+export interface Health {
+  ok: true;
+  pid: number;
+  version: string;
+  missingTools: MissingTool[];
+}
