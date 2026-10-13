@@ -1,5 +1,4 @@
 import { serve as listen } from "@hono/node-server";
-import { createRequire } from "node:module";
 import { resolveHome, ensureHome } from "./home.ts";
 import { migrateConfigProfiles, migrateHome, migrateVersions } from "./migrate.ts";
 import { applyLive, loadConfig } from "./config.ts";
@@ -27,8 +26,7 @@ import { Tick } from "./tick.ts";
 import { Changes } from "./changes.ts";
 import { createApp } from "../api/app.ts";
 import { Dashboard, DashboardMissing } from "../dashboard/page.ts";
-
-const VERSION = (createRequire(import.meta.url)("../../package.json") as { version: string }).version;
+import { findPackageRoot } from "../package-root.ts";
 
 export interface ServeOptions {
   portFlag?: number;
@@ -36,9 +34,11 @@ export interface ServeOptions {
 
 /** The one foreground lasso process (ADR 0008). Resolves with the exit code once it has shut down. */
 export async function serve(opts: ServeOptions): Promise<number> {
+  // Lasso's own version and dashboard, found the same way from source and from an installed bundle.
+  const pkg = findPackageRoot();
   let dashboard: Dashboard;
   try {
-    dashboard = new Dashboard();
+    dashboard = new Dashboard(pkg.dashboardDir, pkg.checkout);
   } catch (error) {
     if (error instanceof DashboardMissing) {
       console.error(error.message);
@@ -126,7 +126,7 @@ export async function serve(opts: ServeOptions): Promise<number> {
   const tick = new Tick(config.tick, log, async () => [...(await mirror.retryPending()), ...(await actions.runDue()), ...(await review.poll()), ...(await runs.startRunnable()), ...(await teardown.sweep())], () => changes.emit({ kind: "tick" }));
   const overrides = new Overrides({ config, home, tickets, progress, log });
   const exits = new Exits({ tickets, sessions, log, progress, runs, terminal, budgets, tick, teardown, overrides });
-  const app = createApp({ config, home, tick, tickets, versions, sessions, feedback, runs, progress, terminal, exits, overrides, budgets, queue, changes, dashboard, version: VERSION });
+  const app = createApp({ config, home, tick, tickets, versions, sessions, feedback, runs, progress, terminal, exits, overrides, budgets, queue, changes, dashboard, version: pkg.version });
 
   if (defaults.wroteConfig) log.info("config.written", { file: home.configFile });
   if (defaults.wrotePipeline) log.info("pipeline.written", { name: "default" });
@@ -145,7 +145,7 @@ export async function serve(opts: ServeOptions): Promise<number> {
     return 1;
   }
   const url = `http://localhost:${config.port}`;
-  log.info("started", { home: home.root, port: config.port, pid: process.pid, version: VERSION });
+  log.info("started", { home: home.root, port: config.port, pid: process.pid, version: pkg.version });
   console.log(`lasso listening at ${url}`);
 
   // Ctrl-C is honoured from here on, before reconciliation and the startup tick: a shutdown that

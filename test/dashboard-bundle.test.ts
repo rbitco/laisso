@@ -12,6 +12,12 @@ describe("the built dashboard", () => {
     expect(() => new Dashboard(dir)).toThrow(/not built .*run pnpm build/);
   });
 
+  it("calls a missing dashboard in an installed package a broken install", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "lasso-dist-"));
+    expect(() => new Dashboard(dir, false)).toThrow(/the install is broken; reinstall/);
+    expect(() => new Dashboard(dir, false)).not.toThrow(/pnpm/);
+  });
+
   it("serves the page at / and each bundled file at its path, with its type", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "lasso-dist-"));
     await mkdir(path.join(dir, "assets"));

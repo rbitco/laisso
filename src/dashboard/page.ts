@@ -1,9 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
-/** Where `pnpm build` writes the dashboard (ADR 0012); not committed. */
-export const DASHBOARD_DIR = path.resolve(import.meta.dirname, "../../dist/dashboard");
-
 const TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -18,10 +15,16 @@ export interface DashboardFile {
   type: string;
 }
 
-/** The built dashboard is missing: Lasso refuses to start rather than serve a blank page. */
+/** The built dashboard is missing: Lasso refuses to start rather than serve a blank page. A checkout has yet to
+ * build it; an installed package ships it, so there it means the install is broken. */
 export class DashboardMissing extends Error {
-  constructor(dir: string) {
-    super(`the dashboard is not built (no ${path.join(dir, "index.html")}); run pnpm build, or pnpm start, which builds first`);
+  constructor(dir: string, checkout: boolean) {
+    const page = path.join(dir, "index.html");
+    super(
+      checkout
+        ? `the dashboard is not built (no ${page}); run pnpm build, or pnpm start, which builds first`
+        : `the dashboard is missing (no ${page}); the install is broken; reinstall with npm i -g @rbitco/lasso`,
+    );
   }
 }
 
@@ -29,8 +32,9 @@ export class DashboardMissing extends Error {
 export class Dashboard {
   private files = new Map<string, DashboardFile>();
 
-  constructor(dir: string = DASHBOARD_DIR) {
-    if (!existsSync(path.join(dir, "index.html"))) throw new DashboardMissing(dir);
+  /** `dir` is the package root's dashboardDir; `checkout` picks the advice when it is missing. */
+  constructor(dir: string, checkout = true) {
+    if (!existsSync(path.join(dir, "index.html"))) throw new DashboardMissing(dir, checkout);
     for (const entry of readdirSync(dir, { recursive: true, withFileTypes: true })) {
       if (!entry.isFile()) continue;
       const file = path.join(entry.parentPath, entry.name);

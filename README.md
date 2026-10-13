@@ -7,7 +7,7 @@ tracker, and shows every Ticket on a local dashboard. The spec is
 
 ## Run
 
-Node 24 or later. The server runs as TypeScript directly; only the
+Node 24 or later. From a checkout the server runs as TypeScript directly; only the
 dashboard is built, by Vite, into `dist/dashboard/` (ADR 0012). Lasso
 refuses to start until it is built.
 
@@ -18,6 +18,17 @@ pnpm start -- status  # the ledger, as a client of the running process
 pnpm start -- check   # run a tick now and print what changed
 pnpm build            # build the dashboard alone
 pnpm dev              # serve the dashboard from source, forwarding /api to a running lasso (LASSO_PORT, default 7433)
+```
+
+The package `@rbitco/lasso` ships prebuilt JavaScript, since Node will not
+run TypeScript from `node_modules`. `npm pack` typechecks, builds the
+dashboard, then bundles the CLI and server with esbuild into
+`dist/lasso.js` (with a source map, so stack traces show `.ts` lines). The
+tarball holds only `dist/`. To check one installs and serves:
+
+```sh
+npm pack
+node scripts/smoke-test.ts rbitco-lasso-0.0.0-dev.tgz 0.0.0-dev
 ```
 
 Everything Lasso owns lives under `~/.lasso` (`LASSO_HOME` overrides it):
