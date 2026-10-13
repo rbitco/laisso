@@ -1,11 +1,12 @@
 // Smoke test for a packed Lasso: installs the tarball globally into a temporary prefix, starts the installed
-// `lasso` against a temporary Lasso home on a free port, and checks it serves its API and dashboard. The
+// `lasso` against a temporary Lasso home on a free port, checks it serves its API and dashboard, then that
+// `lasso skill install` finds the skill it ships. The
 // release workflow runs it on the tarball it is about to publish; test/package.test.ts runs it on a fresh pack.
 //
 //   node scripts/smoke-test.ts <tarball> <expected version>
 
 import { spawn, execFile } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -47,6 +48,12 @@ export async function smokeTest({ tarball, version, log = () => {} }: SmokeOptio
       await exited;
     }
     log("stopped");
+    // The skill is found from the installed bundle and installs under a stand-in HOME.
+    const userHome = path.join(root, "user");
+    await promisify(execFile)(path.join(prefix, "bin", "lasso"), ["skill", "install"], { env: { ...process.env, HOME: userHome } });
+    const stamp = (await readFile(path.join(userHome, ".claude", "skills", "lasso", ".lasso-version"), "utf8")).trim();
+    if (stamp !== version) throw new Error(`lasso skill install stamped ${stamp}, expected ${version}`);
+    log("lasso skill install ok");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

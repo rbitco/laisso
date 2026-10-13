@@ -1,19 +1,27 @@
+import { homedir } from "node:os";
 import { resolveHome } from "../server/home.ts";
 import { ConfigError, loadConfig } from "../server/config.ts";
 import { doctor as checkTools, findOnPath, homePipelines, neededTools, runCommand, storeTickets, type DoctorRow } from "../tools/tools.ts";
+import { findPackageRoot } from "../package-root.ts";
+import { skillStatus, type SkillStatus } from "../skill/skill.ts";
 
 export interface DoctorOptions {
   json: boolean;
+  /** LASSO_HOME, PATH and HOME are read from here: the process's own unless a test says otherwise. */
+  env?: NodeJS.ProcessEnv;
 }
 
 /**
  * `lasso doctor`: which external tools this Lasso home's config needs, whether
  * each is on PATH and logged in, and what needs it. Reads the Lasso home
  * directly, so it works with or without Lasso running, and writes nothing.
- * Exits 1 when a needed tool is missing or logged out.
+ * Exits 1 when a needed tool is missing or logged out. It also says whether
+ * each agent has the Lasso skill and from which version, as information only:
+ * the skill never changes the exit code.
  */
 export async function doctor(opts: DoctorOptions): Promise<number> {
-  const home = resolveHome();
+  const env = opts.env ?? process.env;
+  const home = resolveHome(env);
   let config;
   try {
     config = loadConfig(home);
@@ -25,15 +33,17 @@ export async function doctor(opts: DoctorOptions): Promise<number> {
     throw error;
   }
   const tools = neededTools({ config, pipelines: homePipelines(home), tickets: storeTickets(home) });
-  const rows = await checkTools(tools, { lookup: findOnPath(), run: runCommand });
+  const rows = await checkTools(tools, { lookup: findOnPath(env), run: runCommand });
   const problems = rows.filter((r) => !r.optional && (r.path === null || r.loggedIn === false));
-  if (opts.json) console.log(JSON.stringify({ home: home.root, tools: rows }, null, 2));
-  else console.log(renderDoctor(home.root, rows, problems));
+  const version = findPackageRoot().version;
+  const skill = skillStatus(env.HOME || homedir(), version);
+  if (opts.json) console.log(JSON.stringify({ home: home.root, tools: rows, skill }, null, 2));
+  else console.log(renderDoctor(home.root, rows, problems, skill, version));
   return problems.length ? 1 : 0;
 }
 
-/** One row per tool: found on PATH, logged in, and what needs it; then a line saying what to fix. */
-export function renderDoctor(home: string, rows: DoctorRow[], problems: DoctorRow[]): string {
+/** One row per tool: found on PATH, logged in, and what needs it; then a line saying what to fix; then the skill, per agent. */
+export function renderDoctor(home: string, rows: DoctorRow[], problems: DoctorRow[], skill: SkillStatus[] = [], version = ""): string {
   const table = [
     ["tool", "found", "logged in", "needed by"],
     ...rows.map((r) => [r.name, r.path === null ? "no" : "yes", r.loggedIn === null ? "-" : r.loggedIn ? "yes" : "no", (r.optional ? "optional: " : "") + r.reasons.join("; ")]),
@@ -43,5 +53,14 @@ export function renderDoctor(home: string, rows: DoctorRow[], problems: DoctorRo
   const verdict = problems.length
     ? problems.map((r) => (r.path === null ? `${r.name} not found on PATH` : `${r.name} is not logged in`)).join("; ")
     : "every needed tool is found and logged in";
-  return [`lasso home: ${home}`, "", ...lines, "", verdict].join("\n");
+  const skills = skill.length ? ["", ...skill.map((s) => skillLine(s, version))] : [];
+  return [`lasso home: ${home}`, "", ...lines, "", verdict, ...skills].join("\n");
+}
+
+/** One agent's copy of the skill, with the fix when it is not this Lasso's. */
+function skillLine(s: SkillStatus, version: string): string {
+  const head = `lasso skill for ${s.agent} (${s.dir}): `;
+  if (s.state === "current") return `${head}current, Lasso ${version}`;
+  if (s.state === "missing") return `${head}missing; run lasso skill install`;
+  return `${head}from ${s.installed === null ? "an unknown version" : `Lasso ${s.installed}`}, this is Lasso ${version}; run lasso skill install`;
 }

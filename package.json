@@ -9,7 +9,8 @@
   "files": [
     "dist/lasso.js",
     "dist/lasso.js.map",
-    "dist/dashboard"
+    "dist/dashboard",
+    "skills"
   ],
   "publishConfig": {
     "registry": "https://npm.matty.rocks/"

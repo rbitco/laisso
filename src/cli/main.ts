@@ -4,6 +4,7 @@ import { status } from "./status.ts";
 import { add } from "./add.ts";
 import { check } from "./check.ts";
 import { doctor } from "./doctor.ts";
+import { skill } from "./skill.ts";
 
 export const DEFAULT_PORT = 7433;
 
@@ -13,13 +14,15 @@ const USAGE = `usage:
   lasso status [ticket]     print the Ledger, or one Ticket's detail
   lasso check [ticket]      run a tick now and print what changed
   lasso doctor              list the tools Lasso needs, whether each is found and logged in
+  lasso skill install       copy the Lasso skill to where Claude Code and Codex look for skills
 options:
   --port <n>       port for the server, or the server to talk to
   --json           machine-readable output for client commands
   --all            include done and abandoned Tickets in status
   --yes            add: accept the suggestions without asking
   --repo <name>    add: the repo to intake into
-  --pipeline <n>   add: the Pipeline to run`;
+  --pipeline <n>   add: the Pipeline to run
+  --dry-run        skill install: print what would be written, write nothing`;
 
 export async function main(argv: string[]): Promise<number> {
   const { values, positionals } = parseArgs({
@@ -33,6 +36,7 @@ export async function main(argv: string[]): Promise<number> {
       yes: { type: "boolean", short: "y", default: false },
       repo: { type: "string" },
       pipeline: { type: "string" },
+      "dry-run": { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
     },
   });
@@ -64,6 +68,8 @@ export async function main(argv: string[]): Promise<number> {
       return check({ portFlag, json: Boolean(values.json), ticket: rest[0] });
     case "doctor":
       return doctor({ json: Boolean(values.json) });
+    case "skill":
+      return skill({ action: rest[0], dryRun: Boolean(values["dry-run"]), json: Boolean(values.json) });
     default:
       console.error(`unknown command: ${command}\n${USAGE}`);
       return 1;

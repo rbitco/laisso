@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { execFile } from "node:child_process";
+import { readdirSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -22,7 +23,13 @@ describe("the packed package", () => {
       const [packed] = JSON.parse(stdout) as Array<{ filename: string; files: Array<{ path: string }> }>;
       const files = packed!.files.map((f) => f.path);
       expect(files).toEqual(expect.arrayContaining(["package.json", "dist/lasso.js", "dist/lasso.js.map", "dist/dashboard/index.html"]));
-      expect(files.filter((f) => !f.startsWith("dist/") && f !== "package.json" && f !== "README.md")).toEqual([]);
+      // The Lasso skill ships whole, so `lasso skill install` can copy it from the installed package.
+      const skill = readdirSync(findPackageRoot().skillDir, { recursive: true, withFileTypes: true })
+        .filter((e) => e.isFile())
+        .map((e) => path.relative(REPO_ROOT, path.join(e.parentPath, e.name)).split(path.sep).join("/"));
+      expect(skill).toContain("skills/lasso/SKILL.md");
+      expect(files).toEqual(expect.arrayContaining(skill));
+      expect(files.filter((f) => !f.startsWith("dist/") && !f.startsWith("skills/") && f !== "package.json" && f !== "README.md")).toEqual([]);
       await smokeTest({ tarball: path.join(out, packed!.filename), version: findPackageRoot().version });
     } finally {
       await rm(out, { recursive: true, force: true });

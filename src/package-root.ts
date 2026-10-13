@@ -11,6 +11,8 @@ export interface PackageRoot {
   version: string;
   /** Where `pnpm build` writes the dashboard (ADR 0012); shipped in the package, not committed. */
   dashboardDir: string;
+  /** The Lasso skill shipped in the package, which `lasso skill install` copies to where agents look. */
+  skillDir: string;
   /** A source checkout (has `src/`), as opposed to an installed package, which ships only the build output. */
   checkout: boolean;
 }
@@ -26,7 +28,7 @@ export class PackageRootNotFound extends Error {
 export function findPackageRoot(from: string = import.meta.dirname): PackageRoot {
   for (let dir = path.resolve(from); ; dir = path.dirname(dir)) {
     const version = lassoVersion(path.join(dir, "package.json"));
-    if (version !== null) return { root: dir, version, dashboardDir: path.join(dir, "dist", "dashboard"), checkout: existsSync(path.join(dir, "src")) };
+    if (version !== null) return { root: dir, version, dashboardDir: path.join(dir, "dist", "dashboard"), skillDir: path.join(dir, "skills", "lasso"), checkout: existsSync(path.join(dir, "src")) };
     if (path.dirname(dir) === dir) throw new PackageRootNotFound(from);
   }
 }

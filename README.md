@@ -12,8 +12,15 @@ Node 24 or later, on the homelab LAN.
 ```sh
 npm config set @rbitco:registry=https://npm.matty.rocks/
 npm i -g @rbitco/lasso
+lasso skill install
 lasso doctor   # which tools Lasso needs, whether each is found and logged in, and what needs it
 ```
+
+`lasso skill install` copies the Lasso skill (how to write `config.yaml`
+and Pipelines, and why a Ticket is Flagged) into `~/.claude/skills/lasso`,
+and `~/.codex/skills/lasso` when `~/.codex` exists, so a coding agent can
+set Lasso up from docs matching the installed version; rerun it after an
+upgrade, as `lasso doctor` will say.
 
 A machine without homelab DNS (the work VLAN) uses
 `http://10.30.0.61:4873/` as the registry instead. Only the `@rbitco`
@@ -56,7 +63,7 @@ The package `@rbitco/lasso` ships prebuilt JavaScript, since Node will not
 run TypeScript from `node_modules`. `npm pack` typechecks, builds the
 dashboard, then bundles the CLI and server with esbuild into
 `dist/lasso.js` (with a source map, so stack traces show `.ts` lines). The
-tarball holds only `dist/`. To check one installs and serves:
+tarball holds only `dist/` and `skills/`. To check one installs and serves:
 
 ```sh
 npm pack
