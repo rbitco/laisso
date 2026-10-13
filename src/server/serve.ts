@@ -5,7 +5,7 @@ import { migrateConfigProfiles, migrateHome, migrateVersions } from "./migrate.t
 import { applyLive, loadConfig } from "./config.ts";
 import { acquireLock, AlreadyRunning } from "./lock.ts";
 import { createLogger } from "./log.ts";
-import { Store } from "../store/store.ts";
+import { Store, StoreTooNew } from "../store/store.ts";
 import { Tickets } from "../store/tickets.ts";
 import { Sessions } from "../store/sessions.ts";
 import { Feedback } from "../store/feedback.ts";
@@ -64,7 +64,18 @@ export async function serve(opts: ServeOptions): Promise<number> {
     throw error;
   }
 
-  const store = new Store(home.dbFile);
+  let store: Store;
+  try {
+    // Copies the store to backups/ before migrating it; refuses one a newer Lasso migrated.
+    store = new Store(home.dbFile, { backupsDir: home.backupsDir });
+  } catch (error) {
+    if (error instanceof StoreTooNew) {
+      releaseLock();
+      console.error(error.message);
+      return 1;
+    }
+    throw error;
+  }
   // Every write that the dashboard shows announces itself here; /api/events relays it (no polling).
   const changes = new Changes();
   const ticketChanged = (ticket: string) => changes.emit({ kind: "ticket", ticket });

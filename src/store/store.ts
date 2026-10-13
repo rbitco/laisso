@@ -1,20 +1,68 @@
+import { mkdirSync, readdirSync, rmSync } from "node:fs";
+import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+
+/** How many store backups to keep in the backups directory; older ones are deleted. */
+export const KEEP_BACKUPS = 5;
+
+export interface StoreOptions {
+  /** Where to copy the store before migrating it. Without one, nothing is backed up. */
+  backupsDir?: string;
+  now?: () => Date;
+}
+
+/** The store was migrated by a newer Lasso than this one; opening it would run code against a schema it does not know. */
+export class StoreTooNew extends Error {
+  readonly schema: number;
+
+  constructor(schema: number) {
+    super(`this Lasso home was last used by a newer Lasso (schema ${schema}); install that version or newer`);
+    this.name = "StoreTooNew";
+    this.schema = schema;
+  }
+}
 
 /** The one SQLite store. Only the running lasso process opens it for writing (ADR 0008). */
 export class Store {
   db: DatabaseSync;
 
-  constructor(file: string) {
+  constructor(file: string, opts: StoreOptions = {}) {
     this.db = new DatabaseSync(file);
+    // Read the schema before anything writes, so a refused store is left exactly as it was.
+    const version = this.schemaVersion();
+    if (version > MIGRATIONS.length) {
+      this.db.close();
+      throw new StoreTooNew(version);
+    }
     this.db.exec("PRAGMA journal_mode = WAL");
     this.db.exec("PRAGMA foreign_keys = ON");
-    this.migrate();
+    // A brand-new store (schema 0) has nothing to lose, so only an existing one is copied aside.
+    if (version > 0 && version < MIGRATIONS.length && opts.backupsDir) this.backup(opts.backupsDir, version, (opts.now ?? (() => new Date()))());
+    this.migrate(version);
   }
 
-  private migrate(): void {
-    this.db.exec(`CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
+  private schemaVersion(): number {
+    const meta = this.db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'meta'`).get();
+    if (!meta) return 0;
     const row = this.db.prepare(`SELECT value FROM meta WHERE key = 'schema_version'`).get() as { value: string } | undefined;
-    let version = row ? Number(row.value) : 0;
+    return row ? Number(row.value) : 0;
+  }
+
+  /** A consistent copy, WAL included, named so the newest sort last; keeps the newest KEEP_BACKUPS. */
+  private backup(dir: string, version: number, at: Date): void {
+    mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `lasso-${at.toISOString().replace(/:/g, "-").replace(/\.\d+Z$/, "Z")}-schema${version}.db`);
+    rmSync(file, { force: true });
+    this.db.prepare("VACUUM INTO ?").run(file);
+    const backups = readdirSync(dir)
+      .filter((name) => BACKUP_NAME.test(name))
+      .sort();
+    for (const name of backups.slice(0, -KEEP_BACKUPS)) rmSync(path.join(dir, name), { force: true });
+  }
+
+  private migrate(from: number): void {
+    this.db.exec(`CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
+    let version = from;
     for (const migration of MIGRATIONS.slice(version)) {
       this.db.exec("BEGIN");
       try {
@@ -35,6 +83,8 @@ export class Store {
     this.db.close();
   }
 }
+
+const BACKUP_NAME = /^lasso-.+-schema\d+\.db$/;
 
 const MIGRATIONS: Array<(db: DatabaseSync) => void> = [
   (db) => {
@@ -163,3 +213,6 @@ const MIGRATIONS: Array<(db: DatabaseSync) => void> = [
     db.exec(`ALTER TABLE tickets ADD COLUMN profile_overrides TEXT;`);
   },
 ];
+
+/** The schema version this Lasso migrates a store up to. */
+export const SCHEMA_VERSION = MIGRATIONS.length;

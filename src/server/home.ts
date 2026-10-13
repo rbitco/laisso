@@ -11,6 +11,7 @@ export interface LassoHome {
   pipelinesDir: string;
   ticketsDir: string;
   dbFile: string;
+  backupsDir: string;
   pidFile: string;
   logFile: string;
 }
@@ -23,6 +24,7 @@ export function resolveHome(env: NodeJS.ProcessEnv = process.env): LassoHome {
     pipelinesDir: path.join(root, "pipelines"),
     ticketsDir: path.join(root, "tickets"),
     dbFile: path.join(root, "lasso.db"),
+    backupsDir: path.join(root, "backups"),
     pidFile: path.join(root, "lasso.pid"),
     logFile: path.join(root, "lasso.log"),
   };

@@ -21,9 +21,11 @@ pnpm dev              # serve the dashboard from source, forwarding /api to a ru
 ```
 
 Everything Lasso owns lives under `~/.lasso` (`LASSO_HOME` overrides it):
-`config.yaml`, `pipelines/`, `tickets/`, `lasso.db`, `lasso.log`, `lasso.pid`.
+`config.yaml`, `pipelines/`, `tickets/`, `lasso.db`, `backups/`, `lasso.log`, `lasso.pid`.
 The first run writes a commented `config.yaml` and the default Pipeline and
-never touches either again.
+never touches either again. Before an upgrade migrates `lasso.db`, Lasso copies
+it to `backups/` (the newest 5 are kept); an older Lasso refuses to open a
+`lasso.db` a newer one has migrated.
 
 Stages run under Agent Profiles defined in `config.yaml` (`profiles:`):
 each names a `runner` (`claude | codex | pi`) and may set a `model`,
