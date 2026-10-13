@@ -4,6 +4,8 @@ export interface ToolResult {
   code: number;
   stdout: string;
   stderr: string;
+  /** Why the CLI never ran (ENOENT and the like), when it did not. */
+  errno?: string;
 }
 
 /** The first line the CLI said, minus acli's ✗/✓ glyph, falling back to stdout and then to the exit code. */
@@ -27,7 +29,8 @@ export function runTool(command: string, args: string[], opts: { cwd?: string } 
     execFile(command, args, { encoding: "utf8", maxBuffer: 16 * 1024 * 1024, cwd: opts.cwd }, (error, stdout, stderr) => {
       const e = error as (Error & { code?: unknown }) | null;
       const code = e ? (typeof e.code === "number" ? e.code : 1) : 0;
-      resolve({ code, stdout: stdout ?? "", stderr: (stderr ?? "") + (e && typeof e.code !== "number" ? e.message : "") });
+      const errno = e && typeof e.code === "string" ? { errno: e.code } : {};
+      resolve({ code, stdout: stdout ?? "", stderr: (stderr ?? "") + (e && typeof e.code !== "number" ? e.message : ""), ...errno });
     });
   });
 }

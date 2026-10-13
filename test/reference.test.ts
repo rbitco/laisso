@@ -1,8 +1,8 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { existsSync } from "node:fs";
-import { readFile, readdir, writeFile } from "node:fs/promises";
+import { readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { startLassoWithRepos, runCli, waitFor, type Lasso, type RepoSpec, type LassoConfig } from "./harness.ts";
+import { startLassoWithRepos, restartOnFakesOnly, runCli, waitFor, type Lasso, type RepoSpec, type LassoConfig } from "./harness.ts";
 import type { Detection } from "../src/intake/detect.ts";
 import type { TicketView, IntakeResult } from "../src/api/views.ts";
 
@@ -76,6 +76,21 @@ describe("detection of a tracker reference", () => {
     const gh = await lasso.api<Response>("/api/intake/detect", { method: "POST", raw: true, body: JSON.stringify({ input: "acme/web#404" }) });
     expect(gh.status).toBe(400);
     expect((await gh.json()).error).toBe("acme/web#404: GraphQL: Could not resolve to an issue or pull request with the number of 404. (repository.issue)");
+  });
+
+  it("names a tracker CLI missing from PATH, with the reference and repo that needed it, and points at lasso doctor", async () => {
+    const { lasso: first } = await lassoWith({ app: { tracker: "jira", project: "APP" }, web: { tracker: "github", project: "acme/web" } });
+    const lasso = await restartOnFakesOnly(first);
+    running.push(lasso);
+    await rm(path.join(lasso.pathDir, "acli"));
+    await rm(path.join(lasso.pathDir, "gh"));
+    const error = async (route: string, body: object) => {
+      const res = await lasso.api<Response>(route, { method: "POST", raw: true, body: JSON.stringify(body) });
+      expect(res.status).toBe(400);
+      return (await res.json()).error;
+    };
+    expect(await error("/api/intake/detect", { input: "APP-12" })).toBe("acli not found on PATH (APP-12 in repo app); run lasso doctor");
+    expect(await error("/api/tickets", { input: "acme/web#7", repo: "web" })).toBe("gh not found on PATH (acme/web#7 in repo web); run lasso doctor");
   });
 });
 

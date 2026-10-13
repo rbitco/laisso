@@ -11,6 +11,7 @@ import { ulid } from "../ulid.ts";
 import { slugify } from "./slug.ts";
 import { detect, type Detection } from "./detect.ts";
 import { trackerFor, TrackerError, type Issue, type Tracker } from "../tracker/tracker.ts";
+import { missingFromPath, notOnPath } from "../tools/tools.ts";
 
 export class IntakeError extends Error {}
 
@@ -59,7 +60,7 @@ export class Intake {
     if (chosen && !repo) throw new IntakeError(`repo ${chosen} is not in config.yaml`);
     if (chosen && repo) assertSameTracker(detection.kind, chosen, repo);
     const tracker = trackerFor(detection.kind, repo?.project);
-    const issue = await fetchIssue(tracker, reference);
+    const issue = await fetchIssue(tracker, reference, chosen ?? null);
     detection.title = issue.title;
 
     if (repo) {
@@ -112,7 +113,7 @@ export class Intake {
       this.assertNoActiveTicket(reference);
       assertSameTracker(detection.kind, repoName, repo);
       const tracker = trackerFor(repo.tracker, repo.project);
-      const issue = await fetchIssue(tracker, reference);
+      const issue = await fetchIssue(tracker, reference, repoName);
       row = { id, repo: repoName, reference, origin: "tracker", prompt: null, title: issue.title, body: issue.body, pipeline: pipeline.name, stage: pipeline.stages[0]!.name };
       branch = this.referenceBranch(tracker, reference, issue.title);
     }
@@ -161,12 +162,15 @@ function assertSameTracker(kind: Detection["kind"], repoName: string, repo: Repo
   if (kind !== "prompt" && kind !== repo.tracker) throw new IntakeError(`repo ${repoName} is tracked on ${repo.tracker}, not ${kind}`);
 }
 
-async function fetchIssue(tracker: Tracker, reference: string): Promise<Issue> {
+/** The issue from its tracker; a tracker CLI missing from PATH is named with the reference, and the repo once chosen, that needed it. */
+async function fetchIssue(tracker: Tracker, reference: string, repoName: string | null): Promise<Issue> {
   try {
     return await tracker.fetchIssue(reference);
   } catch (error) {
-    if (error instanceof TrackerError) throw new IntakeError(error.message);
-    throw error;
+    if (!(error instanceof TrackerError)) throw error;
+    const { unstarted } = error;
+    if (unstarted && missingFromPath(unstarted.tool, unstarted.errno)) throw new IntakeError(notOnPath(unstarted.tool, repoName ? `${reference} in repo ${repoName}` : reference));
+    throw new IntakeError(error.message);
   }
 }
 

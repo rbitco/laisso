@@ -5,7 +5,7 @@ import path from "node:path";
 import { loadConfig, type Config } from "../src/server/config.ts";
 import { resolveHome } from "../src/server/home.ts";
 import { parsePipeline, type Pipeline } from "../src/pipeline/load.ts";
-import { checkPath, doctor, homePipelines, missingTools, neededTools, type Lookup, type NeededTool, type RunCommand, type TicketUse } from "../src/tools/tools.ts";
+import { checkPath, doctor, homePipelines, missingFromPath, missingTools, neededTools, notOnPath, type Lookup, type NeededTool, type RunCommand, type TicketUse } from "../src/tools/tools.ts";
 import type { ToolResult } from "../src/tracker/exec.ts";
 
 // The tool check: which external tools a config needs and why, then PATH and login through injected lookups (LASSO-96).
@@ -128,6 +128,17 @@ describe("checking PATH", () => {
       ["terminal-notifier", null],
     ]);
     expect(names(missingTools(tools, lookup))).toEqual(["claude"]);
+  });
+
+  it("calls a failed start a PATH miss only when it was ENOENT and PATH really lacks a bare command", () => {
+    const lookup = lookupOf(["git"]);
+    expect(missingFromPath("claude", "ENOENT", lookup)).toBe(true);
+    // A missing working directory reports ENOENT too.
+    expect(missingFromPath("git", "ENOENT", lookup)).toBe(false);
+    expect(missingFromPath("claude", "EACCES", lookup)).toBe(false);
+    expect(missingFromPath("claude", undefined, lookup)).toBe(false);
+    expect(missingFromPath("/opt/bin/claude", "ENOENT", lookup)).toBe(false);
+    expect(notOnPath("claude", "profile claude-opus")).toBe("claude not found on PATH (profile claude-opus); run lasso doctor");
   });
 });
 

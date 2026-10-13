@@ -1,8 +1,22 @@
 import type { RepoConfig } from "../server/config.ts";
 import { JiraTracker } from "./jira.ts";
 import { GithubTracker } from "./github.ts";
+import { failureReason, type ToolResult } from "./exec.ts";
 
-export class TrackerError extends Error {}
+export class TrackerError extends Error {
+  /** The CLI and its errno when it never ran, so a caller can tell a missing tool from a refusal. */
+  readonly unstarted: { tool: string; errno: string } | null;
+
+  constructor(message: string, unstarted: { tool: string; errno: string } | null = null) {
+    super(message);
+    this.unstarted = unstarted;
+  }
+}
+
+/** A tracker CLI's failure on a reference, in its own words, remembering when it never ran. */
+export function trackerFailure(tool: string, reference: string, r: ToolResult): TrackerError {
+  return new TrackerError(`${reference}: ${failureReason(tool, r)}`, r.errno ? { tool, errno: r.errno } : null);
+}
 
 export interface Issue {
   reference: string;

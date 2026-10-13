@@ -22,6 +22,7 @@ const BIN = path.join(REPO_ROOT, "bin", "lasso.js");
 import { DEFAULT_CONFIG, type Config, type RepoConfig } from "../src/server/config.ts";
 import { parsePipeline } from "../src/pipeline/load.ts";
 import { DEFAULT_PIPELINE_YAML } from "../src/pipeline/default.ts";
+import { findOnPath } from "../src/tools/tools.ts";
 
 const DEFAULT_PIPELINE_STATUSES = [...new Set(parsePipeline("default", DEFAULT_PIPELINE_YAML).stages.flatMap((s) => (s.kind === "action" && "status" in s ? [s.status] : [])))];
 
@@ -431,6 +432,23 @@ export async function startLasso(opts: StartOptions = {}): Promise<Lasso> {
     },
   };
   return lasso;
+}
+
+/**
+ * Stop Lasso and start it again on the same home with a PATH of only the
+ * fakes, node and git, so a test that deletes a fake leaves that tool missing
+ * whatever this machine has installed.
+ */
+export async function restartOnFakesOnly(lasso: Lasso): Promise<Lasso> {
+  await lasso.stop();
+  const systemDir = path.join(path.dirname(lasso.home), "system");
+  await mkdir(systemDir, { recursive: true });
+  const git = findOnPath()("git");
+  if (!git) throw new Error("git is not on PATH");
+  for (const [name, target] of [["node", process.execPath], ["git", git]]) {
+    await writeFile(path.join(systemDir, name), `#!/bin/sh\nexec '${target}' "$@"\n`, { mode: 0o755 });
+  }
+  return startLasso({ home: lasso.home, pathDir: lasso.pathDir, env: { PATH: `${lasso.pathDir}:${systemDir}` } });
 }
 
 async function waitForHealth(url: string, exited: Promise<number | null>, out: () => string): Promise<void> {

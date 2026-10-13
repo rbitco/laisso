@@ -157,6 +157,20 @@ function claudeLoggedIn(r: ToolResult): boolean {
   return r.code === 0;
 }
 
+/** What Lasso says when a tool something needs is not on PATH: the tool, what wanted it, and the fix. */
+export function notOnPath(tool: string, neededBy: string): string {
+  return `${tool} not found on PATH (${neededBy}); run lasso doctor`;
+}
+
+/**
+ * Whether a command failed to start because PATH lacks it. ENOENT alone does
+ * not say so, since a missing working directory reports it too, so PATH is
+ * looked at again; a command given as a path is never a PATH miss.
+ */
+export function missingFromPath(command: string, errno: string | undefined, lookup: Lookup = findOnPath()): boolean {
+  return errno === "ENOENT" && !command.includes("/") && lookup(command) === null;
+}
+
 /** The real PATH: the first executable file of that name in its directories. */
 export function findOnPath(env: NodeJS.ProcessEnv = process.env): Lookup {
   const dirs = (env.PATH ?? "").split(path.delimiter).filter(Boolean);

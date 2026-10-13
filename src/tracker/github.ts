@@ -1,5 +1,5 @@
-import { runTool, failureReason, parseJson } from "./exec.ts";
-import { TrackerError, type Issue, type LabelChange, type Tracker } from "./tracker.ts";
+import { runTool, parseJson } from "./exec.ts";
+import { TrackerError, trackerFailure, type Issue, type LabelChange, type Tracker } from "./tracker.ts";
 
 const LABEL_COLOR = "5319E7";
 
@@ -24,7 +24,7 @@ export class GithubTracker implements Tracker {
   async fetchIssue(reference: string): Promise<Issue> {
     const { repo, number } = split(reference);
     const r = await runTool("gh", ["issue", "view", number, "--repo", repo, "--json", "title,body"]);
-    if (r.code !== 0) throw new TrackerError(`${reference}: ${failureReason("gh", r)}`);
+    if (r.code !== 0) throw trackerFailure("gh", reference, r);
     const parsed = parseJson<{ title?: unknown; body?: unknown }>("gh", reference, r.stdout, (m) => new TrackerError(m));
     const title = typeof parsed.title === "string" ? parsed.title.trim() : "";
     if (!title) throw new TrackerError(`${reference}: gh returned no title`);
@@ -38,7 +38,7 @@ export class GithubTracker implements Tracker {
   async labels(reference: string): Promise<string[]> {
     const { repo, number } = split(reference);
     const r = await runTool("gh", ["issue", "view", number, "--repo", repo, "--json", "labels"]);
-    if (r.code !== 0) throw new TrackerError(`${reference}: ${failureReason("gh", r)}`);
+    if (r.code !== 0) throw trackerFailure("gh", reference, r);
     const parsed = parseJson<{ labels?: unknown }>("gh", reference, r.stdout, (m) => new TrackerError(m));
     return Array.isArray(parsed.labels) ? parsed.labels.map((l: { name?: unknown }) => String(l?.name ?? "")).filter(Boolean) : [];
   }
@@ -52,12 +52,12 @@ export class GithubTracker implements Tracker {
     const first = await runTool("gh", args);
     if (first.code === 0) return;
     const missing = add.filter((label) => first.stderr.includes(`'${label}' not found`));
-    if (!missing.length) throw new TrackerError(`${reference}: ${failureReason("gh", first)}`);
+    if (!missing.length) throw trackerFailure("gh", reference, first);
     for (const label of missing) {
       const created = await runTool("gh", ["label", "create", label, "--repo", repo, "--color", LABEL_COLOR, "--description", "Set by Lasso", "--force"]);
-      if (created.code !== 0) throw new TrackerError(`${reference}: ${failureReason("gh", created)}`);
+      if (created.code !== 0) throw trackerFailure("gh", reference, created);
     }
     const again = await runTool("gh", args);
-    if (again.code !== 0) throw new TrackerError(`${reference}: ${failureReason("gh", again)}`);
+    if (again.code !== 0) throw trackerFailure("gh", reference, again);
   }
 }

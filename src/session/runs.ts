@@ -19,6 +19,7 @@ import type { Queue } from "./queue.ts";
 import { spendOf } from "../budget/budget.ts";
 import type { Review, RoundPlan } from "../review/review.ts";
 import { resumeRefusal, ticketProfile } from "./overrides.ts";
+import { missingFromPath, notOnPath } from "../tools/tools.ts";
 
 export class RunError extends Error {}
 
@@ -38,8 +39,8 @@ export interface RunsDeps {
   ended?: () => void;
 }
 
-/** Lasso's verdict on an ended Session: the Stage is done, waits for more Feedback (a Round), or Flags. */
-export type Verdict = "advance" | "wait" | { flag: string; detail: string | null };
+/** Lasso's verdict on an ended Session: the Stage is done, waits for more Feedback (a Round), or Flags; `retry: false` Flags even with attempts left. */
+export type Verdict = "advance" | "wait" | { flag: string; detail: string | null; retry?: false };
 
 interface Live {
   child: ChildProcess;
@@ -53,6 +54,8 @@ interface Live {
   killReason: EndedReason | null;
   /** Set when the process never started; the Session ends interrupted and the Flag says runner.unavailable. */
   spawnError: string | null;
+  /** The Runner's command is not on PATH: another attempt cannot help, so the Flag comes at once. */
+  notOnPath: boolean;
   /** How the process closed: a signal death or exit 143, whoever sent it, means interrupted. */
   exit: { code: number | null; signal: NodeJS.Signals | null } | null;
   done: Promise<SessionRow>;
@@ -185,7 +188,7 @@ export class Runs {
     });
     let resolve!: (row: SessionRow) => void;
     const done = new Promise<SessionRow>((r) => (resolve = r));
-    const live: Live = { child, ticket: ticket.id, stage, request, stdoutPath, fd, stderr: "", wallTimer: null, killReason: null, spawnError: null, exit: null, done, resolve };
+    const live: Live = { child, ticket: ticket.id, stage, request, stdoutPath, fd, stderr: "", wallTimer: null, killReason: null, spawnError: null, notOnPath: false, exit: null, done, resolve };
     this.live.set(sessionId, live);
     if (command.stdin !== undefined) child.stdin!.end(command.stdin);
 
@@ -198,7 +201,10 @@ export class Runs {
     sessions.setPid(sessionId, child.pid ?? null);
     child.once("error", (error) => {
       log.error("session.spawn_failed", { session: sessionId, error: error.message });
-      live.spawnError = `${command.argv[0]}: ${error.message}`;
+      // A Runner missing from PATH is named with the profile that wanted it; any other failure keeps its own words.
+      const argv0 = command.argv[0]!;
+      live.notOnPath = missingFromPath(argv0, (error as NodeJS.ErrnoException).code);
+      live.spawnError = live.notOnPath ? notOnPath(argv0, `profile ${profile.name}`) : `${argv0}: ${error.message}`;
       this.finish(sessionId);
     });
     child.once("close", (code, signal) => {
@@ -328,7 +334,7 @@ export class Runs {
     // Session over and its Ticket not yet advanced or Flagged.
     let verdict: Verdict | null;
     if (reason === "shutdown" || this.closing) verdict = null;
-    else if (live.spawnError) verdict = { flag: "runner.unavailable", detail: live.spawnError };
+    else if (live.spawnError) verdict = { flag: "runner.unavailable", detail: live.spawnError, ...(live.notOnPath ? { retry: false as const } : {}) };
     else verdict = await this.judge(live, end);
     const row = this.deps.sessions.end(sessionId, end);
     this.deps.log.info("session.ended", { session: sessionId, ticket: row.ticket, stage: row.stage, outcome: row.outcome, reason: row.ended_reason, cost: row.cost_usd });
@@ -362,7 +368,7 @@ export class Runs {
     if (verdict === "advance") return progress.finished(ticket);
     if (verdict === "wait") return;
     // Interrupted and exhausted runs try again while attempts remain; a run a human stopped, or one that failed, asks instead.
-    const retryable = row.ended_by === "outcome" && (row.outcome === "interrupted" || row.outcome === "exhausted");
+    const retryable = verdict.retry !== false && row.ended_by === "outcome" && (row.outcome === "interrupted" || row.outcome === "exhausted");
     const next = retryable ? progress.runnable(ticket) : null;
     if (next && !("problem" in next)) {
       const refusal = budgets.refusal(ticket, next.pipeline, next.stage);

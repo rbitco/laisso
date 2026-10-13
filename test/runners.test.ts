@@ -1,11 +1,11 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdtemp, rm } from "node:fs/promises";
 import { readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
-import { startLassoWithRepos, startLasso, makeHome, makeRepo, waitFor, claudeFixture, runnerFixture, type Lasso, type LassoConfig } from "./harness.ts";
+import { startLassoWithRepos, startLasso, makeHome, makeRepo, restartOnFakesOnly, waitFor, claudeFixture, runnerFixture, type Lasso, type LassoConfig } from "./harness.ts";
 import type { ProfileConfig } from "../src/server/config.ts";
 import type { TicketDetail, IntakeResult } from "../src/api/views.ts";
 import type { TickChange } from "../src/server/tick.ts";
@@ -497,5 +497,31 @@ describe("the shipped profiles", () => {
     const sessions = (await detailOf(lasso, ticket.id)).sessions;
     expect(sessions.find((s) => s.stage === "implement")!.profile).toEqual({ name: "claude-opus", runner: "claude", model: "opus", effort: null, permission: "auto", args: [] });
     expect(sessions.find((s) => s.stage === "document")!.profile).toMatchObject({ name: "claude-sonnet", model: "sonnet" });
+  });
+});
+
+describe("a Runner that cannot start", () => {
+  const opus: Record<string, ProfileConfig> = { "claude-opus": { runner: "claude", model: "opus" } };
+  /** A Lasso whose PATH holds only the fakes, node and git, its claude broken by `breakClaude` before any Ticket exists to run it. */
+  async function flaggedWithBrokenClaude(breakClaude: (file: string) => Promise<void>) {
+    const lasso = await restartOnFakesOnly(await lassoWith({ work: HEADLESS("claude-opus") }, undefined, { profiles: opus }));
+    running.push(lasso);
+    await breakClaude(path.join(lasso.pathDir, "claude"));
+    const ticket = await intake(lasso, "work");
+    await checkNow(lasso);
+    return waitFor(async () => { const t = await detailOf(lasso, ticket.id); return t.flag ? t : null; }, "the Ticket to be Flagged");
+  }
+
+  it("Flags runner.unavailable naming the missing tool and the profile that wanted it, and points at lasso doctor", async () => {
+    const d = await flaggedWithBrokenClaude((file) => rm(file));
+    expect(d.flag).toMatchObject({ reason: "runner.unavailable", detail: "claude not found on PATH (profile claude-opus); run lasso doctor" });
+    // Another attempt cannot find it either, so none is made.
+    expect(d.sessions).toHaveLength(1);
+  });
+
+  it("keeps the spawn error's own words, and retries, when the Runner is on PATH but will not start", async () => {
+    const d = await flaggedWithBrokenClaude((file) => chmod(file, 0o644));
+    expect(d.flag).toMatchObject({ reason: "budget.attempts", detail: "implement: 2 of 2 attempts used; claude: spawn claude EACCES" });
+    expect(d.sessions).toHaveLength(2);
   });
 });

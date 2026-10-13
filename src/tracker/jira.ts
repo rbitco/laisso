@@ -1,6 +1,6 @@
-import { runTool, failureReason, parseJson } from "./exec.ts";
+import { runTool, parseJson } from "./exec.ts";
 import { adfToText } from "./adf.ts";
-import { TrackerError, type Issue, type LabelChange, type Tracker } from "./tracker.ts";
+import { TrackerError, trackerFailure, type Issue, type LabelChange, type Tracker } from "./tracker.ts";
 
 /** JIRA through the acli CLI. `project` is the project key. */
 export class JiraTracker implements Tracker {
@@ -16,7 +16,7 @@ export class JiraTracker implements Tracker {
 
   async fetchIssue(reference: string): Promise<Issue> {
     const r = await runTool("acli", ["jira", "workitem", "view", reference, "--fields", "summary,description", "--json"]);
-    if (r.code !== 0) throw new TrackerError(`${reference}: ${failureReason("acli", r)}`);
+    if (r.code !== 0) throw trackerFailure("acli", reference, r);
     const parsed = parseJson<{ fields?: { summary?: unknown; description?: unknown } }>("acli", reference, r.stdout, (m) => new TrackerError(m));
     const fields = parsed.fields ?? {};
     const title = typeof fields.summary === "string" ? fields.summary.trim() : "";
@@ -28,7 +28,7 @@ export class JiraTracker implements Tracker {
 
   async labels(reference: string): Promise<string[]> {
     const r = await runTool("acli", ["jira", "workitem", "view", reference, "--fields", "labels", "--json"]);
-    if (r.code !== 0) throw new TrackerError(`${reference}: ${failureReason("acli", r)}`);
+    if (r.code !== 0) throw trackerFailure("acli", reference, r);
     const parsed = parseJson<{ fields?: { labels?: unknown } }>("acli", reference, r.stdout, (m) => new TrackerError(m));
     const labels = parsed.fields?.labels;
     return Array.isArray(labels) ? labels.map(String) : [];
@@ -40,6 +40,6 @@ export class JiraTracker implements Tracker {
     if (add.length) args.push("--labels", add.join(","));
     if (remove.length) args.push("--remove-labels", remove.join(","));
     const r = await runTool("acli", [...args, "--yes"]);
-    if (r.code !== 0) throw new TrackerError(`${reference}: ${failureReason("acli", r)}`);
+    if (r.code !== 0) throw trackerFailure("acli", reference, r);
   }
 }
