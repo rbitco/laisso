@@ -4,7 +4,7 @@ import { render, screen, cleanup, act, waitFor, within } from "@testing-library/
 import { userEvent } from "@testing-library/user-event";
 import { DEFAULT_CONFIG } from "../src/server/config.ts";
 import type { BudgetView } from "../src/budget/budget.ts";
-import type { ConfigFile, IntakeResult, PipelineListing, PipelineVersionView, TicketDetail } from "../src/api/views.ts";
+import type { ConfigFile, IntakeResult, PipelineListing, PipelineVersionView, TicketDetail, VersionView } from "../src/api/views.ts";
 import type { Detection } from "../src/intake/detect.ts";
 import type { TickResult, TickStatus } from "../src/server/tick.ts";
 import { App } from "../src/dashboard/app/App.tsx";
@@ -53,7 +53,7 @@ const VERSION: PipelineVersionView = { name: "default", version: 2, createdAt: a
 
 type Sent = { method: string; route: string; body: unknown };
 
-/** A stand-in for Lasso's /api: Tickets, one Pipeline and its Version 2, config, the Tick, and intake; every request it was sent. */
+/** A stand-in for Lasso's /api: Tickets, one Pipeline and its Version 2, config, the Tick, the version notice, and intake; every request it was sent. */
 function fakeLasso() {
   const sent: Sent[] = [];
   const state = {
@@ -62,6 +62,7 @@ function fakeLasso() {
     changes: [] as TickResult["changes"],
     branchExisted: false,
     held: null as Promise<void> | null,
+    version: { version: "1.2.0", notice: { kind: "none" }, text: null } as VersionView,
   };
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
   vi.stubGlobal("fetch", async (url: string, init: RequestInit = {}) => {
@@ -79,6 +80,7 @@ function fakeLasso() {
       return t ? json(t) : json({ error: `no Ticket matches ${one[1]}` }, 404);
     }
     if (url === "/api/tick") return json(state.tick);
+    if (url === "/api/version") return json(state.version);
     if (url === "/api/check-now") return json({ at: ago(0), changes: state.changes } satisfies TickResult);
     if (url === "/api/intake/detect") return json(body.repo ? { ...DETECTED, notes: [`branch app-7 on ${body.repo}`] } : DETECTED);
     if (url === "/api/pipelines") return json([{ name: "default", file: "/p/default.yaml", profile: null, problem: null, stages: [] }] satisfies PipelineListing[]);
@@ -157,6 +159,30 @@ describe("the Tick dot", () => {
     send("hello", lasso.state.tick);
     expect(dot().className).toBe("dot tick-dot idle");
     await waitFor(() => expect(lasso.gets("/api/tickets")).toBe(2));
+  });
+});
+
+describe("the version notice", () => {
+  const versionNotice = () => document.querySelector('[data-role="version-notice"]');
+
+  it("shows in the header when Lasso has one, and follows it as it changes", async () => {
+    const lasso = fakeLasso();
+    lasso.state.version = { version: "1.2.0", notice: { kind: "available", version: "1.3.0" }, text: "v1.3.0 available: npm update -g @rbitco/lasso" };
+    render(<App />);
+    expect(await screen.findByText("v1.3.0 available: npm update -g @rbitco/lasso")).toBeTruthy();
+    lasso.state.version = { version: "1.2.0", notice: { kind: "restart", version: "1.3.0" }, text: "v1.3.0 installed: restart lasso to use it" };
+    send("version");
+    expect(await screen.findByText("v1.3.0 installed: restart lasso to use it")).toBeTruthy();
+    lasso.state.version = { version: "1.3.0", notice: { kind: "none" }, text: null };
+    send("hello", lasso.state.tick);
+    await waitFor(() => expect(versionNotice()).toBeNull());
+  });
+
+  it("is absent when there is nothing to say", async () => {
+    fakeLasso();
+    render(<App />);
+    await screen.findByText("Ticket A");
+    expect(versionNotice()).toBeNull();
   });
 });
 

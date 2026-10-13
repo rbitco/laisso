@@ -20,10 +20,11 @@ import { Intake, IntakeError, type IntakeRequest } from "../intake/intake.ts";
 import { PipelineError, type Pipeline } from "../pipeline/load.ts";
 import { PipelineFiles } from "../pipeline/files.ts";
 import type { Dashboard } from "../dashboard/page.ts";
-import { ticketView, ticketDetail, sessionView, sortForLedger, pipelineListing, pipelineFileView, pipelineVersionView, actionListings, type LiveVersionView, type ViewContext, type IntakeResult, type ConfigFile, type Health, type MissingTool } from "./views.ts";
+import { ticketView, ticketDetail, sessionView, sortForLedger, pipelineListing, pipelineFileView, pipelineVersionView, actionListings, type LiveVersionView, type ViewContext, type IntakeResult, type ConfigFile, type Health, type MissingTool, type VersionView } from "./views.ts";
 import { readFileSync } from "node:fs";
 import { isPlainObject } from "../fields.ts";
 import { replaceFile } from "../atomic-write.ts";
+import { noticeText, type VersionNotice } from "../version-notice.ts";
 
 export interface AppDeps {
   config: Config;
@@ -45,6 +46,8 @@ export interface AppDeps {
   version: string;
   /** Needed tools PATH lacked at startup; the dashboard header lists them. */
   missingTools?: MissingTool[];
+  /** The version notice as last checked (held by VersionCheck). */
+  versionNotice: () => VersionNotice;
 }
 
 /** How long /api/events gathers changes before sending: a burst of writes to one Ticket goes out as one event. */
@@ -92,11 +95,17 @@ export function createApp(deps: AppDeps): Hono {
 
   app.get("/api/health", (c) => c.json({ ok: true, pid: process.pid, version: deps.version, missingTools: deps.missingTools ?? [] } satisfies Health));
 
+  app.get("/api/version", (c) => {
+    const notice = deps.versionNotice();
+    return c.json({ version: deps.version, notice, text: noticeText(notice) } satisfies VersionView);
+  });
+
   app.get("/api/tick", (c) => c.json(deps.tick.status()));
 
   // The dashboard's push channel (Server-Sent Events). Each event names what changed, never the data:
-  // "ticket" {ticket}, "stdout" {ticket, session}, "tick" {the tick status}, "config" {} and "pipeline" {pipeline} after an edit through /api. The page re-reads what it
-  // shows through the ordinary routes, and after a reconnect re-reads everything, as it may have missed some.
+  // "ticket" {ticket}, "stdout" {ticket, session}, "tick" {the tick status}, "config" {} and "pipeline" {pipeline} after an edit through /api,
+  // "version" {} when the version notice changes. The page re-reads what it shows through the ordinary routes, and
+  // after a reconnect re-reads everything, as it may have missed some.
   app.get("/api/events", (c) =>
     streamSSE(c, async (stream) => {
       const gathered = new Map<string, Change>();
@@ -107,14 +116,14 @@ export function createApp(deps: AppDeps): Hono {
         gathered.clear();
         for (const change of batch) {
           if (stream.aborted || stream.closed) return;
-          const data = change.kind === "tick" ? deps.tick.status() : change.kind === "config" ? {} : change.kind === "pipeline" ? { pipeline: change.pipeline } : change.kind === "stdout" ? { ticket: change.ticket, session: change.session } : { ticket: change.ticket };
+          const data = change.kind === "tick" ? deps.tick.status() : change.kind === "config" || change.kind === "version" ? {} : change.kind === "pipeline" ? { pipeline: change.pipeline } : change.kind === "stdout" ? { ticket: change.ticket, session: change.session } : { ticket: change.ticket };
           await stream.writeSSE({ event: change.kind, data: JSON.stringify(data) });
         }
       };
       let finish!: () => void;
       const finished = new Promise<void>((resolve) => (finish = resolve));
       const unsubscribe = deps.changes.subscribe((change) => {
-        gathered.set(change.kind === "tick" || change.kind === "config" ? change.kind : change.kind === "pipeline" ? `pipeline:${change.pipeline}` : change.kind === "stdout" ? `stdout:${change.session}` : `ticket:${change.ticket}`, change);
+        gathered.set(change.kind === "tick" || change.kind === "config" || change.kind === "version" ? change.kind : change.kind === "pipeline" ? `pipeline:${change.pipeline}` : change.kind === "stdout" ? `stdout:${change.session}` : `ticket:${change.ticket}`, change);
         timer ??= setTimeout(() => void flush().catch(finish), EVENT_GATHER_MS);
       }, () => finish());
       stream.onAbort(() => finish());

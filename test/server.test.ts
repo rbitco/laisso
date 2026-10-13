@@ -34,6 +34,16 @@ describe("the lasso process", () => {
     expect(after).toContain("# hand edit");
   });
 
+  it("reports a dev build's version with no notice, and never asks npm for the latest", async () => {
+    const { home, pathDir } = await makeHome();
+    const asked = path.join(pathDir, "npm-asked");
+    await writeFile(path.join(pathDir, "npm"), `#!/bin/sh\necho "$@" >> '${asked}'\necho 9.9.9\n`, { mode: 0o755 });
+    const lasso = await startLasso({ home, pathDir });
+    running.push(lasso);
+    expect(await lasso.api("/api/version")).toEqual({ version: "0.0.0-dev", notice: { kind: "none" }, text: null });
+    expect(existsSync(asked)).toBe(false);
+  });
+
   it("writes a default config.yaml on first run when the home is empty", async () => {
     const { home, pathDir } = await makeHome();
     await rm(path.join(home, "config.yaml"));

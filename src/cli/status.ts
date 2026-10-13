@@ -1,5 +1,5 @@
-import { createClient } from "./client.ts";
-import type { TicketView, TicketDetail, SessionView } from "../api/views.ts";
+import { createClient, type Client } from "./client.ts";
+import type { TicketView, TicketDetail, SessionView, VersionView } from "../api/views.ts";
 
 export interface StatusOptions {
   portFlag?: number;
@@ -11,6 +11,10 @@ export interface StatusOptions {
 export async function status(opts: StatusOptions): Promise<number> {
   const client = createClient(opts.portFlag);
   try {
+    if (!opts.json) {
+      const notice = await versionNotice(client);
+      if (notice) console.log(notice + "\n");
+    }
     if (opts.ticket) {
       const detail = await client.get<TicketDetail>(`/api/tickets/${encodeURIComponent(opts.ticket)}`);
       console.log(opts.json ? JSON.stringify(detail, null, 2) : renderDetail(detail));
@@ -26,6 +30,15 @@ export async function status(opts: StatusOptions): Promise<number> {
       return 1;
     }
     throw error;
+  }
+}
+
+/** The version notice line, if Lasso has one; a Lasso too old to have /api/version has nothing to say. */
+async function versionNotice(client: Client): Promise<string | null> {
+  try {
+    return (await client.get<VersionView>("/api/version")).text;
+  } catch {
+    return null;
   }
 }
 

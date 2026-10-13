@@ -9,6 +9,7 @@ import type { BudgetView } from "../budget/budget.ts";
 import { adapterFor } from "../runner/adapters.ts";
 import type { FeedbackRow } from "../store/feedback.ts";
 import { quietWhy } from "../review/review.ts";
+import type { VersionNotice } from "../version-notice.ts";
 
 export type DisplayState = "flagged" | "needs_you" | "holding" | "ready" | "running" | "queued" | "quiet" | "done" | "abandoned";
 
@@ -230,6 +231,13 @@ export interface ConfigFile {
   config: Config;
   /** Keys this edit changed whose new value applies only after a restart. */
   restart: string[];
+}
+
+/** The running version and what Lasso has to say about it; `text` is the line to show, null when there is nothing to say. */
+export interface VersionView {
+  version: string;
+  notice: VersionNotice;
+  text: string | null;
 }
 
 /** One Action config.yaml defines: global when repo is null, else that repo's own (an override when a global one shares its name). */

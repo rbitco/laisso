@@ -28,6 +28,7 @@ import { createApp } from "../api/app.ts";
 import { Dashboard, DashboardMissing } from "../dashboard/page.ts";
 import { findPackageRoot } from "../package-root.ts";
 import { startupToolCheck } from "../tools/startup.ts";
+import { VersionCheck, npmLatest } from "./version-check.ts";
 
 export interface ServeOptions {
   portFlag?: number;
@@ -128,7 +129,16 @@ export async function serve(opts: ServeOptions): Promise<number> {
   const overrides = new Overrides({ config, home, tickets, progress, log });
   const exits = new Exits({ tickets, sessions, log, progress, runs, terminal, budgets, tick, teardown, overrides });
   const missingTools = startupToolCheck(config, home, tickets, log);
-  const app = createApp({ config, home, tick, tickets, versions, sessions, feedback, runs, progress, terminal, exits, overrides, budgets, queue, changes, dashboard, version: pkg.version, missingTools });
+  // The package on disk is read again at each check: after `npm update -g` it is newer than this process.
+  const onDisk = () => {
+    try {
+      return findPackageRoot(pkg.root).version;
+    } catch {
+      return null;
+    }
+  };
+  const versionCheck = new VersionCheck({ running: pkg.version, onDisk, latest: npmLatest, log, changed: () => changes.emit({ kind: "version" }) });
+  const app = createApp({ config, home, tick, tickets, versions, sessions, feedback, runs, progress, terminal, exits, overrides, budgets, queue, changes, dashboard, version: pkg.version, missingTools, versionNotice: () => versionCheck.current() });
 
   if (defaults.wroteConfig) log.info("config.written", { file: home.configFile });
   if (defaults.wrotePipeline) log.info("pipeline.written", { name: "default" });
@@ -149,6 +159,7 @@ export async function serve(opts: ServeOptions): Promise<number> {
   const url = `http://localhost:${config.port}`;
   log.info("started", { home: home.root, port: config.port, pid: process.pid, version: pkg.version });
   console.log(`lasso listening at ${url}`);
+  versionCheck.start();
 
   // Ctrl-C is honoured from here on, before reconciliation and the startup tick: a shutdown that
   // lands inside them waits for them, so a Session the startup tick spawns is killed and recorded.
@@ -168,6 +179,7 @@ export async function serve(opts: ServeOptions): Promise<number> {
     shuttingDown = true;
     log.info("shutdown", { signal });
     tick.stop();
+    versionCheck.stop();
     // Open event streams would keep server.close waiting; ending them lets it finish.
     changes.close();
     const finished = new Promise<void>((done) => server.close(() => done()));
