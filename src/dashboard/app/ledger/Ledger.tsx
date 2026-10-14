@@ -68,21 +68,25 @@ function TicketRow({ ticket: t, onPulled }: { ticket: TicketView; onPulled: () =
       <span className={"pill " + t.display.state} data-role="pill">
         {t.display.label || t.display.state}
       </span>
-      <div>
-        <div className="ref" data-role="ref" title={t.name ? t.reference || t.shortId : undefined}>
+      <div className="id-cell">
+        <div className="ref" data-role="ref" title={t.name ? `${t.name} (${t.reference || t.shortId})` : t.label}>
           {t.label}
         </div>
-        <div className="repo">{t.repo}</div>
+        <div className="repo" title={t.repo}>
+          {t.repo}
+        </div>
       </div>
       <div className="title-cell">
-        <div className="title">{t.title}</div>
-        <div className="why" data-role="why">
+        <div className="title" title={t.title}>
+          {t.title}
+        </div>
+        <div className="why" data-role="why" title={t.display.why}>
           {t.display.why}
         </div>
       </div>
       <div className="track" data-role="track">
         <div dangerouslySetInnerHTML={{ __html: metroTrack(t) }} />
-        <span className="stage" data-role="stage-text">
+        <span className="stage" data-role="stage-text" title={ledgerStageText(t)}>
           {ledgerStageText(t)}
         </span>
       </div>

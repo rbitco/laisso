@@ -88,7 +88,7 @@ describe("the Ledger", () => {
     expect(role(a, "pill").textContent).toBe("Flagged");
     expect(role(a, "pill").className).toBe("pill flagged");
     expect(role(a, "ref").textContent).toBe("APP-A");
-    expect(role(a, "ref").getAttribute("title")).toBeNull();
+    expect(role(a, "ref").getAttribute("title")).toBe("APP-A");
     expect(role(a, "ref").nextElementSibling!.textContent).toBe("app");
     expect(role(a, "why").textContent).toBe("attempts exhausted");
     expect(within(a).getByLabelText("implement, Stage 2 of 2").tagName.toLowerCase()).toBe("svg");
@@ -105,13 +105,13 @@ describe("the Ledger", () => {
     expect(within(role(row("B"), "quick")).getByRole("button", { name: "Check PR now" }).className).toBe("sm");
   });
 
-  it("shows a named Ticket by its name, with the reference on hover", async () => {
+  it("shows a named Ticket by its name, with the name and reference on hover", async () => {
     fakeLasso([view("A", { name: "Dark mode", label: "Dark mode" })]);
     render(<Ledger all={false} visit={1} />);
     await screen.findByText("Ticket A");
     const ref = role(row("A"), "ref");
     expect(ref.textContent).toBe("Dark mode");
-    expect(ref.getAttribute("title")).toBe("APP-A");
+    expect(ref.getAttribute("title")).toBe("Dark mode (APP-A)");
     expect(role(row("A"), "ref").nextElementSibling!.textContent).toBe("app");
   });
 

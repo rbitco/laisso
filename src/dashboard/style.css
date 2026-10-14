@@ -88,7 +88,25 @@ main { padding: 16px; }
 .ledger-tools { display: flex; justify-content: flex-end; margin: 0 0 8px; font-size: 13px; color: var(--muted); }
 .ledger-tools label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
 [data-role="ledger"] { display: grid; gap: 8px; }
-.ticket { display: grid; grid-template-columns: max-content 120px minmax(160px, 1fr) 150px max-content 64px max-content; gap: 4px 14px; align-items: center; padding: 10px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+/*
+ * Every row shares one column template in proportions of the row (fr after the gaps, so nothing overflows), never
+ * sized by its own content: columns line up whatever a row holds, and long text ends in an ellipsis instead.
+ * Wide: one line of seven columns. Medium: two aligned lines. Narrow: a stacked card.
+ */
+.ticket {
+  display: grid; gap: 4px 14px; align-items: center; padding: 10px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; cursor: pointer;
+  grid-template-columns: minmax(0, 10fr) minmax(0, 14fr) minmax(0, 33fr) minmax(0, 16fr) minmax(0, 9fr) minmax(0, 6fr) minmax(0, 12fr);
+  grid-template-areas: "pill id title track rings last quick";
+}
+.ticket > .pill { grid-area: pill; justify-self: start; max-width: 100%; overflow: hidden; }
+.ticket .id-cell { grid-area: id; min-width: 0; }
+.ticket .title-cell { grid-area: title; min-width: 0; }
+.ticket .track { grid-area: track; min-width: 0; }
+.ticket .rings { grid-area: rings; }
+.ticket .last { grid-area: last; }
+.ticket .quick { grid-area: quick; justify-self: end; max-width: 100%; }
+.ticket .ref, .ticket .repo, .ticket .track .stage { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ticket .quick button { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ticket:hover { border-color: var(--accent); }
 .ticket.ended { opacity: 0.55; }
 .ticket .ref { font-variant-numeric: tabular-nums; font-weight: 600; }
@@ -99,11 +117,19 @@ main { padding: 16px; }
 .ticket .track svg { display: block; width: 100%; max-width: 132px; height: 18px; }
 .ticket .track .stage { display: block; color: var(--muted); font-size: 11px; }
 .ticket .last { font-variant-numeric: tabular-nums; text-align: right; }
-.ticket .quick { min-width: 0; }
-@media (max-width: 900px) {
-  .ticket { grid-template-columns: max-content 1fr max-content; }
-  .ticket .track, .ticket .rings, .ticket .last, .ticket .quick { grid-column: span 1; }
-  .ticket .title-cell { grid-column: 1 / -1; }
+@media (max-width: 1099px) {
+  .ticket {
+    grid-template-columns: minmax(0, 14fr) minmax(0, 20fr) minmax(0, 46fr) minmax(0, 20fr);
+    grid-template-areas: "pill id title quick" ". track rings last";
+  }
+  .ticket .rings { justify-self: start; }
+}
+@media (max-width: 699px) {
+  .ticket {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "pill last" "id rings" "title title" "track quick";
+  }
+  .ticket .rings { justify-self: end; }
 }
 .rings { display: flex; gap: 4px; align-self: center; }
 .rings svg { width: 18px; height: 18px; }

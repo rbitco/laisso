@@ -126,11 +126,11 @@ export function metroTrack(t: TicketView): string {
     px += s.kind === "action" ? 10 : 20;
     return p;
   });
-  if (!pts.length) return `<svg viewBox="0 0 20 18" data-role="track"></svg>`;
+  if (!pts.length) return `<svg viewBox="0 0 20 18" preserveAspectRatio="xMinYMid meet" data-role="track"></svg>`;
   const ci = t.stage.index;
   const state = STATE_COLOUR[t.display.state] || "muted";
   const first = pts[0]!.cx;
-  let o = `<svg viewBox="0 0 ${px} 18" data-role="track" aria-label="${esc(t.stage.label)}, Stage ${ci + 1} of ${pts.length}"><line x1="${first}" y1="9" x2="${pts[pts.length - 1]!.cx}" y2="9" stroke="var(--surface2)" stroke-width="3"/>`;
+  let o = `<svg viewBox="0 0 ${px} 18" preserveAspectRatio="xMinYMid meet" data-role="track" aria-label="${esc(t.stage.label)}, Stage ${ci + 1} of ${pts.length}"><line x1="${first}" y1="9" x2="${pts[pts.length - 1]!.cx}" y2="9" stroke="var(--surface2)" stroke-width="3"/>`;
   const reach = t.state === "done" ? pts.length - 1 : Math.max(0, Math.min(ci, pts.length - 1));
   if (reach > 0) o += `<line x1="${first}" y1="9" x2="${pts[reach]!.cx}" y2="9" stroke="${t.state === "abandoned" ? "var(--line)" : COL.good}" stroke-width="3" opacity=".85"/>`;
   pts.forEach(({ s, cx }, i) => {
