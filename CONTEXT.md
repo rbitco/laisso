@@ -41,7 +41,8 @@ _Avoid_: guardrail, boundary, limit, quota
 **Flagged**:
 A Ticket that has exhausted its Budget or otherwise needs a human before any
 agent may continue. It carries the reason, starts no new Session, and clears
-only when a human retries, resumes, extends, marks done, skips, or abandons.
+only when a human retries, resumes, extends, takes over, marks done, skips,
+or abandons.
 _Avoid_: blocked, stuck, escalated
 
 **Attention**:

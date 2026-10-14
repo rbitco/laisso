@@ -190,6 +190,9 @@ export function createApp(deps: AppDeps): Hono {
   trigger("resume", (ticket) => deps.exits.resume(ticket));
   trigger("extend", (ticket, body) => deps.exits.extend(ticket, body as ExtendRequest));
   trigger("abandon", (ticket) => deps.exits.abandon(ticket));
+  // A human steps into a headless Stage's Session in a terminal, or reads the draft a gate holds before Start.
+  trigger("takeover", (ticket) => deps.exits.takeOver(ticket));
+  trigger("draft", (ticket) => deps.exits.openDraft(ticket));
 
   // A human's profile for one Runner Stage of one Ticket (LASSO-75): it wins over the Pipeline's choice from the
   // Stage's next Session, retries and Rounds included, until cleared. A Session already running keeps its own.

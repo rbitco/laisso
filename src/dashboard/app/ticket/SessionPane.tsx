@@ -83,7 +83,7 @@ function Duration({ session: s }: { session: SessionView }) {
 }
 
 /**
- * The latest Session: its header, Stop or Open terminal while it runs, its output, its last word, and the paths to
+ * The latest Session: its header, Stop, Take over or Open terminal while it runs, its output, its last word, and the paths to
  * copy. `refresh` follows a Stop or Open terminal that went through.
  */
 export function SessionPane({ ticket: t, session: s, refresh }: { ticket: TicketDetail; session: SessionView; refresh: () => Promise<void> }) {
@@ -121,6 +121,11 @@ export function SessionPane({ ticket: t, session: s, refresh }: { ticket: Ticket
       {s.running && s.mode === "headless" && (
         <button className="stop" type="button" disabled={busy} onClick={() => void post(sessionRoute + "/stop")}>
           Stop
+        </button>
+      )}
+      {s.running && s.mode === "headless" && t.triggers.some((x) => x.action === "takeover" && !x.unavailable) && (
+        <button className="stop" type="button" disabled={busy} title="Stop this run and continue its session in a terminal" onClick={() => void post(ticketRoute(t.id) + "/takeover", "{}")}>
+          Take over
         </button>
       )}
       {s.mode === "terminal" && s.running && t.triggers.some((x) => x.action === "terminal") && (

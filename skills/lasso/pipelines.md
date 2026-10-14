@@ -59,6 +59,28 @@ exhausted Session is retried first while attempts remain). A human Stage is
 done when the human marks it done; a missing artifact then warns and can be
 overridden.
 
+Take over in terminal stops a headless Stage's running Session (or clears
+its Flag) and re-enters that Runner session in a terminal; from then the
+Stage is worked as a human Stage. Codex can be taken over only once it has
+reported its thread id.
+
+For an approval step, let one Stage draft and stop for Start, then a second
+act on the draft:
+
+```yaml lasso-pipeline
+stages:
+  - name: plan
+    prompt: Draft a plan in PLAN.md. Do not change any code.
+    advance: false
+    artifact: file PLAN.md
+  - name: implement
+    prompt: Carry out PLAN.md.
+```
+
+While the Ticket holds after `plan`, **Open plan in terminal** re-enters the
+draft's session to read or revise it (Lasso keeps no Session row for that
+window), and **Start implement** is the approval.
+
 ### Repeating Stage (`repeat: feedback`)
 
 Each Tick Lasso polls the Ticket's PR with `gh`. New Feedback (failed

@@ -55,7 +55,7 @@ describe("attempts", () => {
     expect(d.flag).toMatchObject({ reason: "budget.attempts", detail: "implement: 2 of 2 attempts used" });
     expect(d.sessions.map((s) => [s.ordinal, s.outcome, s.startedBy])).toEqual([[2, "interrupted", "auto"], [1, "interrupted", "auto"]]);
     expect(d.budget.attempts).toEqual({ used: 2, limit: 2, source: "global" });
-    expect(d.triggers.map((x) => x.action)).toEqual(["retry", "resume", "extend", "done", "skip", "abandon"]);
+    expect(d.triggers.map((x) => x.action)).toEqual(["retry", "resume", "takeover", "extend", "done", "skip", "abandon"]);
     expect((await notified(lasso, 1)).map((n) => n.body)).toEqual(["budget.attempts: implement: 2 of 2 attempts used"]);
 
     // Retry and Resume are refused at the limit; nothing changes.

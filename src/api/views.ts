@@ -23,7 +23,7 @@ export type DisplayState ="flagged" | "needs_you" | "holding" | "ready" | "runni
 
 /** A lever the human can pull on a Ticket right now; the dashboard renders one button per Trigger. Flagged, the six exits. */
 export interface Trigger {
-  action: "terminal" | "done" | "skip" | "start" | "retry" | "resume" | "extend" | "abandon";
+  action: "terminal" | "done" | "skip" | "start" | "retry" | "resume" | "extend" | "abandon" | "takeover" | "draft";
   label: string;
   /** Set when the lever is shown but cannot be pulled now, saying why: Resume when the Stage's profile is on another Runner. */
   unavailable?: string;
@@ -309,9 +309,12 @@ export function ticketView(ticket: TicketRow, ctx: ViewContext): TicketView {
   const rows = ctx.sessionsFor(ticket);
   const queue = ctx.queuePosition(ticket);
   const budget = ctx.budgetFor(ticket, pipeline, stage, rows);
-  const display = displayState(ticket, stage, rows[0] ?? null, queue, budget.rounds.limit);
+  const takenOver = stage?.kind === "runner" && !stage.human && rows.some((r) => r.mode === "terminal" && r.ended_at === null && r.stage === stage.name);
+  const display = displayState(ticket, stage, rows[0] ?? null, queue, budget.rounds.limit, takenOver);
   const resume = stage?.kind === "runner" ? (last: SessionRow) => resumeRefusal(stage.name, last, ticketProfile(ctx.profiles, ticket, pipeline!, stage)) : () => null;
-  const triggers = ticketTriggers(ticket, stage, rows, resume);
+  const finished = index > 0 ? pipeline!.stages[index - 1]! : null;
+  const draft = ticket.holding_since && finished?.kind === "runner" && !finished.human && resumableHeadless(rows, finished.name) ? finished.name : null;
+  const triggers = ticketTriggers(ticket, stage, rows, resume, takenOver, draft);
   return {
     id: ticket.id,
     shortId: shortId(ticket.id),
@@ -400,7 +403,7 @@ export function sessionView(row: SessionRow, now: number = Date.now(), feedback:
   };
 }
 
-function displayState(ticket: TicketRow, stage: Stage | null, latest: SessionRow | null, queue: number | null, rounds: number): { state: DisplayState; why: string } {
+function displayState(ticket: TicketRow, stage: Stage | null, latest: SessionRow | null, queue: number | null, rounds: number, takenOver = false): { state: DisplayState; why: string } {
   const human = stage?.kind === "runner" && stage.human;
   const name = stage ? stageLabel(stage) : ticket.stage;
   if (ticket.state === "done") return { state: "done", why: "done" };
@@ -409,9 +412,10 @@ function displayState(ticket: TicketRow, stage: Stage | null, latest: SessionRow
   if (latest?.ended_at === null && latest.mode === "action") return { state: "running", why: `${latest.stage}, running its command` };
   if (headlessRunning(latest)) return { state: "running", why: latest.round !== null ? `${latest.stage}, Round ${latest.round} of ${rounds}` : `${latest.stage}, run ${latest.ordinal}` };
   if (ticket.holding_since) return { state: "holding", why: `Start ${name} when ready` };
-  if (human) {
+  if (human || takenOver) {
     const opened = latest && latest.ended_at === null && latest.mode === "terminal" && latest.stage === ticket.stage ? latest.opened_at : null;
-    return { state: "needs_you", why: opened ? `terminal opened ${clockTime(opened)}` : "not started" };
+    const why = opened ? `terminal opened ${clockTime(opened)}` : "not started";
+    return { state: "needs_you", why: takenOver ? `taken over; ${opened ? why : "terminal not opened"}` : why };
   }
   if (queue !== null) return { state: "queued", why: `${queue} in line; ${name} starts when a slot frees` };
   // A repeating Stage with no Round due waits on its PR: quiet (spec: Review loop).
@@ -427,11 +431,22 @@ function resumableHeadless(rows: SessionRow[], stage: string): SessionRow | null
   return runner === null || adapterFor(runner).sessionIds === "lasso" || last.runner_session_id !== null ? last : null;
 }
 
-/** `refusal` says why Resume cannot re-enter a Session under the profile the Stage runs now, or null. */
-function ticketTriggers(ticket: TicketRow, stage: Stage | null, rows: SessionRow[], refusal: (last: SessionRow) => string | null): Trigger[] {
+/**
+ * `refusal` says why Resume cannot re-enter a Session under the profile the Stage runs now, or null. `takenOver`: a
+ * human works this headless Stage in a terminal; `draft`: the finished Stage a holding Ticket can open in a terminal.
+ */
+function ticketTriggers(ticket: TicketRow, stage: Stage | null, rows: SessionRow[], refusal: (last: SessionRow) => string | null, takenOver = false, draft: string | null = null): Trigger[] {
   if (ticket.state !== "active") return [];
   const abandon: Trigger = { action: "abandon", label: "Abandon" };
   if (!stage) return [abandon];
+  // Take over needs a headless Session of the Stage to re-enter: one running, or one Resume could re-enter.
+  const running = rows.find((r) => r.stage === stage.name && r.mode === "headless" && r.ended_at === null) ?? null;
+  const toTake = stage.kind === "runner" && !stage.human && !takenOver ? (running ?? resumableHeadless(rows, stage.name)) : null;
+  const takeOver = (): Trigger[] => {
+    if (!toTake) return [];
+    const unavailable = refusal(toTake);
+    return [{ action: "takeover", label: "Take over in terminal", ...(unavailable ? { unavailable } : {}) }];
+  };
   if (ticket.flagged_at) {
     // Resume needs something to re-enter: a terminal window that opened, or the last headless Session of this
     // Stage, which a Runner that names its own sessions must have reported an id for.
@@ -441,14 +456,15 @@ function ticketTriggers(ticket: TicketRow, stage: Stage | null, rows: SessionRow
     return [
       { action: "retry", label: `Retry ${stage.name}` },
       ...(resumable ? [{ action: "resume" as const, label: `Resume ${stage.name}`, ...(unavailable ? { unavailable } : {}) }] : []),
+      ...takeOver(),
       { action: "extend", label: "Extend Budget" },
       { action: "done", label: `Mark ${stage.name} done` },
       { action: "skip", label: `Skip ${stage.name}` },
       abandon,
     ];
   }
-  if (ticket.holding_since) return [{ action: "start", label: `Start ${stage.name}` }, abandon];
-  if (stage.kind !== "runner" || !stage.human || headlessRunning(rows[0] ?? null)) return [abandon];
+  if (ticket.holding_since) return [{ action: "start", label: `Start ${stage.name}` }, ...(draft ? [{ action: "draft" as const, label: `Open ${draft} in terminal` }] : []), abandon];
+  if (stage.kind !== "runner" || headlessRunning(rows[0] ?? null) || !(stage.human || takenOver)) return [...takeOver(), abandon];
   return [
     { action: "terminal", label: "Open terminal" },
     { action: "done", label: `Mark ${stage.name} done` },

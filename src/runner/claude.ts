@@ -36,7 +36,8 @@ export const claudeAdapter: RunnerAdapter = {
       // Terminal baseline: a person is there to answer what acceptEdits asks.
       const mode = permission ? PERMISSION_MODES[permission] : "acceptEdits";
       if (request.resume) {
-        return { argv: ["claude", "--resume", request.sessionId, "--permission-mode", mode, ...extra], cwd: request.cwd, env };
+        // A Session taken over from a headless run re-enters that run's session, which keeps its own id.
+        return { argv: ["claude", "--resume", request.runnerSessionId ?? request.sessionId, "--permission-mode", mode, ...extra], cwd: request.cwd, env };
       }
       const argv = ["claude", "--session-id", request.sessionId, "--permission-mode", mode];
       if (request.name) argv.push("--name", request.name);

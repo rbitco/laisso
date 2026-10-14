@@ -115,12 +115,20 @@ export class Progress {
     return current;
   }
 
-  /** The human Stage a human-only Trigger (Open terminal, Mark done, Skip) acts on. */
+  /**
+   * The Stage a human-only Trigger (Open terminal, Mark done, Skip) acts on: a human Stage, or a headless one a
+   * human has taken over in a terminal, which is worked as a human Stage until it finishes.
+   */
   humanStage(ticket: TicketRow): { pipeline: Pipeline; stage: RunnerStage } {
     const current = this.currentForTrigger(ticket);
     if (ticket.holding_since) throw new TriggerError(`Ticket ${ticket.reference ?? ticket.id} is holding; Start ${current.stage.name} first`);
-    if (current.stage.kind !== "runner" || !current.stage.human) throw new TriggerError(`${current.stage.name} is not a human Stage`);
+    if (current.stage.kind !== "runner" || !(current.stage.human || this.takenOver(ticket, current.stage.name))) throw new TriggerError(`${current.stage.name} is not a human Stage`);
     return { pipeline: current.pipeline, stage: current.stage };
+  }
+
+  /** A terminal Session holds the Stage: a human took a headless Stage over (Take over in terminal). */
+  takenOver(ticket: TicketRow, stage: string): boolean {
+    return this.deps.sessions.running(ticket.id).some((s) => s.mode === "terminal" && s.stage === stage);
   }
 
   /** The Stage a Flag exit acts on: where an active, Flagged Ticket stopped. */

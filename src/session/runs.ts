@@ -52,6 +52,8 @@ interface Live {
   stderr: string;
   wallTimer: NodeJS.Timeout | null;
   killReason: EndedReason | null;
+  /** A human is taking the Session over in a terminal: however it ends, Lasso reaches no verdict on it. */
+  takenOver: boolean;
   /** Set when the process never started; the Session ends interrupted and the Flag says runner.unavailable. */
   spawnError: string | null;
   /** The Runner's command is not on PATH: another attempt cannot help, so the Flag comes at once. */
@@ -188,7 +190,7 @@ export class Runs {
     });
     let resolve!: (row: SessionRow) => void;
     const done = new Promise<SessionRow>((r) => (resolve = r));
-    const live: Live = { child, ticket: ticket.id, stage, request, stdoutPath, fd, stderr: "", wallTimer: null, killReason: null, spawnError: null, notOnPath: false, exit: null, done, resolve };
+    const live: Live = { child, ticket: ticket.id, stage, request, stdoutPath, fd, stderr: "", wallTimer: null, killReason: null, takenOver: false, spawnError: null, notOnPath: false, exit: null, done, resolve };
     this.live.set(sessionId, live);
     if (command.stdin !== undefined) child.stdin!.end(command.stdin);
 
@@ -229,6 +231,18 @@ export class Runs {
   async stop(session: SessionRow): Promise<SessionRow> {
     const live = this.live.get(session.id);
     if (!live) throw new RunError(`Session ${session.id} is not running`);
+    await this.kill(session.id, "stop");
+    return live.done;
+  }
+
+  /**
+   * Take over in terminal: the Session stops as a human's Stop does, but no verdict follows, since the human now
+   * works the Stage in a terminal on the same session. One that ends on its own meanwhile is not judged either.
+   */
+  async takeOver(session: SessionRow): Promise<SessionRow> {
+    const live = this.live.get(session.id);
+    if (!live) return this.deps.sessions.get(session.id)!;
+    live.takenOver = true;
     await this.kill(session.id, "stop");
     return live.done;
   }
@@ -318,7 +332,7 @@ export class Runs {
     const reason: EndedReason | null = live.killReason ?? (this.closing && !live.spawnError ? "shutdown" : null);
     const outcome: Outcome = reason || live.spawnError || terminated ? { ...parsed, status: "interrupted" } : parsed;
     const stderr = live.stderr.trim() || null;
-    const finalMessage = outcome.finalMessage ?? (live.killReason ? `killed: ${live.killReason.replace("_", " ")}` : reason ? "ended during shutdown" : (live.spawnError ?? (terminated ? `terminated by ${signalName}` : stderr)));
+    const finalMessage = live.takenOver ? "taken over in a terminal" : outcome.finalMessage ?? (live.killReason ? `killed: ${live.killReason.replace("_", " ")}` : reason ? "ended during shutdown" : (live.spawnError ?? (terminated ? `terminated by ${signalName}` : stderr)));
     const end: SessionEnd = {
       ended_by: reason === "stop" || reason === "abandon" ? "human" : "outcome",
       ended_reason: reason,
@@ -333,7 +347,7 @@ export class Runs {
     // The verdict is reached before the row ends so a reader never sees a
     // Session over and its Ticket not yet advanced or Flagged.
     let verdict: Verdict | null;
-    if (reason === "shutdown" || this.closing) verdict = null;
+    if (reason === "shutdown" || this.closing || live.takenOver) verdict = null;
     else if (live.spawnError) verdict = { flag: "runner.unavailable", detail: live.spawnError, ...(live.notOnPath ? { retry: false as const } : {}) };
     else verdict = await this.judge(live, end);
     const row = this.deps.sessions.end(sessionId, end);

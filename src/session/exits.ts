@@ -88,6 +88,52 @@ export class Exits {
     return this.cleared(ticket, "resume", (cleared) => runs.launch(cleared, pipeline, stage, "human", last));
   }
 
+  /**
+   * Take over in terminal: a human steps into the current headless Stage's last Session, running or not, Flagged
+   * or not. A running one stops first; the terminal re-enters its session, and the Stage is then worked as a human
+   * Stage, finished by Mark done or Skip. Taken over already, the window opens again on the same Session.
+   */
+  async takeOver(ticket: TicketRow): Promise<TicketRow> {
+    const { progress, sessions, terminal, runs, tickets } = this.deps;
+    if (ticket.holding_since && !ticket.flagged_at) throw new TriggerError(`Ticket ${ticket.reference ?? ticket.id} is holding; Start ${ticket.stage} or open the draft`);
+    const { pipeline, stage } = ticket.flagged_at ? progress.flaggedStage(ticket) : progress.currentForTrigger(ticket);
+    if (stage.kind !== "runner") throw new TriggerError(`${stage.name} is an action Stage; there is no Session to take over`);
+    if (stage.human) throw new TriggerError(`${stage.name} is a human Stage; Open terminal works it`);
+    let takeOver = null;
+    if (!progress.takenOver(ticket, stage.name)) {
+      const from = sessions.forTicket(ticket.id).find((s) => s.mode === "headless" && s.stage === stage.name) ?? null;
+      if (!from) throw new TriggerError(`no Session of ${stage.name} to take over yet`);
+      this.resumable(ticket, pipeline, stage, from);
+      // A running Runner that names its own session reports it as it ends; one that ended without it cannot be re-entered.
+      const runner = runnerOf(from);
+      if (from.ended_at !== null && runner && adapterFor(runner).sessionIds === "runner" && !from.runner_session_id) throw new TriggerError(`${runner} left no session id to take over on ${stage.name}; Retry starts afresh`);
+      takeOver = { from, stop: () => runs.takeOver(from) };
+      // A Ticket waiting for a slot gives its place up: the human is working the Stage now.
+      tickets.setRunnableSince(ticket.id, null);
+    }
+    const open = (current: TicketRow) => terminal.open(current, pipeline, stage, takeOver);
+    if (ticket.flagged_at) return this.cleared(ticket, "takeover", open);
+    await open(ticket);
+    return tickets.get(ticket.id)!;
+  }
+
+  /**
+   * Open the draft: while a Ticket holds for Start, a terminal on the Stage that just finished, to read or steer
+   * what it made before approving it. Start, not this, releases the next Stage.
+   */
+  async openDraft(ticket: TicketRow): Promise<TicketRow> {
+    const { progress, sessions, terminal, tickets } = this.deps;
+    const { pipeline, index } = progress.currentForTrigger(ticket);
+    if (!ticket.holding_since) throw new TriggerError(`Ticket ${ticket.reference ?? ticket.id} is not holding for Start`);
+    const finished = pipeline.stages[index - 1];
+    if (!finished || finished.kind !== "runner") throw new TriggerError(`nothing before ${ticket.stage} has a Session to open`);
+    const from = sessions.forTicket(ticket.id).find((s) => s.mode === "headless" && s.stage === finished.name) ?? null;
+    if (!from) throw new TriggerError(`${finished.name} has no headless Session to open`);
+    this.resumable(ticket, pipeline, finished, from);
+    await terminal.openDraft(ticket, pipeline, finished, from);
+    return tickets.get(ticket.id)!;
+  }
+
   /** Extend: set the Ticket layer of the Budget. A Flag for a budget.* reason clears once the next Session is affordable again. */
   async extend(ticket: TicketRow, request: ExtendRequest): Promise<TicketRow> {
     const { tickets, progress, budgets, log, tick } = this.deps;

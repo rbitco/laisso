@@ -126,7 +126,7 @@ describe("a human Stage", () => {
     await lasso.runner.script({ stdout: claudeFixture("success.json"), commands: [["git", "commit", "-q", "--allow-empty", "-m", "work"]] });
     const started = await pull(lasso, ticket.id, "start");
     expect(started.display.state).toBe("running");
-    expect(started.triggers).toEqual([{ action: "abandon", label: "Abandon" }]);
+    expect(started.triggers).toEqual([{ action: "takeover", label: "Take over in terminal" }, { action: "abandon", label: "Abandon" }]);
 
     const notes = await waitFor(async () => { const d = await detailOf(lasso, ticket.id); return d.stage.name === "notes" ? d : null; }, "implement to finish");
     expect(notes.display).toEqual({ state: "needs_you", label: "Needs you", why: "not started" });
@@ -211,6 +211,6 @@ describe("a human Stage", () => {
     await waitFor(async () => (lasso.stdout().includes("notify.failed") ? true : null), "the failure to be logged");
     expect(lasso.stdout()).toMatch(/WARN notify.failed event=flagged .*terminal-notifier: broken/);
     expect(await lasso.notifications()).toHaveLength(1);
-    expect((await detailOf(lasso, ticket.id)).triggers.map((x) => x.action)).toEqual(["retry", "resume", "extend", "done", "skip", "abandon"]);
+    expect((await detailOf(lasso, ticket.id)).triggers.map((x) => x.action)).toEqual(["retry", "resume", "takeover", "extend", "done", "skip", "abandon"]);
   });
 });
