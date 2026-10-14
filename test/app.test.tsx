@@ -263,7 +263,7 @@ describe("intake", () => {
     render(<App />);
     const user = userEvent.setup();
     await user.type(screen.getByRole("textbox", { name: "Intake" }), "APP-7");
-    await user.click(screen.getByRole("button", { name: "Add" }));
+    await user.click(screen.getByRole("button", { name: "Import" }));
     const confirm = section("confirm");
     await within(confirm).findByText("jira APP-7");
     expect(lasso.sent.filter((s) => s.route === "/api/intake/detect").at(-1)).toMatchObject({ method: "POST", body: { input: "APP-7" } });
@@ -297,11 +297,11 @@ describe("intake", () => {
     render(<App />);
     const user = userEvent.setup();
     await user.type(screen.getByRole("textbox", { name: "Intake" }), "APP-7");
-    await user.click(screen.getByRole("button", { name: "Add" }));
+    await user.click(screen.getByRole("button", { name: "Import" }));
     await user.click(await screen.findByRole("button", { name: "Cancel" }));
     expect(document.querySelector('[data-role="confirm"]')).toBeNull();
     vi.stubGlobal("fetch", async () => new Response(JSON.stringify({ error: "nothing to intake" }), { status: 400 }));
-    await user.click(screen.getByRole("button", { name: "Add" }));
+    await user.click(screen.getByRole("button", { name: "Import" }));
     await waitFor(() => expect(notice().textContent).toBe("nothing to intake"));
   });
 
@@ -314,7 +314,7 @@ describe("intake", () => {
     render(<App />);
     const user = userEvent.setup();
     await user.type(screen.getByRole("textbox", { name: "Intake" }), "APP-7");
-    await user.click(screen.getByRole("button", { name: "Add" }));
+    await user.click(screen.getByRole("button", { name: "Import" }));
     const confirm = section("confirm");
     await within(confirm).findByText("No JIRA repo is set up yet.", { exact: false });
     expect(within(confirm).getByRole("link", { name: "Add one in Config" }).getAttribute("href")).toBe("#config");
@@ -329,7 +329,7 @@ describe("intake", () => {
     const user = userEvent.setup();
     await user.type(screen.getByRole("textbox", { name: "Intake" }), "APP-7");
     hold();
-    await user.click(screen.getByRole("button", { name: "Add" }));
+    await user.click(screen.getByRole("button", { name: "Import" }));
     const looking = await screen.findByRole("button", { name: "Looking up" });
     expect(looking).toHaveProperty("disabled", true);
     expect(looking.className).toContain("busy");
@@ -337,7 +337,7 @@ describe("intake", () => {
 
     const confirm = section("confirm");
     await within(confirm).findByText("jira APP-7");
-    expect(screen.getByRole("button", { name: "Add" })).toHaveProperty("disabled", false);
+    expect(screen.getByRole("button", { name: "Import" })).toHaveProperty("disabled", false);
     hold();
     await user.click(within(confirm).getByRole("radio", { name: "web" }));
     expect(within(confirm).getByText("checking web for an existing branch")).toBeTruthy();

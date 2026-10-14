@@ -39,7 +39,7 @@ export function IntakeForm({ text, onText, onDetected }: { text: string; onText:
     <form data-role="intake" autoComplete="off" onSubmit={submit} aria-busy={busy}>
       <input name="input" placeholder="Paste a JIRA key, a GitHub issue, or type a prompt" aria-label="Intake" value={text} readOnly={busy} onChange={(ev) => onText(ev.target.value)} />
       <button className={busy ? "primary busy" : "primary"} type="submit" disabled={busy}>
-        {busy ? "Looking up" : "Add"}
+        {busy ? "Looking up" : "Import"}
       </button>
     </form>
   );
