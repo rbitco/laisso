@@ -67,7 +67,8 @@ const PR_ARTIFACTS = new Set(["pr-exists", "pr-review", "pr-merged"]);
  * repo's default, a Pipeline, a Stage, a Ticket's override); gh or acli when
  * a repo's tracker talks through it, an Action's run text names it, or (gh)
  * a Stage reads the PR. A Runner nothing names is not listed.
- * terminal-notifier is optional while notifications are on.
+ * herdr or tmux when terminal: names it. terminal-notifier is optional
+ * while notifications are on.
  */
 export function neededTools(use: ToolUse): NeededTool[] {
   const { config } = use;
@@ -115,6 +116,8 @@ export function neededTools(use: ToolUse): NeededTool[] {
   actionNeeds(config.actions, "");
   for (const [repo, r] of Object.entries(config.repos)) actionNeeds(r.actions, `repo ${repo}'s `);
 
+  // auto opens herdr or tmux only when Lasso already runs inside it, so only a terminal config names outright is needed.
+  if (config.terminal === "herdr" || config.terminal === "tmux") need(config.terminal, `terminal: ${config.terminal}`);
   if (config.notifications.enabled) need("terminal-notifier", "notifications that open the Ticket on click (osascript otherwise)", true);
 
   return [...needed.values()];

@@ -111,6 +111,19 @@ describe("the Config page's settings", () => {
     await waitFor(() => expect(lasso.patches).toEqual([{ budget: { rounds: null }, branch_prefix: null }]));
   });
 
+  it("sets where human Stages open, and clears the key when it goes back to auto", async () => {
+    const lasso = await showPage({ ...DEFAULT_CONFIG, terminal: "tmux" });
+    const select = screen.getByLabelText("Human Stages open in") as HTMLSelectElement;
+    expect(select.value).toBe("tmux");
+    const user = userEvent.setup();
+    await user.selectOptions(select, "herdr");
+    await user.click(save());
+    await waitFor(() => expect(notice().textContent).toBe("saved"));
+    await user.selectOptions(select, "auto");
+    await user.click(save());
+    await waitFor(() => expect(lasso.patches).toEqual([{ terminal: "herdr" }, { terminal: null }]));
+  });
+
   it("marks the form unsaved while it differs from config, and not once it matches again", async () => {
     await showPage();
     const form = document.querySelector('[data-role="config-fields"]')!;

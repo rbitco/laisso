@@ -22,6 +22,7 @@ Unknown top-level keys are ignored.
 | `retention` | `30` | whole number, 0 or more: days a done or Abandoned Ticket's directory is kept |
 | `branch_prefix` | `""` | text; `me` makes branches `me/<key>-<slug>` |
 | `port` | `7433` | whole number, 1 or more: dashboard and API port |
+| `terminal` | `auto` | `auto`, `herdr`, `tmux` or `terminal-app`: where a human Stage's terminal opens; see [Terminals](#terminals) |
 | `notifications.enabled` / `.flagged` / `.human` / `.gate` | all `true` | `true` or `false` |
 
 A duration is hours, minutes and seconds in that order, each optional:
@@ -166,11 +167,30 @@ On a machine with only GitHub repos, put the GitHub command in the global
 `tracker.transition` instead: Lasso then adds nothing, and `acli` is not
 needed (doctor lists a tool as needed when any Action's `run` names it).
 
+## Terminals
+
+Open terminal on a human Stage runs the Runner in a new terminal, in the
+Ticket's worktree, named like `Lasso: LASSO-42 grill`. Where it opens:
+
+| `terminal` | Opens |
+| --- | --- |
+| `auto` | a herdr tab when Lasso was started inside herdr (`HERDR_ENV=1`), else a tmux window when it was started inside tmux (`TMUX` set), else a Terminal.app window |
+| `herdr` | a new tab in Lasso's herdr workspace, focused |
+| `tmux` | a new window in Lasso's tmux session, which becomes its current window |
+| `terminal-app` | a Terminal.app window, brought to the front |
+
+The window opens where the `lasso` process runs, not where the browser
+is. Under `auto`, a herdr or tmux that fails (its server gone since Lasso
+started) falls back to Terminal.app and logs `terminal.fallback`; a
+terminal named outright that fails is an error on Open terminal instead,
+and `lasso doctor` lists it as a needed tool. `lasso doctor` ends with
+where human Stages open, as Lasso started from that shell would choose.
+
 ## When edits apply
 
 | Edit | Applies |
 | --- | --- |
-| `actions`, `profiles`, `default_profile` (global or a repo's) | at the next Session or action Stage that starts; no restart |
+| `actions`, `profiles`, `default_profile` (global or a repo's), `terminal` | at the next Session or action Stage that starts; no restart |
 | `concurrency` | at the next Tick |
 | Pipeline files | at the next Intake; Tickets already under way keep their Version |
 | `repos` (added, removed, or changed `tracker`/`project`/`path`/`pipeline`), `budget`, `retention`, `branch_prefix`, `notifications` | after a restart, or after the next save from the dashboard's Config page, which rereads the whole file |

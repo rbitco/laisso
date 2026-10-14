@@ -1,8 +1,6 @@
-import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { promisify } from "node:util";
 import { currentConfig, type Config } from "../server/config.ts";
 import type { LassoHome } from "../server/home.ts";
 import type { Logger } from "../server/log.ts";
@@ -12,11 +10,10 @@ import { ticketProfile } from "./overrides.ts";
 import type { Pipeline, RunnerStage } from "../pipeline/load.ts";
 import { requestFor, type Command, type RunRequest, type RunnerAdapter } from "../runner/adapter.ts";
 import { adapterFor } from "../runner/adapters.ts";
-import { appleString, shellQuote } from "../macos.ts";
+import { shellQuote } from "../macos.ts";
+import { chooseTerminal, macosTerminal, openerFor, TerminalError, type TerminalKind } from "./openers.ts";
 
-const run = promisify(execFile);
-
-export class TerminalError extends Error {}
+export { TerminalError };
 
 export interface TerminalDeps {
   config: Config;
@@ -25,13 +22,8 @@ export interface TerminalDeps {
   log: Logger;
   /** Flags the Ticket; a Stage whose profile is gone from config cannot open. */
   flag: (ticket: string, reason: string, detail: string) => Promise<void>;
-  /** How a command gets a window; defaults to the platform's. */
-  opener?: WindowOpener;
-}
-
-/** Puts a launcher script in a new terminal window. */
-export interface WindowOpener {
-  open(launcher: string, name: string): Promise<void>;
+  /** The environment Lasso started in, which says whether it runs inside herdr or tmux; defaults to the process's. */
+  env?: NodeJS.ProcessEnv;
 }
 
 /**
@@ -43,17 +35,18 @@ export interface WindowOpener {
  */
 export class Terminal {
   private deps: TerminalDeps;
-  private opener: WindowOpener;
+  private env: NodeJS.ProcessEnv;
 
   constructor(deps: TerminalDeps) {
     this.deps = deps;
-    this.opener = deps.opener ?? macosTerminal();
+    this.env = deps.env ?? process.env;
   }
 
   async open(ticket: TicketRow, pipeline: Pipeline, stage: RunnerStage): Promise<SessionRow> {
     const { sessions, home, log } = this.deps;
     // Read at each open, as for headless Sessions (ADR 0011): an edit to the profile reaches the next window.
-    const profile = ticketProfile(currentConfig(home, this.deps.config), ticket, pipeline, stage);
+    const config = currentConfig(home, this.deps.config);
+    const profile = ticketProfile(config, ticket, pipeline, stage);
     if ("problem" in profile) {
       await this.deps.flag(ticket.id, "profile.missing", profile.problem);
       throw new TerminalError(profile.problem);
@@ -114,9 +107,27 @@ export class Terminal {
         ? `${stage.name} now runs ${profile.name} on ${adapter.name}, not ${switched}; starting afresh.`
         : null;
     writeFileSync(launcher, launcherScript(command, note), { mode: 0o755 });
-    await this.opener.open(launcher, request.name!);
-    log.info(request.resume ? "session.resumed" : "session.opened", { session: sessionId, ticket: ticket.id, stage: stage.name, launcher });
+    const terminal = await this.openWindow(config.terminal, launcher, request.name!, command.cwd);
+    log.info(request.resume ? "session.resumed" : "session.opened", { session: sessionId, ticket: ticket.id, stage: stage.name, launcher, terminal });
     return sessions.setOpened(sessionId, new Date().toISOString());
+  }
+
+  /**
+   * The launcher in the terminal config names, or the one Lasso runs inside.
+   * A terminal Lasso chose itself falls back to Terminal.app when it fails
+   * (a tmux server gone since Lasso started); one config names is reported.
+   */
+  private async openWindow(setting: Config["terminal"], launcher: string, name: string, cwd: string): Promise<TerminalKind> {
+    const choice = chooseTerminal(setting, this.env);
+    try {
+      await openerFor(choice.kind, this.env).open(launcher, name, cwd);
+      return choice.kind;
+    } catch (error) {
+      if (!choice.auto || choice.kind === "terminal-app" || !(error instanceof TerminalError)) throw error;
+      this.deps.log.warn("terminal.fallback", { terminal: choice.kind, error: error.message });
+      await macosTerminal().open(launcher, name, cwd);
+      return "terminal-app";
+    }
   }
 
   /** The id the Runner gave a launched Session: kept on the row once found, so later opens re-enter the same one. */
@@ -145,20 +156,4 @@ export function launcherScript(command: Command, note: string | null = null): st
     `exec ${command.argv.map(shellQuote).join(" ")}`,
     "",
   ].join("\n");
-}
-
-/** macOS: Terminal.app runs the launcher in a new window and comes to the front. */
-export function macosTerminal(): WindowOpener {
-  return {
-    async open(launcher) {
-      // The launcher path is a shell line inside an AppleScript string: quoted for each in turn.
-      const script = `tell application "Terminal"\ndo script ${appleString(shellQuote(launcher))}\nactivate\nend tell`;
-      try {
-        await run("osascript", ["-e", script]);
-      } catch (error) {
-        const e = error as { stderr?: string; message?: string };
-        throw new TerminalError(`could not open a terminal: ${(e.stderr || e.message || "").trim()}`);
-      }
-    },
-  };
 }

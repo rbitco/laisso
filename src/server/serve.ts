@@ -28,6 +28,7 @@ import { createApp } from "../api/app.ts";
 import { Dashboard, DashboardMissing } from "../dashboard/page.ts";
 import { findPackageRoot } from "../package-root.ts";
 import { startupToolCheck } from "../tools/startup.ts";
+import { chooseTerminal } from "../session/openers.ts";
 import { VersionCheck, npmLatest } from "./version-check.ts";
 
 export interface ServeOptions {
@@ -158,6 +159,8 @@ export async function serve(opts: ServeOptions): Promise<number> {
   }
   const url = `http://localhost:${config.port}`;
   log.info("started", { home: home.root, port: config.port, pid: process.pid, version: pkg.version });
+  const opensIn = chooseTerminal(config.terminal, process.env);
+  log.info("terminal", { terminal: opensIn.kind, why: opensIn.why });
   console.log(`lasso listening at ${url}`);
   versionCheck.start();
 

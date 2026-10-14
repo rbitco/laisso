@@ -121,6 +121,16 @@ Document on `claude-sonnet`, and Implement and Review on the default. An
 existing install keeps its files; its migration writes runner-only
 `claude`, `codex` and `pi` profiles and `default_profile: claude`.
 
+Open terminal on a human Stage runs the Runner in a new terminal named
+for the Ticket and Stage. `terminal:` in `config.yaml` says where:
+`auto` (the default) opens a herdr tab when Lasso was started inside
+herdr, a tmux window when inside tmux, and a Terminal.app window
+otherwise; `herdr`, `tmux` or `terminal-app` names one outright. The
+window opens beside the `lasso` process, not the browser. Under `auto`
+a herdr or tmux that fails falls back to Terminal.app and logs why; a
+named one that fails is reported on Open terminal. `lasso doctor` says
+which applies.
+
 Every Ticket runs under a Budget: `rounds` (per repeating Stage),
 `attempts` (per Stage), `wallTime` (per headless Session) and `spend`
 (USD per Ticket). `config.yaml` sets the defaults, a Pipeline may

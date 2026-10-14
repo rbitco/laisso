@@ -1,5 +1,5 @@
 import { useRef, useState, type FormEvent, type ReactNode } from "react";
-import type { Config, NotificationConfig } from "../../../server/config.ts";
+import type { Config, NotificationConfig, TerminalSetting } from "../../../server/config.ts";
 import type { ConfigFile } from "../../../api/views.ts";
 import { api } from "../api.ts";
 import { showNotice } from "../notice.tsx";
@@ -11,6 +11,14 @@ const FLAG_LABEL: Record<keyof NotificationConfig, string> = {
   flagged: "A Ticket is Flagged",
   human: "A human Stage is ready for you",
   gate: "A Stage finished and the next waits for Start",
+};
+
+/** Every value terminal: takes, in config's order (the server's config module is not for the browser). */
+const TERMINAL_LABEL: Record<TerminalSetting, string> = {
+  auto: "herdr or tmux when Lasso runs inside one, else Terminal.app",
+  herdr: "a herdr tab",
+  tmux: "a tmux window",
+  "terminal-app": "a Terminal.app window",
 };
 
 /**
@@ -92,6 +100,16 @@ export function SettingsForm({ config, onSaved }: { config: Config; onSaved: (sa
           {text("retention", "Keep finished Tickets (days)")}
           {text("branch_prefix", "Branch prefix", { numeric: false, placeholder: "none" })}
           {text("port", "Port")}
+          <label>
+            Human Stages open in
+            <select name="terminal" value={draft.terminal} onChange={(ev) => setDraft({ ...draft, terminal: ev.target.value as TerminalSetting })}>
+              {(Object.keys(TERMINAL_LABEL) as TerminalSetting[]).map((t) => (
+                <option key={t} value={t}>
+                  {TERMINAL_LABEL[t]}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
       </Setting>
       <Setting title="Notifications" about="Desktop notifications for the moments that need you.">

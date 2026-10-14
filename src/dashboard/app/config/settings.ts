@@ -1,4 +1,4 @@
-import type { Config, NotificationConfig } from "../../../server/config.ts";
+import type { Config, NotificationConfig, TerminalSetting } from "../../../server/config.ts";
 
 /** The Settings form as typed: each text field as its raw string, each notification as its checkbox. */
 export interface Draft {
@@ -11,10 +11,11 @@ export interface Draft {
   retention: string;
   port: string;
   branch_prefix: string;
+  terminal: TerminalSetting;
   notifications: NotificationConfig;
 }
 
-export type TextField = Exclude<keyof Draft, "notifications">;
+export type TextField = Exclude<keyof Draft, "notifications" | "terminal">;
 
 /** What PATCH /api/config takes from this form: only the keys that changed; null clears a key back to its default. */
 export interface SettingsPatch {
@@ -24,6 +25,7 @@ export interface SettingsPatch {
   retention?: number | null;
   port?: number | null;
   branch_prefix?: string | null;
+  terminal?: TerminalSetting | null;
   notifications?: Partial<NotificationConfig>;
 }
 
@@ -49,6 +51,7 @@ export function draftOf(config: Config): Draft {
     retention: String(config.retention),
     port: String(config.port),
     branch_prefix: config.branch_prefix,
+    terminal: config.terminal,
     notifications: { ...config.notifications },
   };
 }
@@ -66,9 +69,10 @@ export function rebase(was: Config, now: Config, draft: Draft): Draft {
   const [before, after] = [draftOf(was), draftOf(now)];
   const next = { ...draft, notifications: { ...draft.notifications } };
   for (const key of Object.keys(after) as (keyof Draft)[]) {
-    if (key === "notifications") continue;
+    if (key === "notifications" || key === "terminal") continue;
     if (draft[key] === before[key]) next[key] = after[key];
   }
+  if (draft.terminal === before.terminal) next.terminal = after.terminal;
   for (const key of Object.keys(after.notifications) as (keyof NotificationConfig)[]) {
     if (draft.notifications[key] === before.notifications[key]) next.notifications[key] = after.notifications[key];
   }
@@ -99,6 +103,8 @@ export function settingsPatch(config: Config, draft: Draft): SettingsPatch {
   }
   const prefix = draft.branch_prefix.trim() || null;
   if (prefix !== (config.branch_prefix || null)) patch.branch_prefix = prefix;
+  // auto is the default: choosing it clears the key rather than writing it.
+  if (draft.terminal !== config.terminal) patch.terminal = draft.terminal === "auto" ? null : draft.terminal;
   const notifications: Partial<NotificationConfig> = {};
   for (const key of ["enabled", "flagged", "human", "gate"] as const) {
     if (draft.notifications[key] !== config.notifications[key]) notifications[key] = draft.notifications[key];

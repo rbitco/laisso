@@ -56,6 +56,10 @@ export interface Lasso {
   runner: RunnerShim;
   /** The fake osascript: what Terminal.app was told to run, oldest first. */
   terminals(): Promise<Array<{ script: string; launcher: string | null }>>;
+  /** The fake tmux and herdr: every invocation, oldest first. */
+  windows(): Promise<WindowCall[]>;
+  /** Make the fake tmux or herdr fail from now on, as when its server has gone. */
+  breakWindows(tool: "tmux" | "herdr"): Promise<void>;
   /** Make the fake notifier exit 1 from now on, so a post fails. */
   breakNotifier(): Promise<void>;
   /** SIGINT the server and wait for exit; the home is left in place. */
@@ -86,7 +90,40 @@ export async function makeHome(config: LassoConfig = {}): Promise<{ home: string
   await installTrackerShims(pathDir);
   await installFakeRunner(pathDir);
   await installFakeOsascript(pathDir);
+  await installFakeMultiplexers(pathDir);
   return { home, pathDir };
+}
+
+export interface WindowCall {
+  tool: "tmux" | "herdr";
+  args: string[];
+}
+
+/** The pane id the fake herdr says each new tab's root pane has. */
+export const HERDR_PANE = "w1:p7";
+
+async function installFakeMultiplexers(pathDir: string): Promise<void> {
+  // Each records its argv. tmux answers display-message with a session id;
+  // herdr answers tab create as herdr 0.9.4 does, and fails with JSON on stderr as it does.
+  const failure = {
+    tmux: "no server running on /tmp/tmux-501/default\n",
+    herdr: JSON.stringify({ id: "cli:tab:create", error: { code: "server_not_running", message: "no herdr server is running" } }),
+  };
+  const answers = {
+    tmux: { "display-message": "$3\n" },
+    herdr: { tab: JSON.stringify({ id: "cli:tab:create", result: { type: "tab_created", tab: { tab_id: "w1:t2" }, root_pane: { pane_id: HERDR_PANE, tab_id: "w1:t2" } } }) },
+  };
+  for (const tool of ["tmux", "herdr"] as const) {
+    const script = `#!/usr/bin/env node
+const fs = require("node:fs");
+const path = require("node:path");
+const args = process.argv.slice(2);
+fs.appendFileSync(path.join(__dirname, "window-calls.jsonl"), JSON.stringify({ tool: ${JSON.stringify(tool)}, args }) + "\\n");
+if (fs.existsSync(path.join(__dirname, ${JSON.stringify(`${tool}-broken`)}))) { process.stderr.write(${JSON.stringify(failure[tool])}); process.exit(1); }
+process.stdout.write(${JSON.stringify(answers[tool])}[args[0]] ?? "");
+`;
+    await writeFile(path.join(pathDir, tool), script, { mode: 0o755 });
+  }
 }
 
 async function installFakeOsascript(pathDir: string): Promise<void> {
@@ -350,9 +387,12 @@ fs.appendFileSync(path.join(__dirname, "notifications.jsonl"), JSON.stringify(re
   await writeFile(path.join(pathDir, "terminal-notifier"), script, { mode: 0o755 });
 }
 
+/** What says a process runs inside herdr or tmux: dropped from what a test inherits, so the suite runs alike inside either. */
+const MULTIPLEXER_ENV = /^(TMUX|TMUX_PANE|HERDR_.*)$/;
+
 export function serverEnv(home: string, pathDir: string, extra: Record<string, string> = {}): NodeJS.ProcessEnv {
   return {
-    ...process.env,
+    ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !MULTIPLEXER_ENV.test(key))),
     LASSO_HOME: home,
     PATH: `${pathDir}:${process.env.PATH ?? ""}`,
     ...extra,
@@ -412,6 +452,8 @@ export async function startLasso(opts: StartOptions = {}): Promise<Lasso> {
     tracker: trackerShim(pathDir),
     runner: runnerShim(pathDir),
     terminals: () => readJsonl(path.join(pathDir, "osascript-calls.jsonl")),
+    windows: () => readJsonl<WindowCall>(path.join(pathDir, "window-calls.jsonl")),
+    breakWindows: (tool) => writeFile(path.join(pathDir, `${tool}-broken`), ""),
     breakNotifier: () => writeFile(path.join(pathDir, "notifier-broken"), ""),
     notifications: () => readJsonl(path.join(pathDir, "notifications.jsonl")),
     async stop() {

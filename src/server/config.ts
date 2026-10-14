@@ -93,7 +93,13 @@ export interface Config {
   branch_prefix: string;
   port: number;
   notifications: NotificationConfig;
+  /** Where a human Stage's terminal opens; auto picks herdr or tmux when Lasso runs inside one. */
+  terminal: TerminalSetting;
 }
+
+/** The values terminal: takes: auto, or a terminal named outright. */
+export const TERMINALS = ["auto", "herdr", "tmux", "terminal-app"] as const;
+export type TerminalSetting = (typeof TERMINALS)[number];
 
 export const DEFAULT_CONFIG: Config = {
   repos: {},
@@ -111,6 +117,7 @@ export const DEFAULT_CONFIG: Config = {
   branch_prefix: "",
   port: 7433,
   notifications: { enabled: true, flagged: true, human: true, gate: true },
+  terminal: "auto",
 };
 
 export const DEFAULT_CONFIG_YAML = `# Lasso configuration. Every key is optional; the values shown are the defaults.
@@ -178,6 +185,10 @@ concurrency: 3     # headless Sessions running at once, across all Tickets
 retention: 30      # days a done or abandoned Ticket's directory is kept
 branch_prefix: ""  # prefix for Ticket branches, e.g. your username; empty for none
 port: 7433         # dashboard and API port
+
+# Where a human Stage's terminal opens: auto uses herdr or tmux when Lasso
+# runs inside one, else Terminal.app; herdr, tmux or terminal-app names one.
+terminal: auto
 
 notifications:
   enabled: true
@@ -272,6 +283,7 @@ export function parseConfig(text: string, file: string, overrides: { port?: numb
       human: flag(notifications.human, at("notifications.human"), fail, D.notifications.human),
       gate: flag(notifications.gate, at("notifications.gate"), fail, D.notifications.gate),
     },
+    terminal: raw.terminal === undefined || raw.terminal === null ? D.terminal : oneOf(TERMINALS, raw.terminal, at("terminal")),
   };
   if (overrides.port !== undefined) config.port = overrides.port;
   return config;
@@ -290,6 +302,7 @@ const EDITABLE: Record<string, Set<string> | null> = {
   port: null,
   notifications: new Set(["enabled", "flagged", "human", "gate"]),
   default_profile: null,
+  terminal: null,
 };
 
 /** Keys whose new value only takes effect once Lasso restarts. */
@@ -464,6 +477,7 @@ export function applyLive(live: Config, fresh: Config): void {
   live.concurrency = fresh.concurrency;
   live.retention = fresh.retention;
   live.branch_prefix = fresh.branch_prefix;
+  live.terminal = fresh.terminal;
 }
 
 function normaliseRepos(value: Record<string, unknown>, where: string): Record<string, RepoConfig> {
