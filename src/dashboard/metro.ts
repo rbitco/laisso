@@ -167,19 +167,29 @@ export function pipelineLine(stages: Array<{ kind: string }>): string {
  * The detail's Metro flow diagram: a thick track, station circles for done, current and ahead
  * Stages, action Stages as ticks, a red octagon for Flagged, the PR feedback orbit with its
  * Rounds badge, a small orbit counting attempts, a pulsing ring while running, and no
- * travelling dot. Each station is a node with data-stage, for the timeline filter.
+ * travelling dot. Each station is a node with data-stage, for the timeline filter. Stations
+ * sit as far apart as their labels need; given the panel's `width`, they spread across it.
  */
-export function metroDiagram(t: MetroTicket, focus: string | null): string {
-  const baseY = 80;
-  let x = 64;
+export function metroDiagram(t: MetroTicket, focus: string | null, width: number | null = null): string {
+  if (!t.stages.length) return `<svg viewBox="0 0 100 40" role="img" aria-label="no Stages"><text x="0" y="20" class="sub">This Pipeline does not load.</text></svg>`;
+  const infos = t.stages.map((_, i) => stageInfo(t, i));
+  const reach = infos.map(stationReach);
+  // Room above the track only for what is drawn there: the Rounds orbit, an attempts orbit, or a line of text.
+  const baseY = infos.some((inf) => inf.roundsUsed) ? 66 : infos.some((inf) => inf.attempts.length > 1) ? 44 : 34;
+  const H = baseY + (infos.some((inf) => inf.roundsUsed || inf.attempts.length > 1) ? 50 : 40);
+  // Adjacent stations sit far enough apart that their labels clear each other.
+  const gaps = reach.slice(1).map((r, i) => Math.max(reach[i]!.right + r.left + 18, 56));
+  const natural = reach[0]!.left + gaps.reduce((a, b) => a + b, 0) + reach[reach.length - 1]!.right + 24;
+  // A wider panel spreads the stations out, up to a point, and centres what is left over.
+  const spare = width && width > natural ? width - natural : 0;
+  const spread = gaps.length ? Math.min(spare / gaps.length, 180) : 0;
+  const W = Math.max(natural, width || 0);
+  let x = (W - natural - spread * gaps.length) / 2 + reach[0]!.left + 12;
   const pts = t.stages.map((s, i) => {
-    const p = { s, i, cx: x };
-    x += s.kind === "action" ? 52 : 104;
+    const p = { s, i, cx: Math.round(x) };
+    x += (gaps[i] || 0) + spread;
     return p;
   });
-  if (!pts.length) return `<svg viewBox="0 0 100 40" role="img" aria-label="no Stages"><text x="0" y="20" class="sub">This Pipeline does not load.</text></svg>`;
-  const W = pts[pts.length - 1]!.cx + 130,
-    H = 132;
   const ci = t.stage.index;
   const active = t.state === "active";
   const state = STATE_COLOUR[t.display.state] || "muted";
@@ -193,7 +203,7 @@ export function metroDiagram(t: MetroTicket, focus: string | null): string {
     else out += `<line class="segment" x1="${a.cx}" y1="${baseY}" x2="${b.cx}" y2="${baseY}" stroke="${COL[k]}" stroke-width="6" stroke-linecap="round" opacity="${k === "good" ? ".85" : "1"}"/>`;
   }
   pts.forEach(({ s, i, cx }) => {
-    const inf = stageInfo(t, i);
+    const inf = infos[i]!;
     const sel = focus === s.name;
     const name = esc(s.label);
     if (s.kind === "action") {
@@ -226,15 +236,34 @@ export function metroDiagram(t: MetroTicket, focus: string | null): string {
       out +=
         `<path class="orbit attempts" d="M${cx + 7} ${baseY - 9} A14 14 0 1 0 ${cx - 7} ${baseY - 9}" fill="none" stroke="${oc}" stroke-width="2.5" marker-end="url(#arr-${lk})"/><text x="${cx}" y="${baseY - 17}" text-anchor="middle" class="count" style="fill:${oc}">${inf.attempts.length}</text>` +
         `<text class="sub" x="${cx}" y="${baseY + 43}" text-anchor="middle">${inf.attempts.length} of ${t.budget.attempts.limit} attempts</text>`;
-    } else if (inf.last) {
-      const cost = inf.last.costUsd === null ? "" : " · $" + inf.last.costUsd.toFixed(2);
-      out += `<text class="sub" x="${cx}" y="${baseY - 20}" text-anchor="middle">${inf.running ? "running" : duration(inf.last.durationMs)}${cost}</text>`;
-    } else if (inf.cur) {
-      out += `<text class="sub" x="${cx}" y="${baseY - 20}" text-anchor="middle">${esc(t.display.label.toLowerCase())}</text>`;
+    } else {
+      const above = aboveText(t, inf);
+      if (above) out += `<text class="sub" x="${cx}" y="${baseY - 20}" text-anchor="middle">${esc(above)}</text>`;
     }
     out += "</g>";
   });
   return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Stage flow for ${esc(t.reference || t.shortId)}">${out}</svg>`;
+}
+
+type StationInfo = ReturnType<typeof stageInfo>;
+
+/** The line over a station with no orbit: how long its last Session ran, and its cost, or the Ticket's state when current. */
+function aboveText(t: MetroTicket, inf: StationInfo): string {
+  if (inf.last) return (inf.running ? "running" : duration(inf.last.durationMs)) + (inf.last.costUsd === null ? "" : " · $" + inf.last.costUsd.toFixed(2));
+  return inf.cur ? t.display.label.toLowerCase() : "";
+}
+
+/**
+ * How far a station's drawing reaches left and right of its centre, from its widest text at rough per-character
+ * widths for each font size; the Rounds badge reaches further right.
+ */
+function stationReach(inf: StationInfo): { left: number; right: number } {
+  const label = inf.stage.label.length;
+  if (inf.stage.kind === "action") return { left: (label * 5.8) / 2, right: (label * 5.8) / 2 };
+  const below = inf.roundsUsed ? `Round ${inf.roundsUsed} running`.length : inf.attempts.length > 1 ? "10 of 10 attempts".length : 0;
+  const above = inf.roundsUsed || inf.attempts.length > 1 ? 0 : 18;
+  const half = Math.max(label * 7.2, below * 6.2, above * 6.2, 28) / 2;
+  return { left: half, right: inf.roundsUsed ? Math.max(half, 116) : half };
 }
 
 // Agent Profiles (ADR 0011): what the Config list and the profile drawer say about a profile, from
@@ -384,14 +413,23 @@ export function stageProfileView(stageProfile: string | null, pipelineProfile: s
  * What a Runner Stage's profile button says on the Ticket page (LASSO-75): the profile its next Session runs, marked
  * "overridden" while a human's override stands, and each mode's resolved line; a profile that does not resolve says why.
  */
-export function ticketProfileView(v: StageProfileView): ProfileButtonView & { overridden: boolean } {
-  return {
-    name: v.profile,
-    overridden: v.overridden,
-    label: v.profile || "none",
-    headless: v.headless ? profileLine(v.headless, "headless") : v.problem || "",
-    human: v.human ? profileLine(v.human, "human") : v.problem || "",
-  };
+export function ticketProfileView(v: StageProfileView): ProfileButtonView & { overridden: boolean; summary: string } {
+  const headless = v.headless ? profileLine(v.headless, "headless") : v.problem || "";
+  const human = v.human ? profileLine(v.human, "human") : v.problem || "";
+  const summary = v.headless && v.human ? modeSummary(shortParts(v.headless, "headless"), shortParts(v.human, "human")) : v.problem || "";
+  return { name: v.profile, overridden: v.overridden, label: v.profile || "none", headless, human, summary };
+}
+
+/** One mode's settings with every default left out, e.g. claude · fable · effort high · auto. */
+function shortParts(p: ProfileConfig, mode: Mode): string[] {
+  const s = profileMode(p, mode);
+  return [s.runner, s.model || "", s.effort ? "effort " + s.effort : "", s.permission || "", s.args.join(" ")];
+}
+
+/** Both modes on one line: the headless settings, then only those a human Session runs differently. */
+function modeSummary(headless: string[], human: string[]): string {
+  const differs = human.filter((part, i) => part !== headless[i]).map((part) => part || "no args");
+  return headless.filter(Boolean).join(" · ") + (differs.length ? " · human: " + differs.join(" · ") : "");
 }
 
 /**

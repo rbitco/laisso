@@ -56,7 +56,9 @@ export function App() {
     <>
       <header>
         <h1>
-          LASSO
+          <a href="#" data-role="home">
+            LASSO
+          </a>
           <DevBadge />
         </h1>
         <IntakeForm text={intakeText} onText={setIntakeText} onDetected={(d) => setIntake((was) => ({ ...d, n: (was?.n ?? 0) + 1 }))} />

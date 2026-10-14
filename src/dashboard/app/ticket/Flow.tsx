@@ -1,4 +1,4 @@
-import type { CSSProperties, MouseEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type MouseEvent } from "react";
 import type { TicketDetail } from "../../../api/views.ts";
 import { duration, metroDiagram, relative, sessionsForStage } from "../../metro.ts";
 import { sessionLabel } from "./SessionPane.tsx";
@@ -14,9 +14,19 @@ export function Flow({ ticket, focus, onFocus }: { ticket: TicketDetail; focus: 
     const stage = station.dataset.stage!;
     onFocus(stage === focus ? null : stage);
   };
+  // The diagram is laid out for the panel's width, and again whenever it changes.
+  const box = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState<number | null>(null);
+  useEffect(() => {
+    const el = box.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const seen = new ResizeObserver(() => setWidth(Math.floor(el.clientWidth) || null));
+    seen.observe(el);
+    return () => seen.disconnect();
+  }, []);
   return (
     <div className="flow" data-role="flow">
-      <div onClick={click} dangerouslySetInnerHTML={{ __html: metroDiagram(ticket, focus) }} />
+      <div ref={box} onClick={click} dangerouslySetInnerHTML={{ __html: metroDiagram(ticket, focus, width) }} />
       <div className="legend">{LEGEND}</div>
     </div>
   );

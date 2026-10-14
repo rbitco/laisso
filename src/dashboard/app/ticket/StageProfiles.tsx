@@ -2,12 +2,11 @@ import type { StageProfileView, TicketDetail } from "../../../api/views.ts";
 import { ticketProfileView } from "../../metro.ts";
 import { api } from "../api.ts";
 import { openProfileDrawer } from "../profiles/drawer.tsx";
-import { ProfileButton } from "../profiles/ProfileButton.tsx";
 import { ticketRoute } from "./ticket.ts";
 
 /**
- * Each Runner Stage of an active Ticket that isn't done, with the profile its next Session runs under (LASSO-75). The
- * button opens the profile drawer on the Ticket's repo; "Use <profile> for this Ticket's <stage>" sets the Stage's
+ * Each Runner Stage of an active Ticket that isn't done, with the profile its next Session runs under (LASSO-75), one
+ * compact row each: the Stage, the profile, and both modes on one line, the current Stage marked. A row opens the profile drawer on the Ticket's repo; "Use <profile> for this Ticket's <stage>" sets the Stage's
  * override, which wins over the Pipeline's choice from the next Session until "Clear override". Nothing when none.
  */
 export function StageProfiles({ ticket: t, refresh }: { ticket: TicketDetail; refresh: () => Promise<void> }) {
@@ -19,13 +18,10 @@ export function StageProfiles({ ticket: t, refresh }: { ticket: TicketDetail; re
       <h3>Agent Profiles</h3>
       <div className="stage-profiles">
         {rows.map((p) => (
-          <div key={p.stage}>
-            <div className="stage-name">{p.stage}</div>
-            <StageProfile ticket={t} stage={p} refresh={refresh} />
-          </div>
+          <StageProfile key={p.stage} ticket={t} stage={p} refresh={refresh} />
         ))}
       </div>
-      <div className="why">an override applies from the Stage's next Session, retries and Rounds included; a running Session keeps its own</div>
+      <div className="why">A change applies from the Stage's next Session; a running one keeps its own.</div>
     </div>
   );
 }
@@ -52,21 +48,21 @@ function StageProfile({ ticket: t, stage: p, refresh }: { ticket: TicketDetail; 
       }),
       onChange: () => void refresh(),
     });
+  const current = t.stage.name === p.stage;
   return (
-    <ProfileButton
-      label={v.label + "  ✎"}
-      badge={
-        v.overridden && (
+    <button type="button" className={current ? "sp-row cur" : "sp-row"} data-role="ticket-stage-profile" data-stage={p.stage} title={`Choose the profile ${p.stage} runs under on this Ticket`} onClick={open}>
+      <span className="sp-stage">{p.stage}</span>
+      <span className="sp-name">
+        {v.label}
+        {v.overridden && (
           <span className="pf-overridden" data-role="overridden">
             overridden
           </span>
-        )
-      }
-      headless={v.headless}
-      human={v.human}
-      role="ticket-stage-profile"
-      stage={p.stage}
-      onClick={open}
-    />
+        )}
+      </span>
+      <span className="sp-line" data-role="stage-profile-summary">
+        {v.summary}
+      </span>
+    </button>
   );
 }

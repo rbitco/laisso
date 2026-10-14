@@ -519,6 +519,6 @@ describe("a Ticket's profile override on the dashboard", () => {
     expect(set.profiles[0]).toMatchObject({ stage: first.stage, profile: name, from: "override", overridden: true });
     const after = await row();
     expect(ledgerStageText(after)).toBe(`${after.stage.label} · ${after.stage.index + 1}/${after.stages.length} · ${name}*`);
-    expect(ticketProfileView({ ...first, headless: null, human: null, problem: "gone" })).toMatchObject({ headless: "gone", human: "gone" });
+    expect(ticketProfileView({ ...first, headless: null, human: null, problem: "gone" })).toMatchObject({ headless: "gone", human: "gone", summary: "gone" });
   });
 });

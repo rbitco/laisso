@@ -417,7 +417,7 @@ describe("a Stage's profile on the Ticket", () => {
     await showPage("A");
     const user = userEvent.setup();
     const button = () => document.querySelector<HTMLElement>('[data-role="ticket-stage-profile"][data-stage="implement"]')!;
-    expect([...button().children].map((c) => c.textContent)).toEqual(["claude-opus  ✎", "headless  claude · opus · effort default · auto (default)", "human     claude · opus · effort default · edits (default)"]);
+    expect([...button().children].map((c) => c.textContent)).toEqual(["implement", "claude-opus", "claude · opus · auto · human: edits"]);
     await user.click(button());
     let drawer = await screen.findByRole("dialog", { name: "Agent Profiles" });
     expect(await within(drawer).findByText("Stage implement of Ticket APP-A")).toBeTruthy();

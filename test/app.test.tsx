@@ -348,6 +348,17 @@ describe("the page's views", () => {
     expect(section("side").childElementCount).toBe(0);
   });
 
+  it("goes back to the Ledger from the LASSO heading", async () => {
+    fakeLasso();
+    render(<App />);
+    await screen.findByText("Ticket A");
+    go("#pipelines");
+    await waitFor(() => expect(shownViews()).toEqual(["pipelines"]));
+    await userEvent.setup().click(screen.getByRole("link", { name: "LASSO" }));
+    await waitFor(() => expect(shownViews()).toEqual(["ledger"]));
+    expect(location.hash).toBe("");
+  });
+
   it("lists done and Abandoned Tickets when Show done and Abandoned is ticked", async () => {
     const lasso = fakeLasso();
     render(<App />);

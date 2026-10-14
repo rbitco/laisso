@@ -151,7 +151,6 @@ function TicketBody({ ticket: t, refresh }: { ticket: TicketDetail; refresh: () 
       <div className="dgrid">
         <div className="stack">
           {t.session ? <SessionPane key={t.session.id} ticket={t} session={t.session} refresh={refresh} /> : <div className="panel muted">No Session yet.</div>}
-          <StageProfiles ticket={t} refresh={refresh} />
           <dl>
             <dt>worktree</dt>
             <dd>{worktreeGone(t) ? t.worktree + " (removed)" : t.worktree}</dd>
@@ -168,6 +167,7 @@ function TicketBody({ ticket: t, refresh }: { ticket: TicketDetail; refresh: () 
             {editing && <BudgetEditor ticket={t} onClose={() => setEditing(false)} onSaved={refresh} />}
           </div>
           <Timeline ticket={t} focus={narrowed} onFocus={setFocus} />
+          <StageProfiles ticket={t} refresh={refresh} />
         </div>
       </div>
     </>
