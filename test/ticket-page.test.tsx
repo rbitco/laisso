@@ -169,8 +169,8 @@ describe("a Ticket's page", () => {
     fakeLasso([ticket("A", { pr: "https://github.com/o/app/pull/7", pipelineDrift: "changed" }), ticket("B")]);
     await showPage("A");
     const bar = document.querySelector<HTMLElement>('[data-role="titlebar"]')!;
-    expect(bar.querySelector(".eyebrow")!.textContent).toBe("APP-A · app · app-A · PR · Name");
-    expect(within(bar).getByRole("link", { name: "PR" }).getAttribute("href")).toBe("https://github.com/o/app/pull/7");
+    expect(bar.querySelector(".eyebrow")!.textContent).toBe("APP-A · app · app-A · PR #7 · Name");
+    expect(within(bar).getByRole("link", { name: "PR #7" }).getAttribute("href")).toBe("https://github.com/o/app/pull/7");
     expect(within(bar).getByText("Quiet").className).toBe("pill quiet");
     expect(within(triggers()).getAllByRole("button").map((b) => b.textContent)).toEqual(["Mark done", "Extend", "Abandon"]);
     expect(screen.getByRole("img", { name: "Stage flow for APP-A" })).toBeTruthy();

@@ -133,6 +133,12 @@ function Sidebar({ list, current }: { list: TicketView[]; current: string }) {
   );
 }
 
+/** "PR #85" for a pull request's URL; plain "PR" for a link Lasso cannot read a number from. */
+function prLabel(url: string): string {
+  const number = /\/pull\/(\d+)/.exec(url)?.[1];
+  return number ? `PR #${number}` : "PR";
+}
+
 /** The name, edited in place: Enter or Save keeps it, Escape or Cancel leaves it, and an empty name clears it. */
 function NameEditor({ ticket: t, done, refresh }: { ticket: TicketDetail; done: () => void; refresh: () => Promise<void> }) {
   const [value, setValue] = useState(t.name ?? "");
@@ -232,7 +238,7 @@ function TitleBar({ ticket: t, refresh, children }: { ticket: TicketDetail; refr
             <>
               {" · "}
               <a href={t.pr} target="_blank" rel="noopener" data-role="pr-link">
-                PR
+                {prLabel(t.pr)}
               </a>
             </>
           )}
