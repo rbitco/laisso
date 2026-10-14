@@ -5,6 +5,7 @@ import { api } from "../api.ts";
 import { useEvents } from "../events.ts";
 import { DevBadge } from "../header/DevBadge.tsx";
 import { Tick } from "../header/Tick.tsx";
+import { ThemeToggle } from "./Theme.tsx";
 
 export type NavView = "ledger" | "pipelines" | "config";
 
@@ -51,7 +52,8 @@ function useNeedsYou(): number {
 }
 
 /**
- * The page's nav: the name and dev badge, the three views with how many Tickets need you, and the Tick at the foot.
+ * The page's nav: the name and dev badge, the three views with how many Tickets need you, and
+ * the Tick and theme button at the foot.
  * It is a sidebar; `compact` (a Ticket's page) shrinks it to an icon rail, and below 700px the views become a bottom
  * tab bar. `onChecked` follows a Check now, so the page reads again.
  */
@@ -82,7 +84,10 @@ export function Nav({ on, compact, onChecked }: { on: NavView; compact: boolean;
           </a>
         ))}
       </div>
-      <Tick onChecked={onChecked} />
+      <div className="foot">
+        <Tick onChecked={onChecked} />
+        <ThemeToggle />
+      </div>
     </nav>
   );
 }

@@ -7,6 +7,7 @@
   --shadow: 0 12px 40px rgba(20, 20, 18, 0.14);
   --sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
   --mono: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --top-h: 62px; /* the header's height, which the Ticket list's top bar matches */
   --pulse: 1.4s; /* one pulse cycle; the Tick dot reads it to hold a fast Tick's pulse */
   color-scheme: light;
 }
@@ -37,7 +38,7 @@ body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 var(
 .shell { display: grid; grid-template-columns: 216px minmax(0, 1fr); min-height: 100vh; }
 .shell.compact { grid-template-columns: 56px minmax(0, 1fr); }
 .col { min-width: 0; }
-header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; min-height: var(--top-h); padding: 12px 16px; border-bottom: 1px solid var(--line); }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 /* The nav: a sidebar of the views, an icon rail on a Ticket's page, and a bottom tab bar on a phone. */
 nav.pages { position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; gap: 4px; padding: 16px 12px; background: var(--side); border-right: 1px solid var(--line); }
@@ -51,10 +52,14 @@ nav.pages .views a:hover { color: var(--ink); background: var(--surface2); }
 nav.pages .views a.on { color: var(--ink); background: var(--surface2); font-weight: 500; }
 nav.pages .count { margin-left: auto; font-size: 11.5px; font-weight: 600; min-width: 20px; text-align: center; padding: 0 6px; border-radius: 999px; color: var(--amber); background: var(--amber-bg); font-variant-numeric: tabular-nums; }
 nav.pages a:focus-visible, nav.pages button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-nav.pages .tick { margin-top: auto; display: grid; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+nav.pages .foot { margin-top: auto; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px 8px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+nav.pages .tick { display: contents; }
+nav.pages .tick-line { grid-column: 1 / -1; }
 nav.pages .tick-line { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; }
 nav.pages .tick-status { min-width: 0; line-height: 1.35; }
-nav.pages .tick button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+nav.pages .foot button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; }
+nav.pages .theme { width: 36px; padding: 0; color: var(--muted); }
+nav.pages .theme:hover { color: var(--ink); }
 @media (min-width: 700px) {
   nav.pages.compact { align-items: center; padding: 16px 0; gap: 6px; }
   nav.pages.compact .brand { padding: 0 0 14px; }
@@ -66,17 +71,19 @@ nav.pages .tick button { display: inline-flex; align-items: center; justify-cont
   nav.pages.compact .views a { width: 36px; height: 36px; padding: 0; justify-content: center; }
   nav.pages.compact .count { position: absolute; top: 5px; right: 5px; width: 7px; height: 7px; min-width: 0; padding: 0; background: var(--amber); box-shadow: 0 0 0 2px var(--side); }
   nav.pages.compact .count .n { display: none; }
-  nav.pages.compact .tick { padding: 0; border: 0; background: none; justify-items: center; }
-  nav.pages.compact .tick button { width: 36px; height: 36px; padding: 0; background: none; border-color: transparent; color: var(--muted); }
-  nav.pages.compact .tick button:hover { color: var(--ink); background: var(--surface2); }
+  nav.pages.compact .foot { grid-template-columns: auto; padding: 0; border: 0; background: none; justify-items: center; gap: 6px; }
+  nav.pages.compact .tick-line { justify-content: center; padding-bottom: 4px; }
+  nav.pages.compact .foot button { width: 36px; height: 36px; padding: 0; background: none; border-color: transparent; color: var(--muted); }
+  nav.pages.compact .foot button:hover { color: var(--ink); background: var(--surface2); }
 }
 @media (max-width: 699px) {
   .shell, .shell.compact { grid-template-columns: minmax(0, 1fr); }
   nav.pages { position: static; height: auto; flex-direction: row; align-items: center; padding: 12px 16px 0; background: none; border-right: 0; }
   nav.pages .brand { padding: 0; }
-  nav.pages .tick { margin: 0 0 0 auto; padding: 0; border: 0; background: none; display: flex; align-items: center; }
+  nav.pages .foot { margin: 0 0 0 auto; padding: 0; border: 0; background: none; display: flex; align-items: center; gap: 8px; }
   nav.pages .tick-status { display: none; }
-  nav.pages .tick button { padding: 4px 11px; font-size: 12px; }
+  nav.pages .foot button { padding: 4px 11px; font-size: 12px; }
+  nav.pages .theme { width: 32px; height: 30px; padding: 0; }
   nav.pages .views { position: fixed; z-index: 20; left: 0; right: 0; bottom: 0; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; padding: 8px 6px calc(8px + env(safe-area-inset-bottom)); background: var(--side); border-top: 1px solid var(--line); }
   nav.pages .views a { flex-direction: column; gap: 3px; padding: 4px 0; font-size: 11px; }
   nav.pages .views a:hover { background: none; }
@@ -126,10 +133,25 @@ main { padding: 16px; }
 
 /* layout: the Ledger, collapsing to a sidebar when a detail is open */
 .dwrap { display: grid; grid-template-columns: 1fr; gap: 16px; align-items: start; }
-.dwrap.open { grid-template-columns: 280px minmax(0, 1fr); }
-@media (max-width: 800px) { .dwrap.open { grid-template-columns: 1fr; } .dwrap.open .dside { max-height: 220px; overflow: auto; } }
-.dside { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
-.dside .back { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); font-size: 12px; }
+/* With a Ticket open, the Ledger collapses to a full-height column between the rail and the page; narrower, a band
+   under the header. */
+.shell.compact { grid-template-columns: 56px 280px minmax(0, 1fr); }
+.dside { position: sticky; top: 0; height: 100vh; overflow: auto; background: var(--bg); border-right: 1px solid var(--line); }
+.dside .back { display: flex; justify-content: space-between; align-items: center; gap: 8px; height: var(--top-h); padding: 0 16px; border-bottom: 1px solid var(--line); font-size: 12px; }
+@media (max-width: 899px) {
+  .shell.compact { grid-template-columns: 56px minmax(0, 1fr); grid-template-rows: auto auto 1fr; }
+  .shell.compact nav.pages { grid-column: 1; grid-row: 1 / 4; }
+  .shell.compact .col { display: contents; }
+  .shell.compact header { grid-column: 2; order: 1; }
+  .shell.compact .dside { grid-column: 2; order: 2; position: static; height: auto; max-height: 220px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .shell.compact main { grid-column: 2; order: 3; }
+  .dside .back { height: auto; padding: 8px 16px; }
+}
+@media (max-width: 699px) {
+  .shell.compact { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto 1fr; }
+  .shell.compact nav.pages { grid-row: auto; }
+  .shell.compact header, .shell.compact .dside, .shell.compact main { grid-column: 1; }
+}
 .dside a.back-link { color: var(--muted); text-decoration: none; }
 .qitem { padding: 8px 12px; border-top: 1px solid var(--line); cursor: pointer; display: flex; gap: 10px; align-items: flex-start; }
 .back + .qitem { border-top: 0; }

@@ -477,6 +477,48 @@ describe("the page's views", () => {
   });
 });
 
+describe("the theme button", () => {
+  // Node's own localStorage shadows jsdom's and is absent without a file, so these tests bring a store of their own.
+  beforeEach(() => {
+    const kept = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (k: string) => kept.get(k) ?? null,
+      setItem: (k: string, v: string) => void kept.set(k, String(v)),
+      removeItem: (k: string) => void kept.delete(k),
+    });
+  });
+  afterEach(() => {
+    delete document.documentElement.dataset.theme;
+  });
+
+  it("follows the system at first, then steps through Light, Dark and back, keeping the choice in this browser", async () => {
+    fakeLasso();
+    render(<App />);
+    const button = () => within(section("nav")).getByRole("button", { name: /^Theme/ });
+    expect(button().textContent).toBe("Theme: System");
+    expect(document.documentElement.dataset.theme).toBeUndefined();
+    const user = userEvent.setup();
+    await user.click(button());
+    expect(button().textContent).toBe("Theme: Light");
+    expect(document.documentElement.dataset.theme).toBe("light");
+    expect(localStorage.getItem("lasso.theme")).toBe("light");
+    await user.click(button());
+    expect(button().getAttribute("title")).toBe("Theme: Dark (click for System)");
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    await user.click(button());
+    expect(button().textContent).toBe("Theme: System");
+    expect(document.documentElement.dataset.theme).toBeUndefined();
+    expect(localStorage.getItem("lasso.theme")).toBeNull();
+  });
+
+  it("starts from the theme this browser kept", async () => {
+    localStorage.setItem("lasso.theme", "dark");
+    fakeLasso();
+    render(<App />);
+    expect(within(section("nav")).getByRole("button", { name: /^Theme/ }).textContent).toBe("Theme: Dark");
+  });
+});
+
 describe("the page's hash", () => {
   it("names the Ledger, a Ticket, Pipelines with a Pipeline or one of its Versions, or Config", () => {
     expect(parseRoute("")).toEqual({ view: "ledger" });

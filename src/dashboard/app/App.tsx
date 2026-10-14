@@ -18,7 +18,7 @@ const LEDGER: Place = { route: { view: "ledger" }, visit: 0 };
  * The dashboard: the nav (the views, the Tick dot and Check now), the header (intake, the version notice, any missing
  * tools), then the view the hash names. A
  * Ticket's page swaps in once its data is here, so until then the view before it stays; with a Ticket open the Ledger
- * collapses to a sidebar beside it. When Lasso comes back after a restart, the view shown reads everything again, as
+ * collapses to a column between the nav and the page. When Lasso comes back after a restart, the view shown reads everything again, as
  * it may have missed some changes.
  */
 export function App() {
@@ -49,6 +49,7 @@ export function App() {
   return (
     <div className={"shell" + (view === "detail" ? " compact" : "")} data-role="shell">
       <Nav on={on} compact={view === "detail"} onChecked={reread} />
+      <aside className="dside" data-role="side" aria-label="Tickets" hidden={view !== "detail"} ref={setSide} />
       <div className="col">
         <header>
           <IntakeForm text={intakeText} onText={setIntakeText} onDetected={(d) => setIntake((was) => ({ ...d, n: (was?.n ?? 0) + 1 }))} />
@@ -72,8 +73,7 @@ export function App() {
             />
           )}
           <div className={"dwrap" + (view === "detail" ? " open" : "")} data-role="layout">
-            <aside className="dside" data-role="side" hidden={view !== "detail"} ref={setSide} />
-            <div className="dmain">
+              <div className="dmain">
               <div className="ledger-tools" data-role="ledger-tools" hidden={view !== "ledger"}>
                 <label>
                   <input type="checkbox" data-role="show-ended" checked={all} onChange={(ev) => setAll(ev.target.checked)} /> Show done and Abandoned
