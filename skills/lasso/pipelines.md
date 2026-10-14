@@ -62,7 +62,10 @@ overridden.
 Take over in terminal stops a headless Stage's running Session (or clears
 its Flag) and re-enters that Runner session in a terminal; from then the
 Stage is worked as a human Stage. Codex can be taken over only once it has
-reported its thread id.
+reported its thread id. Hand back gives a taken-over Stage back to Lasso:
+a Review Stage returns to Rounds (Feedback that arrived meanwhile opens the
+next one), and any other Stage runs headless again on the same Runner
+session. A Review Stage taken over and never handed back runs no Rounds.
 
 For an approval step, let one Stage draft and stop for Start, then a second
 act on the draft:

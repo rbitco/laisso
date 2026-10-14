@@ -4,10 +4,12 @@ import path from "node:path";
 import { startLassoWithRepos, waitFor, claudeFixture, runnerFixture, type Lasso, type LassoConfig } from "./harness.ts";
 import type { TicketDetail, IntakeResult } from "../src/api/views.ts";
 import type { TickChange } from "../src/server/tick.ts";
+import { setScene, type Scene } from "./scenes.ts";
 
 // Take over in terminal (LASSO-105): a human steps into a headless Stage's Session, running or Flagged, on its own
-// session id, and works the Stage as a human Stage from there; at a Start gate, the finished Stage's Session opens
-// in a terminal while Start stays the approval. The fakes on PATH stand in for the Runners and Terminal.app.
+// session id, and works the Stage as a human Stage from there; Hand back (LASSO-107) returns it to Lasso. At a Start
+// gate, the finished Stage's Session opens in a terminal while Start stays the approval. The fakes on PATH stand in
+// for the Runners, the PR and Terminal.app.
 const running: Lasso[] = [];
 afterEach(async () => {
   while (running.length) await running.pop()!.destroy();
@@ -34,6 +36,7 @@ const detailOf = (lasso: Lasso, id: string) => lasso.api<TicketDetail>(`/api/tic
 const pull = (lasso: Lasso, id: string, lever: string, body: object = {}) => lasso.api<TicketDetail>(`/api/tickets/${id}/${lever}`, { method: "POST", body: JSON.stringify(body) });
 const checkNow = (lasso: Lasso) => lasso.api<{ changes: TickChange[] }>("/api/check-now", { method: "POST" });
 const runningSession = (lasso: Lasso, id: string) => waitFor(async () => { const t = await detailOf(lasso, id); return t.session?.running && t.session.mode === "headless" ? t.session : null; }, "the headless Session to run");
+const launches = (lasso: Lasso, count: number) => waitFor(async () => { const c = await lasso.runner.calls(); return c.length >= count ? c : null; }, `${count} Runner launches`);
 const launcherText = (launcher: string | null) => readFileSync(launcher!, "utf8");
 /** The fake Runner has started, and written what it was scripted to, before anything takes its Session over. */
 const underWay = (lasso: Lasso, id: string, session: string, text = "") =>
@@ -56,7 +59,7 @@ describe("Take over in terminal", () => {
     expect(taken.session).toMatchObject({ stage: "plan", mode: "terminal", startedBy: "human", running: true, runnerSessionId: headless.id });
     expect(taken.display).toMatchObject({ state: "needs_you" });
     expect(taken.display.why).toMatch(/^taken over; terminal opened \d\d:\d\d$/);
-    expect(taken.triggers.map((t) => t.action)).toEqual(["terminal", "done", "skip", "abandon"]);
+    expect(taken.triggers.map((t) => t.action)).toEqual(["terminal", "handback", "done", "skip", "abandon"]);
     const stopped = taken.sessions.find((s) => s.id === headless.id)!;
     expect(stopped).toMatchObject({ running: false, outcome: "interrupted", endedReason: "stop", finalMessage: "taken over in a terminal" });
 
@@ -114,6 +117,65 @@ describe("Take over in terminal", () => {
     const res = await lasso.api<Response>(`/api/tickets/${ticket.id}/takeover`, { method: "POST", body: "{}", raw: true });
     expect(res.status).toBe(400);
     expect((await res.json()).error).toBe("no Session of plan to take over yet");
+  });
+});
+
+describe("Hand back", () => {
+  it("ends the terminal and starts a headless Session re-entering its session, spending no attempt", async () => {
+    const { lasso, ticket } = await lassoWithTicket({ budget: { attempts: 2 } });
+    await lasso.runner.script({ hang: true });
+    await checkNow(lasso);
+    const headless = await runningSession(lasso, ticket.id);
+    await underWay(lasso, ticket.id, headless.id);
+    const taken = await pull(lasso, ticket.id, "takeover");
+
+    await lasso.runner.script({ stdout: claudeFixture("success.json"), files: { "PLAN.md": "the plan\n" } });
+    const handed = await pull(lasso, ticket.id, "handback");
+    const terminal = handed.sessions.find((s) => s.id === taken.session!.id)!;
+    expect(terminal).toMatchObject({ running: false, endedBy: "human", endedReason: "stop", finalMessage: "handed back to Lasso" });
+    expect(handed.session).toMatchObject({ stage: "plan", mode: "headless", startedBy: "human" });
+    const calls = await launches(lasso, 2);
+    expect(calls[1]!.argv).toEqual(expect.arrayContaining(["--resume", headless.id]));
+
+    // The stopped run and the resumed one are the two attempts; the terminal between them is not a third.
+    const done = await waitFor(async () => { const t = await detailOf(lasso, ticket.id); return t.display.state === "holding" ? t : null; }, "plan to finish");
+    expect(done.flag).toBeNull();
+    expect(done.stage.name).toBe("act");
+  });
+
+  it("is refused on a Stage nobody took over", async () => {
+    const { lasso, ticket } = await lassoWithTicket();
+    const res = await lasso.api<Response>(`/api/tickets/${ticket.id}/handback`, { method: "POST", body: "{}", raw: true });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("plan is not taken over in a terminal; there is nothing to hand back");
+  });
+
+  it("returns a Review Stage to Rounds: Feedback that came in while taken over opens the next Round", async () => {
+    const started = await startLassoWithRepos({ app: { pipeline: "loop" } }, {}, { loop: "stages:\n  - name: review\n    prompt: Address the Feedback.\n    repeat: feedback\n    artifact: pr-merged\n" });
+    running.push(started.lasso);
+    const lasso = started.lasso;
+    const ticket = await lasso.api<IntakeResult>("/api/tickets", { method: "POST", body: JSON.stringify({ input: "Add dark mode", repo: "app", pipeline: "loop" }) });
+    const asked: Scene = { tag: "asked", comments: [{ id: 201, author: "bob", body: "Please add a changelog entry.", at: "2026-09-27T10:05:00Z" }] };
+    await setScene(lasso, ticket.branch, asked);
+    await lasso.runner.script({ hang: true });
+    await checkNow(lasso);
+    const round1 = await runningSession(lasso, ticket.id);
+    expect(round1.round).toBe(1);
+    await underWay(lasso, ticket.id, round1.id);
+    await pull(lasso, ticket.id, "takeover");
+
+    // While the terminal holds the Stage the PR is still read, but no Round starts.
+    await setScene(lasso, ticket.branch, { tag: "more", comments: [...asked.comments!, { id: 203, author: "carol", body: "And a test, please.", at: "2026-09-27T11:00:00Z" }] });
+    const polled = await checkNow(lasso);
+    expect(polled.changes).toEqual([{ ticket: ticket.id, summary: "PR #7: 1 new Feedback item: comment by carol" }]);
+    expect(await lasso.runner.calls()).toHaveLength(1);
+
+    const handed = await pull(lasso, ticket.id, "handback");
+    expect(handed.session).toMatchObject({ mode: "headless", round: 2, running: true });
+    const calls = await launches(lasso, 2);
+    // The Round carries everything still outstanding: the new comment, and the one nobody answered in the terminal.
+    expect(calls[1]!.argv[2]).toContain("Round 2: 2 items.");
+    expect(calls[1]!.argv[2]).toContain("> And a test, please.");
   });
 });
 

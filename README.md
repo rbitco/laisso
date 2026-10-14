@@ -134,7 +134,11 @@ which applies.
 Take over in terminal steps into any headless Stage, running or Flagged:
 Lasso stops the Session (a Flag clears), opens its Runner session in a
 terminal, and the Stage is then worked as a human Stage until Mark done,
-Skip or Abandon. For an approval step, give the drafting Stage
+Skip, Abandon or Hand back. Hand back ends the terminal Session and gives
+the Stage back to Lasso without spending an attempt: a Review Stage polls
+the PR at once and opens a Round for any Feedback that arrived meanwhile,
+and any other Stage starts a headless Session that re-enters the terminal's
+Runner session. For an approval step, give the drafting Stage
 `advance: false`: while the Ticket holds, Open <Stage> in terminal
 re-enters the finished draft without changing anything, and Start releases
 the next Stage.

@@ -65,9 +65,12 @@ function pick<T>(ticket: T | null, pipeline: T | undefined, global: T): Resolved
   return { value: global, source: "global" };
 }
 
-/** The Sessions that count as tries at a Stage: a run cut off by shutdown is not one (spec: Budget). */
+/**
+ * The Sessions that count as tries at a Stage: a run cut off by shutdown is not one, nor a terminal handed back to
+ * Lasso, the only terminal Session that ends with reason stop (spec: Budget).
+ */
 function triesOf(rows: SessionRow[], stage: string): SessionRow[] {
-  return rows.filter((r) => r.stage === stage && r.mode !== "action" && r.ended_reason !== "shutdown");
+  return rows.filter((r) => r.stage === stage && r.mode !== "action" && r.ended_reason !== "shutdown" && !(r.mode === "terminal" && r.ended_reason === "stop"));
 }
 
 /**

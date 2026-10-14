@@ -133,6 +133,11 @@ export function SessionPane({ ticket: t, session: s, refresh }: { ticket: Ticket
           Open terminal
         </button>
       )}
+      {s.mode === "terminal" && s.running && t.triggers.some((x) => x.action === "handback") && (
+        <button className="stop" type="button" disabled={busy} title="End this terminal Session and let Lasso run the Stage again" onClick={() => void post(ticketRoute(t.id) + "/handback", "{}")}>
+          Hand back
+        </button>
+      )}
     </div>
   );
 
@@ -141,7 +146,7 @@ export function SessionPane({ ticket: t, session: s, refresh }: { ticket: Ticket
     return (
       <section className="session" data-role="session">
         {head}
-        <div className="hint">{opened + ". Lasso tracks this Session by its id only: the row ends when you mark the Stage done or skip it."}</div>
+        <div className="hint">{opened + ". Lasso tracks this Session by its id only: the row ends when you mark the Stage done or skip it" + (t.triggers.some((x) => x.action === "handback") ? ", or hand it back to Lasso." : ".")}</div>
         <div className="paths">
           <WorktreeChip ticket={t} />
           <CopyChip label="session id" value={s.id} />

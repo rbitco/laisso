@@ -118,6 +118,34 @@ export class Exits {
   }
 
   /**
+   * Hand back: the human's terminal on a taken-over Stage ends, and Lasso runs the Stage headless again. A repeating
+   * Stage goes back to Rounds: a tick polls the PR and starts one for any Feedback due, else the Stage waits for the
+   * PR. Any other Stage starts a Session at once that re-enters the terminal's session where the Runner allows, so
+   * the Runner picks up from what the human did; past the Budget, that start Flags instead. The terminal Session
+   * spends no attempt.
+   */
+  async handBack(ticket: TicketRow): Promise<TicketRow> {
+    const { progress, sessions, runs, tick, tickets, log } = this.deps;
+    const { pipeline, stage } = progress.currentForTrigger(ticket);
+    if (stage.kind !== "runner" || stage.human || !progress.takenOver(ticket, stage.name)) throw new TriggerError(`${stage.name} is not taken over in a terminal; there is nothing to hand back`);
+    const held = sessions.running(ticket.id).find((s) => s.mode === "terminal" && s.stage === stage.name)!;
+    sessions.end(held.id, { ended_by: "human", ended_reason: "stop", outcome: null, final_message: "handed back to Lasso", usage: null, cost_usd: null, transcript_path: held.transcript_path });
+    log.info("session.handed_back", { session: held.id, ticket: ticket.id, stage: stage.name });
+    if (stage.repeat) await tick.run("start");
+    else await runs.launch(ticket, pipeline, stage, "human", this.reenterable(ticket, pipeline, stage, held));
+    await progress.pushMirror(ticket.id);
+    return tickets.get(ticket.id)!;
+  }
+
+  /** The terminal Session a headless one can re-enter: one the Runner was launched on, under the same Runner, with an id it knows. */
+  private reenterable(ticket: TicketRow, pipeline: Pipeline, stage: RunnerStage, held: SessionRow): SessionRow | null {
+    const runner = runnerOf(held);
+    if (!runner || (held.opened_at === null && held.runner_session_id === null)) return null;
+    if (adapterFor(runner).sessionIds === "runner" && !held.runner_session_id) return null;
+    return resumeRefusal(stage.name, held, this.deps.overrides.resolve(ticket, pipeline, stage)) ? null : held;
+  }
+
+  /**
    * Open the draft: while a Ticket holds for Start, a terminal on the Stage that just finished, to read or steer
    * what it made before approving it. Start, not this, releases the next Stage.
    */

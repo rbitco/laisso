@@ -23,7 +23,7 @@ export type DisplayState ="flagged" | "needs_you" | "holding" | "ready" | "runni
 
 /** A lever the human can pull on a Ticket right now; the dashboard renders one button per Trigger. Flagged, the six exits. */
 export interface Trigger {
-  action: "terminal" | "done" | "skip" | "start" | "retry" | "resume" | "extend" | "abandon" | "takeover" | "draft";
+  action: "terminal" | "done" | "skip" | "start" | "retry" | "resume" | "extend" | "abandon" | "takeover" | "handback" | "draft";
   label: string;
   /** Set when the lever is shown but cannot be pulled now, saying why: Resume when the Stage's profile is on another Runner. */
   unavailable?: string;
@@ -467,6 +467,8 @@ function ticketTriggers(ticket: TicketRow, stage: Stage | null, rows: SessionRow
   if (stage.kind !== "runner" || headlessRunning(rows[0] ?? null) || !(stage.human || takenOver)) return [...takeOver(), abandon];
   return [
     { action: "terminal", label: "Open terminal" },
+    // A taken-over Stage can go back to Lasso: its Rounds, or a headless Session on the terminal's session.
+    ...(takenOver ? [{ action: "handback" as const, label: "Hand back to Lasso" }] : []),
     { action: "done", label: `Mark ${stage.name} done` },
     { action: "skip", label: `Skip ${stage.name}` },
     abandon,
