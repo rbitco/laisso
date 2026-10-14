@@ -140,7 +140,6 @@ function parseStage(pipeline: string, entry: unknown, index: number): Stage {
   const { artifact, artifactWith } = parseArtifact(s.artifact, where);
   if (s.repeat !== undefined && s.repeat !== "feedback") throw new PipelineError(`${where}: repeat must be feedback`);
   if (s.repeat === "feedback" && artifact === null) throw new PipelineError(`${where}: a repeating Stage needs an artifact as its end condition`);
-  if (s.repeat === "feedback" && artifactWith) throw new PipelineError(`${where}: a repeating Stage cannot end on a check Action yet`);
   if (s.human !== undefined && typeof s.human !== "boolean") throw new PipelineError(`${where}: human must be true or false`);
   if (s.advance !== undefined && typeof s.advance !== "boolean") throw new PipelineError(`${where}: advance must be true or false`);
   const budget = mapping(s.budget, `${where}: budget`, fail);

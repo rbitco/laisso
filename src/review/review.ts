@@ -5,7 +5,9 @@ import type { Sessions } from "../store/sessions.ts";
 import { itemOf, type Feedback, type FeedbackRow } from "../store/feedback.ts";
 import type { Progress } from "../session/progress.ts";
 import type { Verdict } from "../session/runs.ts";
-import type { RunnerStage } from "../pipeline/load.ts";
+import { actionArtifact, type RunnerStage } from "../pipeline/load.ts";
+import type { ActionChecks } from "../artifact/action-check.ts";
+import { checkFor } from "../store/tickets.ts";
 import { parsePrUrl, type PullRequests, type PrRef } from "./github.ts";
 import { addressedEvidence, checkFailed, describe, fresh, logSlice, marker, outstanding, ownMark, repeatedChecks, watermarkOf, type FeedbackItem, type PrFacts, type Seen } from "./feedback.ts";
 
@@ -47,6 +49,8 @@ export interface ReviewDeps {
   feedback: Feedback;
   progress: Progress;
   prs: PullRequests;
+  /** Runs a repeating Stage's check Action, its end condition when it has one (ADR 0014). */
+  checks: ActionChecks;
   log: Logger;
 }
 
@@ -102,7 +106,7 @@ export class Review {
     const freshItems = fresh(items, ticket.feedback_watermark, seen);
     const status = statusOf(facts, freshItems.length, items.length);
     if (this.record(ticket, status)) changes.push({ ticket: ticket.id, summary: `PR #${ref.number}: checks ${status.checks}` });
-    if (facts.state === "MERGED") {
+    if (facts.state === "MERGED" && !stage.artifactWith) {
       await progress.finished(ticket);
       changes.push({ ticket: ticket.id, summary: `PR #${ref.number} merged; ${stage.name} finished` });
       return changes;
@@ -114,6 +118,24 @@ export class Review {
         changes.push({ ticket: ticket.id, summary: `Flagged: ${detail}` });
       }
       return changes;
+    }
+    // A check Action ends the Stage, not the merge: it runs each poll while the Ticket waits, unless a human has it or one is running.
+    if (stage.artifactWith) {
+      if (ticket.flagged_at || this.deps.checks.running(ticket.id)) return changes;
+      const verdict = await this.endCheck(ticket, stage, facts.state === "MERGED");
+      const fresh = tickets.get(ticket.id);
+      if (!fresh || fresh.state !== "active" || fresh.stage !== stage.name || sessions.running(ticket.id).some((s) => s.mode === "headless")) return changes;
+      if (verdict === "advance") {
+        await progress.finished(fresh);
+        changes.push({ ticket: ticket.id, summary: `${stage.artifact} met; ${stage.name} finished` });
+        return changes;
+      }
+      if (verdict !== "wait") {
+        await progress.flag(ticket.id, verdict.flag, verdict.detail);
+        changes.push({ ticket: ticket.id, summary: `Flagged: ${verdict.detail}` });
+        return changes;
+      }
+      ticket = fresh;
     }
     if (freshItems.length === 0) {
       if (ticket.feedback_due) tickets.update(ticket.id, { feedback_due: null });
@@ -173,7 +195,8 @@ export class Review {
     const ref = await prs.discover(ticket);
     if (!ref) return { flag: "artifact.missing", detail: `${stage.artifact}: no PR for branch ${ticket.branch}` };
     const facts = await prs.facts(ref);
-    if (facts.state === "MERGED") return "advance";
+    if (facts.state === "MERGED" && !stage.artifactWith) return "advance";
+    if (facts.state === "MERGED") return this.endCheck(ticket, stage, true);
     const own = ownMark(ticket.id, stage.name);
     const rows = feedback.forSession(sessionId);
     const evidence = new Map<number, string | null>();
@@ -186,7 +209,24 @@ export class Review {
     const items = outstanding(facts, own);
     this.record(ticket, statusOf(facts, fresh(items, ticket.feedback_watermark, seenBy(feedback.forStage(ticket.id, stage.name))).length, items.length));
     if (facts.state === "CLOSED") return { flag: "review.pr_closed", detail: `PR #${ref.number} closed without merging` };
+    if (stage.artifactWith) {
+      const ended = await this.endCheck(ticket, stage, false);
+      if (ended !== "wait") return ended;
+    }
     if (left.length) return { flag: "review.unaddressed", detail: `${left.length} of ${rows.length} Feedback items unaddressed: ${describe(left.map(itemOf))}` };
+    return "wait";
+  }
+
+  /**
+   * Run a repeating Stage's check Action (ADR 0014): met ends the Stage, a
+   * broken check Flags, and not met waits for Feedback while the PR is open
+   * but Flags once it has merged, as no more Feedback can come.
+   */
+  private async endCheck(ticket: TicketRow, stage: RunnerStage, merged: boolean): Promise<Verdict> {
+    const verdict = await this.deps.checks.probe(ticket, stage.name)(actionArtifact(stage.artifact!)!, stage.artifactWith ?? {});
+    if (verdict.present) return "advance";
+    if (verdict.broken) return { flag: "artifact.error", detail: `${stage.artifact}: ${verdict.detail}` };
+    if (merged) return { flag: "artifact.missing", detail: `${stage.artifact}: ${verdict.detail} (the PR has merged)` };
     return "wait";
   }
 
@@ -233,7 +273,13 @@ export function statusOf(facts: PrFacts, freshCount: number, outstandingCount: n
 }
 
 /** The why line of a quiet Ticket: what the last poll saw of its PR. */
-export function quietWhy(ticket: Pick<TicketRow, "pr_status">, stage: string): string {
+export function quietWhy(ticket: Pick<TicketRow, "pr_status" | "artifact_checks">, stage: string): string {
+  const check = checkFor(ticket, stage);
+  const why = prWhy(ticket, stage);
+  return check?.result === "not_met" ? `${why} · ${check.action} not met` : why;
+}
+
+function prWhy(ticket: Pick<TicketRow, "pr_status">, stage: string): string {
   const status = ticket.pr_status ? (JSON.parse(ticket.pr_status) as PrStatus) : null;
   if (!status) return `${stage}: no PR yet`;
   const pr = `PR #${status.number}`;

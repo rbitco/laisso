@@ -22,6 +22,8 @@ export interface ActionChecksDeps {
 export class ActionChecks {
   private deps: ActionChecksDeps;
   private live = new Set<RunningCommand>();
+  /** Tickets with a check running now: a poll leaves them alone rather than run a second. */
+  private busy = new Set<string>();
 
   constructor(deps: ActionChecksDeps) {
     this.deps = deps;
@@ -32,6 +34,11 @@ export class ActionChecks {
     return (action, params) => this.run(ticket, stage, action, params);
   }
 
+  /** Is a check running for this Ticket now? */
+  running(ticket: string): boolean {
+    return this.busy.has(ticket);
+  }
+
   /** Ctrl-C: every running check is killed; it runs again when next asked. */
   async shutdown(): Promise<void> {
     const live = [...this.live];
@@ -40,7 +47,8 @@ export class ActionChecks {
   }
 
   private async run(ticket: TicketRow, stage: string, name: string, params: Record<string, string>): Promise<ArtifactVerdict> {
-    const { verdict, code } = await this.verdict(ticket, stage, name, params);
+    this.busy.add(ticket.id);
+    const { verdict, code } = await this.verdict(ticket, stage, name, params).finally(() => this.busy.delete(ticket.id));
     // Shutdown cut it short: it is no verdict, so nothing is kept.
     if (code !== "shutdown") {
       const result = verdict.present ? "met" : verdict.broken ? "error" : "not_met";

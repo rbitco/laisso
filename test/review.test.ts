@@ -1,4 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
+import { existsSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
+import path from "node:path";
 import { startLassoWithRepos, startLasso, runCli, waitFor, claudeFixture, type Lasso } from "./harness.ts";
 import type { TicketDetail, IntakeResult } from "../src/api/views.ts";
 import type { TickChange } from "../src/server/tick.ts";
@@ -297,5 +300,85 @@ describe("the Review loop", () => {
     const other = await runCli(["check", "nope"], lasso);
     expect(other.code).toBe(1);
     expect(other.stderr).toContain("no Ticket matches nope");
+  });
+});
+
+// A check Action as a repeating Stage's end condition (ADR 0014, LASSO-117): the Action passes once `.ready` is in the worktree.
+describe("a repeating Stage that ends on a check Action", () => {
+  const CHECKED = `stages:
+  - name: review
+    prompt: Address the Feedback.
+    repeat: feedback
+    artifact: action ready
+`;
+  const READY = 'if [ -f .ready ]; then echo "ready to go"; else echo "no .ready yet"; exit 1; fi';
+
+  async function lassoWithCheck(run = READY) {
+    const started = await startLassoWithRepos({ app: { pipeline: "checked" } }, { actions: { ready: { run } } }, { checked: CHECKED });
+    running.push(started.lasso);
+    const ticket = await started.lasso.api<IntakeResult>("/api/tickets", { method: "POST", body: JSON.stringify({ input: "Add dark mode", repo: "app", pipeline: "checked" }) });
+    return { ...started, ticket };
+  }
+  const ready = (worktree: string) => writeFile(path.join(worktree, ".ready"), "");
+
+  it("runs the check each poll, says so while it is not met, and finishes the Stage once it is", async () => {
+    const { lasso, ticket } = await lassoWithCheck();
+    await setScene(lasso, ticket.branch, green);
+    expect((await checkNow(lasso)).changes).toEqual([{ ticket: ticket.id, summary: "PR #7 found" }]);
+    const waiting = await detailOf(lasso, ticket.id);
+    expect(waiting.flag).toBeNull();
+    expect(waiting.display).toEqual({ state: "quiet", label: "Quiet", why: "PR #7: checks green, nothing outstanding · ready not met" });
+    expect(waiting.check).toMatchObject({ action: "ready", result: "not_met", code: 1, line: "no .ready yet" });
+
+    await ready(ticket.worktree);
+    expect((await checkNow(lasso)).changes).toEqual([{ ticket: ticket.id, summary: "action ready met; review finished" }]);
+    const done = await detailOf(lasso, ticket.id);
+    expect(done.state).toBe("done");
+    expect(await lasso.runner.calls()).toEqual([]);
+  });
+
+  it("is not ended by a merge alone: a merged PR whose check is not met Flags artifact.missing", async () => {
+    const { lasso, ticket } = await lassoWithCheck();
+    await setScene(lasso, ticket.branch, { ...green, state: "MERGED" });
+    expect((await checkNow(lasso)).changes.map((c) => c.summary)).toEqual(["PR #7 found", "Flagged: action ready: no .ready yet (the PR has merged)"]);
+    const d = await detailOf(lasso, ticket.id);
+    expect(d.state).toBe("active");
+    expect(d.flag).toMatchObject({ reason: "artifact.missing", detail: "action ready: no .ready yet (the PR has merged)" });
+    // Flagged, it is a human's: the poll runs no more checks and raises no second Flag.
+    await ready(ticket.worktree);
+    expect((await checkNow(lasso)).changes).toEqual([]);
+    // Mark done runs the check, now met, and the Stage finishes.
+    expect((await pull(lasso, ticket.id, "done")).state).toBe("done");
+  });
+
+  it("still Flags review.pr_closed on a PR closed unmerged, and Flags artifact.error on a broken check", async () => {
+    const closed = await lassoWithCheck();
+    await setScene(closed.lasso, closed.ticket.branch, { ...green, state: "CLOSED" });
+    expect((await checkNow(closed.lasso)).changes.map((c) => c.summary)).toEqual(["PR #7 found", "Flagged: PR #7 closed without merging"]);
+
+    const broken = await lassoWithCheck('echo "gh: not logged in" >&2; exit 4');
+    await setScene(broken.lasso, broken.ticket.branch, green);
+    expect((await checkNow(broken.lasso)).changes.map((c) => c.summary)).toEqual(["PR #7 found", "Flagged: action ready: ready exited 4: gh: not logged in"]);
+    expect((await detailOf(broken.lasso, broken.ticket.id)).flag).toMatchObject({ reason: "artifact.error" });
+  });
+
+  it("runs Rounds on Feedback while not met, and ends the Stage when a Round meets it", async () => {
+    const { lasso, ticket } = await lassoWithCheck();
+    const asked: Scene = { ...green, tag: "asked", comments: [{ id: 201, author: "bob", body: "Rename this.", at: T1 }] };
+    const replied: Scene = { ...asked, tag: "replied", comments: [...asked.comments!, { id: 202, author: "lasso-bot", body: `Renamed.\n${marker(ticket.id, 1)}`, at: T2 }] };
+    await setScene(lasso, ticket.branch, asked);
+    await lasso.runner.script({ stdout: claudeFixture("success.json"), files: { ".ready": "" }, commands: swapTo(lasso, await sceneFile(lasso, ticket.branch, "replied", replied)) });
+    expect((await checkNow(lasso)).changes.map((c) => c.summary)).toEqual(["PR #7 found", "PR #7: 1 new Feedback item: comment by bob", "started review Round 1"]);
+    const done = await waitFor(async () => { const d = await detailOf(lasso, ticket.id); return d.state === "done" ? d : null; }, "the Ticket to be done");
+    expect(done.flag).toBeNull();
+    expect(done.session).toMatchObject({ round: 1, outcome: "succeeded" });
+  });
+
+  it("never runs two checks for one Ticket at once", async () => {
+    const { lasso, ticket } = await lassoWithCheck('if [ -e ../check.lock ]; then echo overlap >> ../overlaps; fi; touch ../check.lock; sleep 1; rm ../check.lock; exit 1');
+    await setScene(lasso, ticket.branch, green);
+    await Promise.all([checkNow(lasso), checkNow(lasso), checkNow(lasso)]);
+    expect(existsSync(path.join(ticket.worktree, "..", "overlaps"))).toBe(false);
+    expect((await detailOf(lasso, ticket.id)).check).toMatchObject({ result: "not_met" });
   });
 });

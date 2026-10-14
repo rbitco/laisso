@@ -136,8 +136,8 @@ describe("a check Action artifact", () => {
     expect(check("  - name: a\n    prompt: p\n    artifact: { action: ci-green, with: { loud: yes } }\n")).toThrow(/ci-green takes no param loud/);
   });
 
-  it("cannot end a repeating Stage yet", () => {
-    expect(() => parsePipeline("p", STAGES("  - name: a\n    prompt: p\n    repeat: feedback\n    artifact: action ci-green\n"))).toThrow(/a repeating Stage cannot end on a check Action yet/);
+  it("can end a repeating Stage", () => {
+    expect(parsePipeline("p", STAGES("  - name: a\n    prompt: p\n    repeat: feedback\n    artifact: action ci-green\n")).stages[0]).toMatchObject({ repeat: "feedback", artifact: "action ci-green", artifactWith: {} });
   });
 });
 
