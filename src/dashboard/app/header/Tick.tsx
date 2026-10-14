@@ -1,4 +1,5 @@
 import { useEffect, useReducer, useRef, useState } from "react";
+import { RefreshCw } from "lucide-react";
 import type { TickResult, TickStatus } from "../../../server/tick.ts";
 import { tickIndicator } from "../../metro.ts";
 import { api } from "../api.ts";
@@ -17,9 +18,9 @@ function pulseMs(): number {
 }
 
 /**
- * The header's Tick dot and Check now. The dot is still when idle, pulses while a Tick runs, and is red and still
- * while Lasso is unreachable; its tooltip says when the last Tick ran and the next is due, and moves each second.
- * Until the first status or error it has no tooltip. `onChecked` follows a Check now, so the page reads again.
+ * The nav's Tick dot, its status, and Check now. The dot is still when idle, pulses while a Tick runs, and is red and
+ * still while Lasso is unreachable; the status beside it, and its tooltip, say when the last Tick ran and the next is
+ * due, and move each second. Until the first status or error neither shows. `onChecked` follows a Check now, so the page reads again.
  */
 export function Tick({ onChecked }: { onChecked: () => void }) {
   const [seen, setSeen] = useState<Seen>("connecting");
@@ -74,9 +75,15 @@ export function Tick({ onChecked }: { onChecked: () => void }) {
 
   return (
     <div className="tick">
-      <span className={"dot tick-dot" + (drawn ? " " + (held ? "running" : drawn.state) : "")} data-role="tick-dot" role="img" title={drawn?.title} aria-label={drawn?.title} />
-      <button type="button" data-role="check-now" onClick={check}>
-        Check now
+      <div className="tick-line">
+        <span className={"dot tick-dot" + (drawn ? " " + (held ? "running" : drawn.state) : "")} data-role="tick-dot" role="img" title={drawn?.title} aria-label={drawn?.title} />
+        <span className="tick-status" data-role="tick-status" aria-hidden="true">
+          {drawn?.title}
+        </span>
+      </div>
+      <button type="button" data-role="check-now" title="Check now" onClick={check}>
+        <RefreshCw aria-hidden="true" />
+        <span className="label">Check now</span>
       </button>
     </div>
   );

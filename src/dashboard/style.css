@@ -1,5 +1,5 @@
 :root {
-  --bg: #fafaf8; --surface: #ffffff; --surface2: #f1f0ec; --ink: #141412; --muted: #6f6b63; --line: #e6e4de;
+  --bg: #fafaf8; --side: #f3f2ee; --surface: #ffffff; --surface2: #f1f0ec; --ink: #141412; --muted: #6f6b63; --line: #e6e4de;
   --accent: #bd522d; --accent-ink: #ffffff; --accent-soft: rgba(189, 82, 45, 0.1); --pill: #f1f0ec;
   --good: #2f7a3d; --crit: #d23c2e; --amber: #965a08; --run: #2f63b8;
   --crit-bg: rgba(210, 60, 46, 0.1); --amber-bg: rgba(200, 130, 20, 0.13); --good-bg: rgba(47, 122, 61, 0.1); --run-bg: rgba(47, 99, 184, 0.1);
@@ -12,7 +12,7 @@
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #080808; --surface: #101010; --surface2: #181818; --ink: #f2f0ea; --muted: #8f8b83; --line: #212121;
+    --bg: #080808; --side: #0b0b0b; --surface: #101010; --surface2: #181818; --ink: #f2f0ea; --muted: #8f8b83; --line: #212121;
     --accent: #ee7d55; --accent-ink: #160904; --accent-soft: rgba(238, 125, 85, 0.12); --pill: #181818;
     --good: #6fc985; --crit: #ef5b4c; --amber: #e8ad52; --run: #7aa6e8;
     --crit-bg: rgba(239, 91, 76, 0.12); --amber-bg: rgba(232, 173, 82, 0.12); --good-bg: rgba(111, 201, 133, 0.12); --run-bg: rgba(122, 166, 232, 0.12);
@@ -22,7 +22,7 @@
   }
 }
 :root[data-theme="dark"] {
-  --bg: #080808; --surface: #101010; --surface2: #181818; --ink: #f2f0ea; --muted: #8f8b83; --line: #212121;
+  --bg: #080808; --side: #0b0b0b; --surface: #101010; --surface2: #181818; --ink: #f2f0ea; --muted: #8f8b83; --line: #212121;
   --accent: #ee7d55; --accent-ink: #160904; --accent-soft: rgba(238, 125, 85, 0.12); --pill: #181818;
   --good: #6fc985; --crit: #ef5b4c; --amber: #e8ad52; --run: #7aa6e8;
   --crit-bg: rgba(239, 91, 76, 0.12); --amber-bg: rgba(232, 173, 82, 0.12); --good-bg: rgba(111, 201, 133, 0.12); --run-bg: rgba(122, 166, 232, 0.12);
@@ -33,9 +33,58 @@
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 var(--sans); -webkit-font-smoothing: antialiased; }
+/* The frame: the nav beside a column of the header and the view shown. */
+.shell { display: grid; grid-template-columns: 216px minmax(0, 1fr); min-height: 100vh; }
+.shell.compact { grid-template-columns: 56px minmax(0, 1fr); }
+.col { min-width: 0; }
 header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); }
-header h1 { font-size: 15px; font-weight: 600; margin: 0 16px 0 0; letter-spacing: 0.16em; display: flex; align-items: center; gap: 8px; }
-header h1 a { color: inherit; text-decoration: none; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* The nav: a sidebar of the views, an icon rail on a Ticket's page, and a bottom tab bar on a phone. */
+nav.pages { position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; gap: 4px; padding: 16px 12px; background: var(--side); border-right: 1px solid var(--line); }
+nav.pages .brand { font-size: 13.5px; font-weight: 600; margin: 0; padding: 4px 10px 18px; letter-spacing: 0.16em; display: flex; align-items: center; gap: 8px; }
+nav.pages .brand a { color: inherit; text-decoration: none; }
+nav.pages .mark { display: none; }
+nav.pages svg { width: 16px; height: 16px; stroke-width: 1.75; flex: none; }
+nav.pages .views { display: grid; gap: 2px; }
+nav.pages .views a { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; color: var(--muted); text-decoration: none; position: relative; }
+nav.pages .views a:hover { color: var(--ink); background: var(--surface2); }
+nav.pages .views a.on { color: var(--ink); background: var(--surface2); font-weight: 500; }
+nav.pages .count { margin-left: auto; font-size: 11.5px; font-weight: 600; min-width: 20px; text-align: center; padding: 0 6px; border-radius: 999px; color: var(--amber); background: var(--amber-bg); font-variant-numeric: tabular-nums; }
+nav.pages a:focus-visible, nav.pages button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+nav.pages .tick { margin-top: auto; display: grid; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+nav.pages .tick-line { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; }
+nav.pages .tick-status { min-width: 0; line-height: 1.35; }
+nav.pages .tick button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+@media (min-width: 700px) {
+  nav.pages.compact { align-items: center; padding: 16px 0; gap: 6px; }
+  nav.pages.compact .brand { padding: 0 0 14px; }
+  nav.pages.compact .word { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  nav.pages.compact .mark { display: block; font-size: 15px; font-weight: 700; letter-spacing: 0; color: var(--accent); }
+  nav.pages.compact .dev-badge, nav.pages.compact .tick-status { display: none; }
+  nav.pages.compact .label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  nav.pages.compact .views { gap: 6px; }
+  nav.pages.compact .views a { width: 36px; height: 36px; padding: 0; justify-content: center; }
+  nav.pages.compact .count { position: absolute; top: 5px; right: 5px; width: 7px; height: 7px; min-width: 0; padding: 0; background: var(--amber); box-shadow: 0 0 0 2px var(--side); }
+  nav.pages.compact .count .n { display: none; }
+  nav.pages.compact .tick { padding: 0; border: 0; background: none; justify-items: center; }
+  nav.pages.compact .tick button { width: 36px; height: 36px; padding: 0; background: none; border-color: transparent; color: var(--muted); }
+  nav.pages.compact .tick button:hover { color: var(--ink); background: var(--surface2); }
+}
+@media (max-width: 699px) {
+  .shell, .shell.compact { grid-template-columns: minmax(0, 1fr); }
+  nav.pages { position: static; height: auto; flex-direction: row; align-items: center; padding: 12px 16px 0; background: none; border-right: 0; }
+  nav.pages .brand { padding: 0; }
+  nav.pages .tick { margin: 0 0 0 auto; padding: 0; border: 0; background: none; display: flex; align-items: center; }
+  nav.pages .tick-status { display: none; }
+  nav.pages .tick button { padding: 4px 11px; font-size: 12px; }
+  nav.pages .views { position: fixed; z-index: 20; left: 0; right: 0; bottom: 0; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; padding: 8px 6px calc(8px + env(safe-area-inset-bottom)); background: var(--side); border-top: 1px solid var(--line); }
+  nav.pages .views a { flex-direction: column; gap: 3px; padding: 4px 0; font-size: 11px; }
+  nav.pages .views a:hover { background: none; }
+  nav.pages .views a.on { background: none; color: var(--accent); }
+  nav.pages .views svg { width: 20px; height: 20px; }
+  nav.pages .count { position: absolute; top: 0; left: calc(50% + 8px); margin: 0; min-width: 0; font-size: 10px; padding: 0 5px; }
+  .shell main { padding-bottom: calc(88px + env(safe-area-inset-bottom)); }
+}
 /* A dev build's mark, so a dev clone's dashboard is never taken for the installed Lasso's. */
 .dev-badge { font-size: 10.5px; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; padding: 1px 7px; border-radius: 999px; color: var(--amber); border: 1px solid var(--amber); }
 form[data-role="intake"] { display: flex; gap: 8px; flex: 1 1 320px; }
@@ -47,7 +96,7 @@ button:disabled { opacity: 0.6; cursor: default; }
 button.busy { opacity: 1; cursor: progress; }
 button.busy::after { content: ''; display: inline-block; width: 0.75em; height: 0.75em; margin-left: 6px; vertical-align: -1px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 0.7s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
-.tick { display: flex; gap: 8px; align-items: center; color: var(--muted); font-variant-numeric: tabular-nums; }
+.tick { color: var(--muted); font-variant-numeric: tabular-nums; }
 main { padding: 16px; }
 .empty { color: var(--muted); padding: 32px 0; text-align: center; }
 .notice { color: var(--crit); }
@@ -275,10 +324,6 @@ dialog.modal::backdrop { background: rgba(0, 0, 0, 0.55); backdrop-filter: blur(
 .timeline .pill.interrupted { background: var(--amber-bg); color: var(--amber); }
 
 /* Pipelines and Config: shared form parts */
-nav.views { display: flex; gap: 4px; }
-nav.views a { color: var(--muted); text-decoration: none; padding: 4px 10px; border-radius: 8px; }
-nav.views a:hover { color: var(--ink); background: var(--surface2); }
-nav.views a.on { color: var(--ink); background: var(--surface2); font-weight: 600; }
 .panel h2 { margin: 0; font-size: 16px; }
 .card { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; }
 .card.problem { border-color: var(--crit); }

@@ -3,26 +3,20 @@ import { useEvents } from "./events.ts";
 import { Notice, showNotice } from "./notice.tsx";
 import { usePlace, type Place } from "./route.ts";
 import { ConfirmIntake, IntakeForm, type Detected } from "./header/Intake.tsx";
-import { Tick } from "./header/Tick.tsx";
 import { MissingTools } from "./header/Tools.tsx";
 import { VersionNotice } from "./header/VersionNotice.tsx";
-import { DevBadge } from "./header/DevBadge.tsx";
+import { Nav } from "./nav/Nav.tsx";
 import { Ledger } from "./ledger/Ledger.tsx";
 import { TicketPage } from "./ticket/TicketPage.tsx";
 import { PipelinesPage } from "./pipelines/PipelinesPage.tsx";
 import { ConfigPage } from "./config/ConfigPage.tsx";
 import { ProfileDrawerHost } from "./profiles/drawer.tsx";
 
-const VIEWS = [
-  { href: "#", view: "ledger", name: "Tickets" },
-  { href: "#pipelines", view: "pipelines", name: "Pipelines" },
-  { href: "#config", view: "config", name: "Config" },
-] as const;
-
 const LEDGER: Place = { route: { view: "ledger" }, visit: 0 };
 
 /**
- * The dashboard: the header (intake, the Tick dot and Check now, the view links, the version notice, any missing tools), then the view the hash names. A
+ * The dashboard: the nav (the views, the Tick dot and Check now), the header (intake, the version notice, any missing
+ * tools), then the view the hash names. A
  * Ticket's page swaps in once its data is here, so until then the view before it stays; with a Ticket open the Ledger
  * collapses to a sidebar beside it. When Lasso comes back after a restart, the view shown reads everything again, as
  * it may have missed some changes.
@@ -53,66 +47,55 @@ export function App() {
 
   const on = route.view === "detail" ? "ledger" : route.view;
   return (
-    <>
-      <header>
-        <h1>
-          <a href="#" data-role="home">
-            LASSO
-          </a>
-          <DevBadge />
-        </h1>
-        <IntakeForm text={intakeText} onText={setIntakeText} onDetected={(d) => setIntake((was) => ({ ...d, n: (was?.n ?? 0) + 1 }))} />
-        <Tick onChecked={reread} />
-        <VersionNotice />
-        <nav className="views">
-          {VIEWS.map((v) => (
-            <a key={v.view} href={v.href} className={v.view === on ? "on" : undefined}>
-              {v.name}
-            </a>
-          ))}
-        </nav>
-        <MissingTools />
-      </header>
-      <main>
-        <Notice />
-        {intake && (
-          <ConfirmIntake
-            key={intake.n}
-            detected={intake}
-            onCancel={() => setIntake(null)}
-            onAdded={(t) => {
-              setIntake(null);
-              setIntakeText("");
-              if (t.branchExisted) showNotice("checked out existing branch " + t.branch);
-              location.hash = "";
-              reread();
-            }}
-          />
-        )}
-        <div className={"dwrap" + (view === "detail" ? " open" : "")} data-role="layout">
-          <aside className="dside" data-role="side" hidden={view !== "detail"} ref={setSide} />
-          <div className="dmain">
-            <div className="ledger-tools" data-role="ledger-tools" hidden={view !== "ledger"}>
-              <label>
-                <input type="checkbox" data-role="show-ended" checked={all} onChange={(ev) => setAll(ev.target.checked)} /> Show done and Abandoned
-              </label>
+    <div className={"shell" + (view === "detail" ? " compact" : "")} data-role="shell">
+      <Nav on={on} compact={view === "detail"} onChecked={reread} />
+      <div className="col">
+        <header>
+          <IntakeForm text={intakeText} onText={setIntakeText} onDetected={(d) => setIntake((was) => ({ ...d, n: (was?.n ?? 0) + 1 }))} />
+          <VersionNotice />
+          <MissingTools />
+        </header>
+        <main>
+          <Notice />
+          {intake && (
+            <ConfirmIntake
+              key={intake.n}
+              detected={intake}
+              onCancel={() => setIntake(null)}
+              onAdded={(t) => {
+                setIntake(null);
+                setIntakeText("");
+                if (t.branchExisted) showNotice("checked out existing branch " + t.branch);
+                location.hash = "";
+                reread();
+              }}
+            />
+          )}
+          <div className={"dwrap" + (view === "detail" ? " open" : "")} data-role="layout">
+            <aside className="dside" data-role="side" hidden={view !== "detail"} ref={setSide} />
+            <div className="dmain">
+              <div className="ledger-tools" data-role="ledger-tools" hidden={view !== "ledger"}>
+                <label>
+                  <input type="checkbox" data-role="show-ended" checked={all} onChange={(ev) => setAll(ev.target.checked)} /> Show done and Abandoned
+                </label>
+              </div>
+              <section data-role="ledger" aria-label="Tickets" hidden={view !== "ledger"}>
+                {view === "ledger" && <Ledger all={all} visit={shown.visit} />}
+              </section>
+              <section data-role="detail" className="detail" hidden={view !== "detail"}>
+                {route.view === "detail" && <TicketPage id={route.id} visit={place.visit} all={all} side={side} onShown={() => setTicketShown(true)} />}
+              </section>
+              <section data-role="pipelines" className="panel editor-panel" aria-label="Pipelines" hidden={view !== "pipelines"}>
+                {shown.route.view === "pipelines" && <PipelinesPage name={shown.route.name} version={shown.route.version} visit={shown.visit} />}
+              </section>
+              <section data-role="config" className="panel editor-panel" aria-label="Config" hidden={view !== "config"}>
+                {view === "config" && <ConfigPage visit={shown.visit} />}
+              </section>
             </div>
-            <section data-role="ledger" aria-label="Tickets" hidden={view !== "ledger"}>
-              {view === "ledger" && <Ledger all={all} visit={shown.visit} />}
-            </section>
-            <section data-role="detail" className="detail" hidden={view !== "detail"}>
-              {route.view === "detail" && <TicketPage id={route.id} visit={place.visit} all={all} side={side} onShown={() => setTicketShown(true)} />}
-            </section>
-            <section data-role="pipelines" className="panel editor-panel" aria-label="Pipelines" hidden={view !== "pipelines"}>
-              {shown.route.view === "pipelines" && <PipelinesPage name={shown.route.name} version={shown.route.version} visit={shown.visit} />}
-            </section>
-            <section data-role="config" className="panel editor-panel" aria-label="Config" hidden={view !== "config"}>
-              {view === "config" && <ConfigPage visit={shown.visit} />}
-            </section>
           </div>
-        </div>
-      </main>
+        </main>
+      </div>
       <ProfileDrawerHost />
-    </>
+    </div>
   );
 }

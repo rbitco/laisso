@@ -13,7 +13,7 @@ import { closeProfileDrawer } from "../src/dashboard/app/profiles/drawer.tsx";
 import { showNotice } from "../src/dashboard/app/notice.tsx";
 import { events } from "../src/dashboard/app/events.ts";
 
-// The dashboard's frame as a person uses it (ADR 0012): the header's intake, Tick dot and Check now, the view links,
+// The dashboard's frame as a person uses it (ADR 0012): the header's intake, the nav's view links, Tick dot and Check now,
 // and moving between the Ledger, a Ticket, Pipelines and Config by the page's hash.
 
 class FakeEventSource extends EventTarget {
@@ -116,7 +116,7 @@ const notice = () => document.querySelector('[data-role="notice"]')!;
 const chosen = (confirm: HTMLElement, group: string) => (within(within(confirm).getByRole("radiogroup", { name: group })).getAllByRole("radio") as HTMLInputElement[]).find((r) => r.checked)?.value ?? null;
 const section = (role: string) => document.querySelector<HTMLElement>(`[data-role="${role}"]`)!;
 const shownViews = () => ["ledger", "detail", "pipelines", "config"].filter((r) => !section(r).hidden);
-const navOn = () => [...document.querySelectorAll("nav.views a.on")].map((a) => a.textContent);
+const navOn = () => [...document.querySelectorAll("nav .views a.on")].map((a) => a.textContent);
 const go = (hash: string) => act(() => void (location.hash = hash));
 
 beforeEach(() => {
@@ -173,11 +173,12 @@ describe("the Tick dot", () => {
     render(<App />);
     await screen.findByText("Ticket A");
     send("hello", (lasso.state.tick = freshTick()));
-    expect(lasso.gets("/api/tickets")).toBe(1);
+    // One read for the Ledger, one for the nav's needs-you count.
+    expect(lasso.gets("/api/tickets")).toBe(2);
     send("error");
     send("hello", (lasso.state.tick = freshTick()));
     expect(dot().className).toBe("dot tick-dot idle");
-    await waitFor(() => expect(lasso.gets("/api/tickets")).toBe(2));
+    await waitFor(() => expect(lasso.gets("/api/tickets")).toBe(4));
   });
 });
 
@@ -245,7 +246,8 @@ describe("Check now", () => {
     await waitFor(() => expect(notice().textContent).toBe("APP-A: review started; APP-B: PR merged"));
     expect(lasso.sent.filter((s) => s.method === "POST").map((s) => s.route)).toEqual(["/api/check-now"]);
     await waitFor(() => expect(lasso.gets("/api/tick")).toBe(1));
-    await waitFor(() => expect(lasso.gets("/api/tickets")).toBe(2));
+    // The Ledger's first read and the nav's needs-you count, then the Ledger again.
+    await waitFor(() => expect(lasso.gets("/api/tickets")).toBe(3));
   });
 
   it("says nothing new when nothing changed", async () => {
@@ -364,7 +366,7 @@ describe("the page's views", () => {
   it("links Tickets, Pipelines and Config, marking the one shown", async () => {
     fakeLasso();
     render(<App />);
-    expect(within(document.querySelector("nav.views")!).getAllByRole("link").map((a) => [a.textContent, a.getAttribute("href")])).toEqual([
+    expect(within(document.querySelector("nav .views")!).getAllByRole("link").map((a) => [a.textContent, a.getAttribute("href")])).toEqual([
       ["Tickets", "#"],
       ["Pipelines", "#pipelines"],
       ["Config", "#config"],
@@ -380,6 +382,44 @@ describe("the page's views", () => {
     await screen.findByText("Pick a Pipeline to edit it, or make a new one.");
     expect(navOn()).toEqual(["Pipelines"]);
     expect(shownViews()).toEqual(["pipelines"]);
+  });
+
+  it("counts the Tickets that need you on Tickets, and keeps the count up as Tickets change", async () => {
+    const lasso = fakeLasso();
+    const needs = (t: TicketDetail): TicketDetail => ({ ...t, display: { state: "needs_you", label: "Needs you", why: "waiting on you" } });
+    const flagged = (t: TicketDetail): TicketDetail => ({ ...t, display: { state: "flagged", label: "Flagged", why: "attempts exhausted" } });
+    lasso.state.tickets = [needs(ticket("A")), ticket("B")];
+    render(<App />);
+    const tickets = () => within(section("nav")).getByRole("link", { name: /^Tickets/ });
+    await waitFor(() => expect(tickets().textContent).toBe("Tickets1 need you"));
+    lasso.state.tickets = [needs(ticket("A")), flagged(ticket("B"))];
+    send("ticket", { ticket: "B" });
+    await waitFor(() => expect(tickets().textContent).toBe("Tickets2 need you"));
+    lasso.state.tickets = [ticket("A"), ticket("B")];
+    send("ticket", { ticket: "A" });
+    await waitFor(() => expect(section("needs-you")).toBeNull());
+    expect(tickets().textContent).toBe("Tickets");
+  });
+
+  it("shrinks the nav to an icon rail on a Ticket's page, its links and Check now still named", async () => {
+    fakeLasso();
+    render(<App />);
+    await screen.findByText("Ticket A");
+    expect(section("nav").className).toBe("pages");
+    go("#A");
+    await screen.findByRole("heading", { level: 2, name: "Ticket A" });
+    expect(section("nav").className).toBe("pages compact");
+    expect(section("shell").className).toBe("shell compact");
+    expect(within(section("nav")).getAllByRole("link").map((a) => [a.textContent, a.getAttribute("title")])).toEqual([
+      ["LASSOL", null],
+      ["Tickets", "Tickets"],
+      ["Pipelines", "Pipelines"],
+      ["Config", "Config"],
+    ]);
+    expect(within(section("nav")).getByRole("link", { name: "LASSO" }).getAttribute("href")).toBe("#");
+    expect(within(section("nav")).getByRole("button", { name: "Check now" }).getAttribute("title")).toBe("Check now");
+    go("");
+    await waitFor(() => expect(section("nav").className).toBe("pages"));
   });
 
   it("opens a Pipeline Version from its link", async () => {
