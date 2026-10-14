@@ -242,7 +242,7 @@ export function metroDiagram(t: MetroTicket, focus: string | null, width: number
     }
     out += "</g>";
   });
-  return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Stage flow for ${esc(t.reference || t.shortId)}">${out}</svg>`;
+  return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Stage flow for ${esc(t.label)}">${out}</svg>`;
 }
 
 type StationInfo = ReturnType<typeof stageInfo>;

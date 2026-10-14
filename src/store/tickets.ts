@@ -9,6 +9,8 @@ export interface TicketRow {
   origin: "tracker" | "prompt";
   prompt: string | null;
   title: string;
+  /** What a human calls the Ticket, shown in place of its reference or short id; null shows those. */
+  name: string | null;
   body: string | null;
   pipeline: string;
   /** The Version of the Pipeline this Ticket runs (ADR 0009); null only for a Ticket from before Versions whose file could not be pinned. */
@@ -61,7 +63,23 @@ export function shortId(id: string): string {
   return id.slice(-8);
 }
 
-export type NewTicket = Pick<TicketRow, "id" | "repo" | "reference" | "origin" | "prompt" | "title" | "body" | "pipeline" | "pipeline_version" | "stage" | "branch" | "worktree">;
+/** What people read a Ticket as: its name when a human gave it one, else its tracker reference, else its short id. */
+export function ticketLabel(ticket: Pick<TicketRow, "id" | "name" | "reference">): string {
+  return ticket.name ?? ticket.reference ?? shortId(ticket.id);
+}
+
+export const NAME_MAX = 80;
+
+/** A name as a human gave it: one line, trimmed; empty or null clears it. */
+export function parseName(value: unknown): { name: string | null } | { problem: string } {
+  if (value === null || value === undefined) return { name: null };
+  if (typeof value !== "string") return { problem: "name must be text, or null to clear it" };
+  const name = value.replace(/\s+/g, " ").trim();
+  if (name.length > NAME_MAX) return { problem: `name is ${name.length} characters; keep it to ${NAME_MAX}` };
+  return { name: name || null };
+}
+
+export type NewTicket = Pick<TicketRow, "id" | "repo" | "reference" | "origin" | "prompt" | "title" | "body" | "pipeline" | "pipeline_version" | "stage" | "branch" | "worktree"> & Partial<Pick<TicketRow, "name">>;
 
 /** Current-state rows for Tickets; Sessions are the history (spec: Store). */
 export class Tickets {
@@ -77,10 +95,10 @@ export class Tickets {
   insert(ticket: NewTicket, now: string = new Date().toISOString()): TicketRow {
     this.db
       .prepare(
-        `INSERT INTO tickets (id, repo, reference, origin, prompt, title, body, pipeline, pipeline_version, stage, state, branch, worktree, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)`,
+        `INSERT INTO tickets (id, repo, reference, origin, prompt, title, name, body, pipeline, pipeline_version, stage, state, branch, worktree, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)`,
       )
-      .run(ticket.id, ticket.repo, ticket.reference, ticket.origin, ticket.prompt, ticket.title, ticket.body, ticket.pipeline, ticket.pipeline_version, ticket.stage, ticket.branch, ticket.worktree, now, now);
+      .run(ticket.id, ticket.repo, ticket.reference, ticket.origin, ticket.prompt, ticket.title, ticket.name ?? null, ticket.body, ticket.pipeline, ticket.pipeline_version, ticket.stage, ticket.branch, ticket.worktree, now, now);
     this.changed(ticket.id);
     return this.get(ticket.id)!;
   }

@@ -42,7 +42,7 @@ export function renderChanges(changes: TickResult["changes"], tickets: TicketVie
   return [...byTicket]
     .map(([id, summaries]) => {
       const ticket = tickets.find((t) => t.id === id);
-      return `${ticket?.reference ?? ticket?.shortId ?? id}  ${summaries.join("; ")}`;
+      return `${ticket?.label ?? id}  ${summaries.join("; ")}`;
     })
     .join("\n");
 }

@@ -37,7 +37,7 @@ function StageProfile({ ticket: t, stage: p, refresh }: { ticket: TicketDetail; 
   const open = () =>
     openProfileDrawer(v.name, {
       scope: t.repo,
-      context: `Stage ${p.stage} of Ticket ${t.reference || t.shortId}`,
+      context: `Stage ${p.stage} of Ticket ${t.label}`,
       extra: (name) => ({
         role: "ticket-profile-choice",
         why: "this Ticket only; applies from the Stage's next Session",

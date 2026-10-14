@@ -3,7 +3,7 @@ import path from "node:path";
 import { homedir } from "node:os";
 import { actionsFor, currentConfig, resolveProfile, type Config, type RepoConfig } from "../server/config.ts";
 import type { LassoHome } from "../server/home.ts";
-import { shortId, type Tickets, type TicketRow, type NewTicket } from "../store/tickets.ts";
+import { parseName, shortId, type Tickets, type TicketRow, type NewTicket } from "../store/tickets.ts";
 import type { PipelineVersions } from "../store/versions.ts";
 import { checkActions, listPipelines, loadPipeline, PipelineError, type Pipeline } from "../pipeline/load.ts";
 import { Git } from "../git.ts";
@@ -19,6 +19,8 @@ export interface IntakeRequest {
   input: string;
   repo?: string;
   pipeline?: string;
+  /** What to call the Ticket in place of its reference or short id. */
+  name?: string | null;
 }
 
 export interface Admitted {
@@ -79,6 +81,8 @@ export class Intake {
     const { config, home, tickets } = this.deps;
     const input = (request.input ?? "").trim();
     if (!input) throw new IntakeError("nothing to intake: paste a reference or type a prompt");
+    const named = parseName(request.name);
+    if ("problem" in named) throw new IntakeError(named.problem);
     const detection = detect(config, input, listPipelines(home.pipelinesDir), request.repo);
 
     const repoName = request.repo ?? detection.repo.suggestion;
@@ -103,7 +107,7 @@ export class Intake {
     }
 
     const id = ulid();
-    let row: Omit<NewTicket, "pipeline_version" | "branch" | "worktree">;
+    let row: Omit<NewTicket, "pipeline_version" | "branch" | "worktree" | "name">;
     let branch: string;
     if (detection.kind === "prompt") {
       row = { id, repo: repoName, reference: null, origin: "prompt", prompt: input, title: promptTitle(input), body: null, pipeline: pipeline.name, stage: pipeline.stages[0]!.name };
@@ -133,7 +137,7 @@ export class Intake {
 
     try {
       // Pinned last, so a refused Intake numbers no Version.
-      const ticket = tickets.insert({ ...row, pipeline_version: this.deps.versions.pin(pipeline), branch, worktree });
+      const ticket = tickets.insert({ ...row, name: named.name, pipeline_version: this.deps.versions.pin(pipeline), branch, worktree });
       return { ticket, branchExisted: existed };
     } catch (error) {
       await git.removeWorktree(worktree).catch(() => undefined);

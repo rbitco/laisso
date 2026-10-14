@@ -1,4 +1,4 @@
-import { overrideFor, shortId, type TicketRow } from "../store/tickets.ts";
+import { overrideFor, shortId, ticketLabel, type TicketRow } from "../store/tickets.ts";
 import { runnerOf, type SessionProfile, type SessionRow } from "../store/sessions.ts";
 import { type Pipeline, type RunnerName, type RunnerStage, type Stage } from "../pipeline/load.ts";
 import type { PipelineSource } from "../pipeline/files.ts";
@@ -77,6 +77,10 @@ export interface TicketView {
   shortId: string;
   title: string;
   reference: string | null;
+  /** What a human named the Ticket, or null. */
+  name: string | null;
+  /** What people read the Ticket as: the name, else the reference, else the short id. */
+  label: string;
   origin: "tracker" | "prompt";
   /** The issue body pulled at intake, or the prompt text; what a Stage prompt gets to read. */
   body: string | null;
@@ -320,6 +324,8 @@ export function ticketView(ticket: TicketRow, ctx: ViewContext): TicketView {
     shortId: shortId(ticket.id),
     title: ticket.title,
     reference: ticket.reference,
+    name: ticket.name,
+    label: ticketLabel(ticket),
     origin: ticket.origin,
     body: ticket.origin === "prompt" ? ticket.prompt : ticket.body,
     repo: ticket.repo,

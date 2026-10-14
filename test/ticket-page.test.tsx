@@ -43,7 +43,7 @@ const profile = (stage: string, name: string, overridden = false): StageProfileV
 function ticket(id: string, over: Partial<TicketDetail> = {}): TicketDetail {
   const s = session({ ticket: id });
   return {
-    id, shortId: id.slice(-8), title: `Ticket ${id}`, reference: `APP-${id}`, origin: "tracker", body: null, repo: "app", branch: `app-${id}`, worktree: `/wt/${id}`,
+    id, shortId: id.slice(-8), title: `Ticket ${id}`, reference: `APP-${id}`, name: null, label: `APP-${id}`, origin: "tracker", body: null, repo: "app", branch: `app-${id}`, worktree: `/wt/${id}`,
     pipeline: "default", pipelineVersion: 2,
     stage: { name: "implement", kind: "runner", label: "implement", human: false, index: 1, total: 2, repeat: false, override: null },
     state: "active", flag: null, pr: null, display: { state: "quiet", label: "Quiet", why: "waiting on the next tick" }, queue: null,
@@ -109,6 +109,7 @@ function fakeLasso(tickets: TicketDetail[]) {
     if (out) return json(session());
     const refused = state.refuse[rest];
     if (refused) return json(refused.body, refused.status);
+    if (rest === "name") state.tickets[t.id] = { ...t, name: body.name, label: body.name ?? t.reference ?? t.shortId };
     const stage = /^stages\/([^/]+)\/profile$/.exec(rest);
     if (stage) {
       const name = decodeURIComponent(stage[1]!);
@@ -168,7 +169,7 @@ describe("a Ticket's page", () => {
     fakeLasso([ticket("A", { pr: "https://github.com/o/app/pull/7", pipelineDrift: "changed" }), ticket("B")]);
     await showPage("A");
     const bar = document.querySelector<HTMLElement>('[data-role="titlebar"]')!;
-    expect(bar.querySelector(".eyebrow")!.textContent).toBe("APP-A · app · app-A · PR");
+    expect(bar.querySelector(".eyebrow")!.textContent).toBe("APP-A · app · app-A · PR · Name");
     expect(within(bar).getByRole("link", { name: "PR" }).getAttribute("href")).toBe("https://github.com/o/app/pull/7");
     expect(within(bar).getByText("Quiet").className).toBe("pill quiet");
     expect(within(triggers()).getAllByRole("button").map((b) => b.textContent)).toEqual(["Mark done", "Extend", "Abandon"]);
@@ -202,6 +203,34 @@ describe("a Ticket's page", () => {
     expect(document.querySelector('[data-stage="plan"]')!.getAttribute("class")).toContain("focus");
     await user.click(within(timeline()).getByRole("button", { name: "All Stages" }));
     expect(within(timeline()).getAllByRole("listitem")).toHaveLength(2);
+  });
+});
+
+describe("naming a Ticket", () => {
+  it("names it from the title bar, keeps the reference beside the name, and clears it with an empty name", async () => {
+    const lasso = fakeLasso([ticket("A")]);
+    await showPage("A");
+    const user = userEvent.setup();
+    const bar = () => document.querySelector<HTMLElement>('[data-role="titlebar"]')!;
+    await user.click(within(bar()).getByRole("button", { name: "Name" }));
+    await user.type(within(bar()).getByRole("textbox", { name: "Ticket name" }), "Dark mode{Enter}");
+    await waitFor(() => expect(bar().querySelector('[data-role="name"]')?.textContent).toBe("Dark mode"));
+    expect(bar().querySelector(".eyebrow")!.textContent).toBe("Dark mode · APP-A · app · app-A · Rename");
+    expect(document.querySelector(`[data-id="A"] .ref`)!.textContent).toMatch(/^Dark mode · /);
+
+    await user.click(within(bar()).getByRole("button", { name: "Rename" }));
+    const input = within(bar()).getByRole("textbox", { name: "Ticket name" });
+    expect(input).toHaveProperty("value", "Dark mode");
+    await user.keyboard("{Escape}");
+    expect(within(bar()).queryByRole("textbox")).toBeNull();
+    await user.click(within(bar()).getByRole("button", { name: "Rename" }));
+    await user.clear(within(bar()).getByRole("textbox", { name: "Ticket name" }));
+    await user.click(within(bar()).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(bar().querySelector('[data-role="name"]')).toBeNull());
+    expect(lasso.sent).toEqual([
+      { method: "PUT", route: "/api/tickets/A/name", body: { name: "Dark mode" } },
+      { method: "PUT", route: "/api/tickets/A/name", body: { name: null } },
+    ]);
   });
 });
 

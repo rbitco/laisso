@@ -4,7 +4,7 @@ import path from "node:path";
 import { currentConfig, type Config, type ProfileSettings } from "../server/config.ts";
 import type { LassoHome } from "../server/home.ts";
 import type { Logger } from "../server/log.ts";
-import { shortId, type TicketRow } from "../store/tickets.ts";
+import { ticketLabel, type TicketRow } from "../store/tickets.ts";
 import { runnerOf, sessionProfile, type Sessions, type SessionRow } from "../store/sessions.ts";
 import { ticketProfile } from "./overrides.ts";
 import type { Pipeline, RunnerStage } from "../pipeline/load.ts";
@@ -140,7 +140,7 @@ export class Terminal {
     file: string,
     note: string | null,
   ): Promise<{ launcher: string; terminal: TerminalKind }> {
-    const request: RunRequest = { ...requestFor(ticket, stage, profile.profile), mode: "terminal", ...session, name: `Lasso: ${ticket.reference ?? shortId(ticket.id)} ${stage.name}`, limits: {} };
+    const request: RunRequest = { ...requestFor(ticket, stage, profile.profile), mode: "terminal", ...session, name: `Lasso: ${ticketLabel(ticket)} ${stage.name}`, limits: {} };
     const command = adapter.command(request);
     const dir = path.join(this.deps.home.ticketsDir, ticket.id, "sessions");
     mkdirSync(dir, { recursive: true });

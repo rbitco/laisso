@@ -143,6 +143,11 @@ Runner session. For an approval step, give the drafting Stage
 re-enters the finished draft without changing anything, and Start releases
 the next Stage.
 
+A Ticket may be given a name, in the Import Ticket dialog or later with
+Name or Rename on its page. The name then shows in place of its reference
+or short id in the dashboard, `lasso status`, notifications and terminal
+window names; branches and URLs keep the id, and the tracker never sees it.
+
 Every Ticket runs under a Budget: `rounds` (per repeating Stage),
 `attempts` (per Stage), `wallTime` (per headless Session) and `spend`
 (USD per Ticket). `config.yaml` sets the defaults, a Pipeline may

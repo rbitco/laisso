@@ -163,3 +163,36 @@ describe("lasso add", () => {
     expect(asJson.stages).toHaveLength(9);
   });
 });
+
+// A Ticket's name (LASSO-108): what a human calls it, shown in place of the reference or short id until cleared.
+describe("naming a Ticket", () => {
+  const rename = (lasso: Lasso, id: string, name: unknown) => lasso.api<Response>(`/api/tickets/${id}/name`, { method: "PUT", body: JSON.stringify({ name }), raw: true });
+
+  it("takes a name at intake, trimmed onto one line, and shows it in place of the short id", async () => {
+    const { lasso } = await lassoWithRepos(["app"]);
+    const t = await lasso.api<IntakeResult>("/api/tickets", { method: "POST", body: JSON.stringify({ input: "Review PR 412 for the payment flow", repo: "app", name: "  PR review:\n payments " }) });
+    expect(t).toMatchObject({ name: "PR review: payments", label: "PR review: payments", title: "Review PR 412 for the payment flow", reference: null });
+    expect(t.branch).toContain(t.shortId);
+    const status = await runCli(["status"], lasso);
+    expect(status.stdout).toContain("PR review: payments");
+    expect(status.stdout).not.toContain(t.shortId);
+  });
+
+  it("renames, clears, and refuses a name past 80 characters", async () => {
+    const { lasso } = await lassoWithRepos(["app"]);
+    const t = await lasso.api<IntakeResult>("/api/tickets", { method: "POST", body: JSON.stringify({ input: "Fix the footer", repo: "app" }) });
+    expect(t).toMatchObject({ name: null, label: t.shortId });
+
+    const named = (await (await rename(lasso, t.id, "Footer fix")).json()) as TicketDetail;
+    expect(named).toMatchObject({ name: "Footer fix", label: "Footer fix" });
+    const listed = await lasso.api<TicketView[]>("/api/tickets");
+    expect(listed.find((x) => x.id === t.id)!.label).toBe("Footer fix");
+
+    const tooLong = await rename(lasso, t.id, "x".repeat(81));
+    expect(tooLong.status).toBe(400);
+    expect((await tooLong.json()).error).toBe("name is 81 characters; keep it to 80");
+
+    const cleared = (await (await rename(lasso, t.id, "   ")).json()) as TicketDetail;
+    expect(cleared).toMatchObject({ name: null, label: t.shortId });
+  });
+});

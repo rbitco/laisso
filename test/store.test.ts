@@ -39,12 +39,12 @@ function storeAt(file: string, schema: number): void {
   db.close();
 }
 
-/** A store one migration behind: the last migration (profile_overrides) undone. */
+/** A store one migration behind: the last migration (a Ticket's name) undone. */
 function storeOneBehind(file: string): DatabaseSync {
   new Store(file).close();
   const db = new DatabaseSync(file);
   db.exec("PRAGMA journal_mode = WAL");
-  db.exec("ALTER TABLE tickets DROP COLUMN profile_overrides");
+  db.exec("ALTER TABLE tickets DROP COLUMN name");
   db.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run(String(SCHEMA_VERSION - 1));
   return db;
 }
@@ -101,7 +101,7 @@ describe("the store backup before migrating", () => {
     try {
       expect(db.prepare(`SELECT pipeline FROM pipeline_versions`).all()).toEqual([{ pipeline: "work" }]);
       const columns = (db.prepare(`PRAGMA table_info(tickets)`).all() as Array<{ name: string }>).map((c) => c.name);
-      expect(columns).not.toContain("profile_overrides");
+      expect(columns).not.toContain("name");
     } finally {
       db.close();
     }

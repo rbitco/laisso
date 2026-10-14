@@ -49,7 +49,7 @@ function renderWhich(h: Health): string {
 }
 
 function renderLedger(tickets: TicketView[]): string {
-  const rows = tickets.map((t) => [t.display.label, t.reference ?? t.shortId, t.repo, t.stage.label, t.title, t.display.why]);
+  const rows = tickets.map((t) => [t.display.label, t.label, t.repo, t.stage.label, t.title, t.display.why]);
   const widths = rows[0]!.map((_, i) => Math.max(...rows.map((r) => r[i]!.length)));
   return rows.map((r) => r.map((cell, i) => cell.padEnd(widths[i]!)).join("  ").trimEnd()).join("\n");
 }

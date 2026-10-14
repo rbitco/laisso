@@ -4,7 +4,7 @@ import type { Changes, Change } from "../server/changes.ts";
 import { ConfigError, patchConfigText, writeProfileText, deleteProfileText, repoDefaultText, profileNamers, applyLive, RESTART_KEYS, parseConfig, currentConfig, type Config } from "../server/config.ts";
 import type { LassoHome } from "../server/home.ts";
 import type { Tick } from "../server/tick.ts";
-import type { Tickets, TicketRow } from "../store/tickets.ts";
+import { parseName, type Tickets, type TicketRow } from "../store/tickets.ts";
 import type { PipelineVersions } from "../store/versions.ts";
 import type { Sessions } from "../store/sessions.ts";
 import type { Feedback } from "../store/feedback.ts";
@@ -151,10 +151,21 @@ export function createApp(deps: AppDeps): Hono {
 
   app.post("/api/tickets", async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as Partial<IntakeRequest>;
-    const { ticket, branchExisted } = await intake.admit({ input: body.input ?? "", repo: body.repo, pipeline: body.pipeline });
+    const { ticket, branchExisted } = await intake.admit({ input: body.input ?? "", repo: body.repo, pipeline: body.pipeline, name: body.name });
     await deps.progress.admitted(ticket);
     const result: IntakeResult = { ...ticketView(deps.tickets.get(ticket.id)!, viewContext()), branchExisted };
     return c.json(result, 201);
+  });
+
+  // Name a Ticket (LASSO-108): shown in place of its reference or short id; null or empty clears it. Any state may be renamed.
+  app.put("/api/tickets/:id/name", async (c) => {
+    const ticket = deps.tickets.find(c.req.param("id"));
+    if (!ticket) return c.json({ error: `no Ticket matches ${c.req.param("id")}` }, 404);
+    const body = (await c.req.json().catch(() => ({}))) as { name?: unknown };
+    const named = parseName(body.name);
+    if ("problem" in named) return c.json({ error: named.problem }, 400);
+    deps.tickets.update(ticket.id, { name: named.name });
+    return c.json(ticketDetail(deps.tickets.get(ticket.id)!, viewContext()));
   });
 
   app.get("/api/tickets/:id", (c) => {

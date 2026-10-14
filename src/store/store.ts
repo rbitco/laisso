@@ -212,6 +212,10 @@ const MIGRATIONS: Array<(db: DatabaseSync) => void> = [
   (db) => {
     db.exec(`ALTER TABLE tickets ADD COLUMN profile_overrides TEXT;`);
   },
+  // A Ticket's name (LASSO-108): what a human calls it, shown in place of its reference or short id.
+  (db) => {
+    db.exec(`ALTER TABLE tickets ADD COLUMN name TEXT;`);
+  },
 ];
 
 /** The schema version this Lasso migrates a store up to. */

@@ -69,7 +69,7 @@ export function Triggers({ ticket: t, onExtend, refresh }: { ticket: TicketDetai
   const retryWith = () =>
     openProfileDrawer(stageProfile!.profile, {
       scope: t.repo,
-      context: `Retry Stage ${t.stage.name} of Ticket ${t.reference || t.shortId} under another profile; it stays this Stage's override until cleared`,
+      context: `Retry Stage ${t.stage.name} of Ticket ${t.label} under another profile; it stays this Stage's override until cleared`,
       extra: (name) => ({
         role: "retry-with-choice",
         choices: [

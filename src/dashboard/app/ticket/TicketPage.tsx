@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { TicketDetail, TicketView } from "../../../api/views.ts";
 import type { Drift } from "../../../store/versions.ts";
 import { relative } from "../../metro.ts";
+import { api } from "../api.ts";
 import { useEvents } from "../events.ts";
 import { showNotice } from "../notice.tsx";
 import { pipelineHref } from "../pipelines/href.ts";
@@ -123,12 +124,41 @@ function Sidebar({ list, current }: { list: TicketView[]; current: string }) {
         <div key={t.id} className={"qitem" + (t.id === current ? " sel" : "") + (t.state === "active" ? "" : " ended")} data-id={t.id} onClick={() => (location.hash = t.id)}>
           <span className={"dot " + t.display.state} />
           <div style={{ minWidth: 0 }}>
-            <div className="ref">{(t.reference || t.shortId) + " · " + t.repo + " · " + t.stage.label}</div>
+            <div className="ref">{t.label + " · " + t.repo + " · " + t.stage.label}</div>
             <div className="title">{t.title}</div>
           </div>
         </div>
       ))}
     </>
+  );
+}
+
+/** The name, edited in place: Enter or Save keeps it, Escape or Cancel leaves it, and an empty name clears it. */
+function NameEditor({ ticket: t, done, refresh }: { ticket: TicketDetail; done: () => void; refresh: () => Promise<void> }) {
+  const [value, setValue] = useState(t.name ?? "");
+  const [saving, setSaving] = useState(false);
+  const save = async (ev: FormEvent) => {
+    ev.preventDefault();
+    setSaving(true);
+    try {
+      await api(`/api/tickets/${t.id}/name`, { method: "PUT", body: JSON.stringify({ name: value.trim() || null }) });
+      await refresh();
+      done();
+    } catch (error) {
+      showNotice(message(error));
+      setSaving(false);
+    }
+  };
+  return (
+    <form className="name-editor" data-role="name-editor" onSubmit={save} onKeyDown={(ev) => ev.key === "Escape" && done()}>
+      <input aria-label="Ticket name" autoFocus value={value} maxLength={80} disabled={saving} placeholder={`shown in place of ${t.reference || t.shortId}`} onChange={(ev) => setValue(ev.target.value)} />
+      <button type="submit" className={"sm primary" + (saving ? " busy" : "")} disabled={saving}>
+        Save
+      </button>
+      <button type="button" className="sm" disabled={saving} onClick={done}>
+        Cancel
+      </button>
+    </form>
   );
 }
 
@@ -145,7 +175,9 @@ function TicketBody({ ticket: t, refresh }: { ticket: TicketDetail; refresh: () 
   const triggers = <Triggers ticket={t} onExtend={() => setEditing(true)} refresh={refresh} />;
   return (
     <>
-      <TitleBar ticket={t}>{!t.flag && triggers}</TitleBar>
+      <TitleBar ticket={t} refresh={refresh}>
+        {!t.flag && triggers}
+      </TitleBar>
       <Flow ticket={t} focus={narrowed} onFocus={setFocus} />
       {t.flag && <FlagBox ticket={t}>{triggers}</FlagBox>}
       <div className="dgrid">
@@ -174,19 +206,42 @@ function TicketBody({ ticket: t, refresh }: { ticket: TicketDetail; refresh: () 
   );
 }
 
-/** The reference, repo, branch and PR link over the title and why; the pill, then the levers unless the Flag box has them. */
-function TitleBar({ ticket: t, children }: { ticket: TicketDetail; children: ReactNode }) {
+/**
+ * The name and reference, repo, branch and PR link over the title and why; the pill, then the levers unless the Flag
+ * box has them. Rename edits the name in place.
+ */
+function TitleBar({ ticket: t, refresh, children }: { ticket: TicketDetail; refresh: () => Promise<void>; children: ReactNode }) {
+  const [naming, setNaming] = useState(false);
+  const id = t.reference || t.shortId;
   return (
     <div className="titlebar" data-role="titlebar">
       <div style={{ minWidth: 0 }}>
         <div className="eyebrow">
-          <span>{(t.reference || t.shortId) + " · " + t.repo + " · " + t.branch}</span>
+          {naming ? (
+            <NameEditor ticket={t} done={() => setNaming(false)} refresh={refresh} />
+          ) : (
+            t.name && (
+              <span className="tname" data-role="name">
+                {t.name}
+              </span>
+            )
+          )}
+          {t.name && !naming && " · "}
+          <span>{id + " · " + t.repo + " · " + t.branch}</span>
           {t.pr && (
             <>
               {" · "}
               <a href={t.pr} target="_blank" rel="noopener" data-role="pr-link">
                 PR
               </a>
+            </>
+          )}
+          {!naming && (
+            <>
+              {" · "}
+              <button type="button" className="rename" data-role="rename" onClick={() => setNaming(true)}>
+                {t.name ? "Rename" : "Name"}
+              </button>
             </>
           )}
         </div>

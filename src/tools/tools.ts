@@ -6,7 +6,7 @@ import type { LassoHome } from "../server/home.ts";
 import { listPipelines, loadPipeline, parsePipeline, type Pipeline, type RunnerName } from "../pipeline/load.ts";
 import { DEFAULT_PIPELINE_YAML } from "../pipeline/default.ts";
 import { runTool, type ToolResult } from "../tracker/exec.ts";
-import { overridesOf, shortId, type TicketRow } from "../store/tickets.ts";
+import { overridesOf, ticketLabel, type TicketRow } from "../store/tickets.ts";
 
 /** A Ticket as the tool check reads it: what to call it, its repo, and the profile a human chose per Stage. */
 export interface TicketUse {
@@ -213,8 +213,8 @@ export function homePipelines(home: LassoHome): Pipeline[] {
 }
 
 /** An active Ticket's overrides, from its row. */
-export function ticketUse(row: Pick<TicketRow, "id" | "reference" | "repo" | "profile_overrides">): TicketUse {
-  return { name: row.reference ?? shortId(row.id), repo: row.repo, overrides: overridesOf(row) };
+export function ticketUse(row: Pick<TicketRow, "id" | "reference" | "name" | "repo" | "profile_overrides">): TicketUse {
+  return { name: ticketLabel(row), repo: row.repo, overrides: overridesOf(row) };
 }
 
 /**
@@ -226,7 +226,7 @@ export function storeTickets(home: LassoHome): TicketUse[] {
   let db: DatabaseSync | null = null;
   try {
     db = new DatabaseSync(home.dbFile, { readOnly: true });
-    const rows = db.prepare(`SELECT id, reference, repo, profile_overrides FROM tickets WHERE state = 'active' AND profile_overrides IS NOT NULL`).all() as unknown as Parameters<typeof ticketUse>[0][];
+    const rows = db.prepare(`SELECT id, reference, name, repo, profile_overrides FROM tickets WHERE state = 'active' AND profile_overrides IS NOT NULL`).all() as unknown as Parameters<typeof ticketUse>[0][];
     return rows.map(ticketUse);
   } catch {
     return [];

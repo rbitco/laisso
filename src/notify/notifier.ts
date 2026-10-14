@@ -22,7 +22,7 @@ export function createNotifier(deps: NotifierDeps): Notifier {
   return {
     post(event, ticket, body) {
       if (!deps.config.enabled || !deps.config[event]) return;
-      const title = ticket.reference ? `${ticket.reference} ${ticket.title}` : ticket.title;
+      const title = ticket.name ?? (ticket.reference ? `${ticket.reference} ${ticket.title}` : ticket.title);
       const url = `${deps.baseUrl}/#${ticket.id}`;
       const done = (adapter: string, error: Error | null) => {
         if (error) deps.log.warn("notify.failed", { event, ticket: ticket.id, adapter, error: error.message });

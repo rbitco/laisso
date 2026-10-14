@@ -41,7 +41,7 @@ const ago = (seconds: number) => new Date(Date.now() - seconds * 1000).toISOStri
 
 function ticket(id: string): TicketDetail {
   return {
-    id, shortId: id.slice(-8), title: `Ticket ${id}`, reference: `APP-${id}`, origin: "tracker", body: null, repo: "app", branch: `app-${id}`, worktree: `/wt/${id}`,
+    id, shortId: id.slice(-8), title: `Ticket ${id}`, reference: `APP-${id}`, name: null, label: `APP-${id}`, origin: "tracker", body: null, repo: "app", branch: `app-${id}`, worktree: `/wt/${id}`,
     pipeline: "default", pipelineVersion: 2,
     stage: { name: "plan", kind: "runner", label: "plan", human: false, index: 0, total: 1, repeat: false, override: null },
     state: "active", flag: null, pr: null, display: { state: "quiet", label: "Quiet", why: "waiting" }, queue: null, triggers: [], budget: BUDGET,
@@ -284,9 +284,12 @@ describe("intake", () => {
     await within(confirm).findByText("branch app-7 on web");
     expect(lasso.sent.filter((s) => s.route === "/api/intake/detect").at(-1)).toMatchObject({ body: { input: "APP-7", repo: "web" } });
 
+    const name = within(confirm).getByRole("textbox", { name: "Name" }) as HTMLInputElement;
+    expect(name.placeholder).toBe("optional; shown in place of APP-7");
+    await user.type(name, " Login fix ");
     await user.click(within(confirm).getByRole("button", { name: "Confirm" }));
     await waitFor(() => expect(document.querySelector('[data-role="confirm"]')).toBeNull());
-    expect(lasso.sent.find((s) => s.method === "POST" && s.route === "/api/tickets")!.body).toEqual({ input: "APP-7", repo: "web", pipeline: "frontend" });
+    expect(lasso.sent.find((s) => s.method === "POST" && s.route === "/api/tickets")!.body).toEqual({ input: "APP-7", repo: "web", pipeline: "frontend", name: "Login fix" });
     expect(notice().textContent).toBe("checked out existing branch app-7-fix");
     expect((screen.getByRole("textbox", { name: "Intake" }) as HTMLInputElement).value).toBe("");
     expect(location.hash).toBe("");

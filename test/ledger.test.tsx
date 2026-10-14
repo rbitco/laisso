@@ -28,7 +28,7 @@ const ago = (seconds: number) => new Date(Date.now() - seconds * 1000).toISOStri
 
 function view(id: string, over: Partial<TicketView> = {}): TicketView {
   return {
-    id, shortId: id.slice(-8), title: `Ticket ${id}`, reference: `APP-${id}`, origin: "tracker", body: null, repo: "app", branch: `app-${id}`, worktree: `/wt/${id}`,
+    id, shortId: id.slice(-8), title: `Ticket ${id}`, reference: `APP-${id}`, name: null, label: `APP-${id}`, origin: "tracker", body: null, repo: "app", branch: `app-${id}`, worktree: `/wt/${id}`,
     pipeline: "default", pipelineVersion: 1,
     stage: { name: "implement", kind: "runner", label: "implement", human: false, index: 1, total: 2, repeat: false, override: null },
     state: "active", flag: null, pr: null, display: { state: "quiet", label: "Quiet", why: "waiting on the next tick" }, queue: null, triggers: [], budget: BUDGET,
@@ -88,6 +88,7 @@ describe("the Ledger", () => {
     expect(role(a, "pill").textContent).toBe("Flagged");
     expect(role(a, "pill").className).toBe("pill flagged");
     expect(role(a, "ref").textContent).toBe("APP-A");
+    expect(role(a, "ref").getAttribute("title")).toBeNull();
     expect(role(a, "ref").nextElementSibling!.textContent).toBe("app");
     expect(role(a, "why").textContent).toBe("attempts exhausted");
     expect(within(a).getByLabelText("implement, Stage 2 of 2").tagName.toLowerCase()).toBe("svg");
@@ -102,6 +103,16 @@ describe("the Ledger", () => {
     expect(within(role(a, "quick")).getByRole("button").className).toBe("sm primary");
     expect(within(role(a, "quick")).getByRole("button").textContent).toBe("Retry");
     expect(within(role(row("B"), "quick")).getByRole("button", { name: "Check PR now" }).className).toBe("sm");
+  });
+
+  it("shows a named Ticket by its name, with the reference on hover", async () => {
+    fakeLasso([view("A", { name: "Dark mode", label: "Dark mode" })]);
+    render(<Ledger all={false} visit={1} />);
+    await screen.findByText("Ticket A");
+    const ref = role(row("A"), "ref");
+    expect(ref.textContent).toBe("Dark mode");
+    expect(ref.getAttribute("title")).toBe("APP-A");
+    expect(role(row("A"), "ref").nextElementSibling!.textContent).toBe("app");
   });
 
   it("lists done and Abandoned Tickets, greyed, only with all, and says so when there are none", async () => {

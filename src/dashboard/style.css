@@ -117,6 +117,11 @@ main { padding: 16px; }
 .titlebar { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
 .titlebar h2 { font-size: 18px; margin: 2px 0; text-wrap: balance; }
 .titlebar .eyebrow a { color: var(--accent); }
+.titlebar .tname { color: var(--ink); font-weight: 600; font-size: 12px; text-transform: none; letter-spacing: normal; }
+.titlebar .rename { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer; }
+.titlebar .rename:hover { text-decoration: underline; }
+.name-editor { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-right: 8px; text-transform: none; letter-spacing: normal; }
+.name-editor input { width: min(320px, 70vw); padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: inherit; font: inherit; font-size: 13px; }
 .titlebar .right { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .triggers { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .override { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; color: var(--crit); }
@@ -168,6 +173,9 @@ dialog.modal::backdrop { background: rgba(0,0,0,.4); }
 .confirm .issue { margin: 0; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
 .confirm .notice { margin: 0; }
 .confirm .row { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
+.confirm .name-field { display: grid; gap: 6px; }
+.confirm .field-label { font-weight: 600; font-size: 13px; color: var(--ink); }
+.confirm .name-field input { padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: inherit; font: inherit; }
 .picker { margin: 0; padding: 0; border: 0; min-width: 0; display: grid; gap: 6px; }
 .picker legend { padding: 0; margin-bottom: 6px; font-weight: 600; font-size: 13px; }
 .picker .opts { display: grid; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; max-height: 220px; overflow-y: auto; }

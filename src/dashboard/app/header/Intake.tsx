@@ -95,6 +95,7 @@ export function ConfirmIntake({ detected, onCancel, onAdded }: { detected: Detec
   const { input, detection: d } = detected;
   const [repo, setRepo] = useState(d.repo.suggestion ?? "");
   const [pipeline, setPipeline] = useState(d.pipeline.suggestion || "");
+  const [name, setName] = useState("");
   const [notes, setNotes] = useState(d.notes);
   const [checking, setChecking] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -162,7 +163,7 @@ export function ConfirmIntake({ detected, onCancel, onAdded }: { detected: Detec
     setError("");
     setAdding(true);
     try {
-      onAdded(await api<IntakeResult>("/api/tickets", { method: "POST", body: JSON.stringify({ input, repo, pipeline }) }));
+      onAdded(await api<IntakeResult>("/api/tickets", { method: "POST", body: JSON.stringify({ input, repo, pipeline, name: name.trim() || null }) }));
     } catch (e) {
       setError(message(e));
       setAdding(false);
@@ -177,6 +178,10 @@ export function ConfirmIntake({ detected, onCancel, onAdded }: { detected: Detec
           <div className="kind">{d.kind + (d.reference ? " " + d.reference : "")}</div>
           <p className="issue">{d.title || input}</p>
         </div>
+        <label className="name-field">
+          <span className="field-label">Name</span>
+          <input name="name" value={name} maxLength={80} disabled={adding} placeholder={`optional; shown in place of ${d.reference ?? "the Ticket's id"}`} onChange={(ev) => setName(ev.target.value)} />
+        </label>
         <Picker
           name="repo"
           label="Repo"

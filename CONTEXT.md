@@ -12,6 +12,12 @@ exists for it, the Ticket is linked to that issue; a Ticket that began as a
 prompt has none until Grill publishes a spec.
 _Avoid_: issue, work item, task, card
 
+**Name**:
+What a human calls a Ticket, optional and changeable at any time. Where set,
+it stands in for the Ticket's reference or short id wherever a person reads
+it; the reference stays the Ticket's identity and is never renamed.
+_Avoid_: title (the issue's or prompt's own title), label (tracker labels)
+
 **Intake**:
 The act of turning a tracker reference or a prompt into a Ticket bound to a
 repo, a Pipeline, and a branch in its own worktree.

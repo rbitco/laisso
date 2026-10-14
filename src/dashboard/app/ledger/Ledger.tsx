@@ -69,8 +69,8 @@ function TicketRow({ ticket: t, onPulled }: { ticket: TicketView; onPulled: () =
         {t.display.label || t.display.state}
       </span>
       <div>
-        <div className="ref" data-role="ref">
-          {t.reference || t.shortId}
+        <div className="ref" data-role="ref" title={t.name ? t.reference || t.shortId : undefined}>
+          {t.label}
         </div>
         <div className="repo">{t.repo}</div>
       </div>
