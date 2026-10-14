@@ -25,7 +25,10 @@ export interface RunnerStage {
   profile: string | null;
   human: boolean;
   advance: boolean;
+  /** A built-in Artifact, `file <path>`, or `action <name>` for a check Action (ADR 0014). */
   artifact: string | null;
+  /** The params a check Action Artifact passes, as an action Stage's `with`; set only for one. */
+  artifactWith?: Record<string, string>;
   repeat: "feedback" | null;
   budget: StageBudget;
 }
@@ -134,10 +137,10 @@ function parseStage(pipeline: string, entry: unknown, index: number): Stage {
   if (typeof s.name !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(s.name)) throw new PipelineError(`${where} needs a name of lowercase letters, digits, and hyphens`);
   if (s.prompt !== undefined) text(s.prompt, `${where}: prompt`, fail);
   if (s.skills !== undefined && (!Array.isArray(s.skills) || !s.skills.every((x) => typeof x === "string"))) throw new PipelineError(`${where}: skills must be a list of skill names`);
-  const artifact = s.artifact === undefined ? null : String(s.artifact);
-  if (artifact !== null && !isKnownArtifact(artifact)) throw new PipelineError(`${where}: unknown artifact ${artifact}`);
+  const { artifact, artifactWith } = parseArtifact(s.artifact, where);
   if (s.repeat !== undefined && s.repeat !== "feedback") throw new PipelineError(`${where}: repeat must be feedback`);
   if (s.repeat === "feedback" && artifact === null) throw new PipelineError(`${where}: a repeating Stage needs an artifact as its end condition`);
+  if (s.repeat === "feedback" && artifactWith) throw new PipelineError(`${where}: a repeating Stage cannot end on a check Action yet`);
   if (s.human !== undefined && typeof s.human !== "boolean") throw new PipelineError(`${where}: human must be true or false`);
   if (s.advance !== undefined && typeof s.advance !== "boolean") throw new PipelineError(`${where}: advance must be true or false`);
   const budget = mapping(s.budget, `${where}: budget`, fail);
@@ -155,6 +158,7 @@ function parseStage(pipeline: string, entry: unknown, index: number): Stage {
     human: s.human === true,
     advance: s.advance !== false,
     artifact,
+    ...(artifactWith ? { artifactWith } : {}),
     repeat: s.repeat === "feedback" ? "feedback" : null,
     budget: {
       rounds: budget.rounds === undefined ? undefined : count(budget.rounds, `${where}: budget.rounds`, fail),
@@ -164,6 +168,33 @@ function parseStage(pipeline: string, entry: unknown, index: number): Stage {
   };
 }
 
+const ARTIFACT_ACTION_FIELDS = new Set(["action", "with"]);
+
+/** A Stage's artifact: a name as written, or `{ action, with }`, which reads as `action <name>` with its params. */
+function parseArtifact(value: unknown, where: string): { artifact: string | null; artifactWith?: Record<string, string> } {
+  if (value === undefined || value === null) return { artifact: null };
+  if (isPlainObject(value)) {
+    const o = value as Record<string, unknown>;
+    for (const key of Object.keys(o)) if (!ARTIFACT_ACTION_FIELDS.has(key)) throw new PipelineError(`${where}: ${key} is not a field of a check Action artifact`);
+    if (typeof o.action !== "string") throw new PipelineError(`${where}: a check Action artifact needs action: <name>`);
+    return { artifact: `action ${o.action}`, artifactWith: parseWith(o.with, where, "artifact.with") };
+  }
+  const artifact = String(value);
+  if (!isKnownArtifact(artifact)) throw new PipelineError(`${where}: unknown artifact ${artifact}`);
+  return actionArtifact(artifact) === null ? { artifact } : { artifact, artifactWith: {} };
+}
+
+/** A `with:` mapping of param to single value. */
+function parseWith(value: unknown, where: string, field: string): Record<string, string> {
+  if (value !== undefined && !isPlainObject(value)) throw new PipelineError(`${where}: ${field} must be a mapping of param to value`);
+  const params: Record<string, string> = {};
+  for (const [key, v] of Object.entries((value as Record<string, unknown> | undefined) ?? {})) {
+    if (v === null || typeof v === "object") throw new PipelineError(`${where}: ${field}.${key} must be a single value`);
+    params[key] = String(v);
+  }
+  return params;
+}
+
 function parseActionStage(s: Record<string, unknown>, where: string): ActionStage {
   // The form before ADR 0010; startup migration rewrites it, so only a hand edit meets this.
   if (s.status !== undefined) throw new PipelineError(`${where}: status is now a param; write with: { status: ${String(s.status)} }`);
@@ -171,12 +202,7 @@ function parseActionStage(s: Record<string, unknown>, where: string): ActionStag
   const action = String(s.action);
   if (!ACTION_NAME.test(action)) throw new PipelineError(`${where}: ${action} is not an Action name`);
   if (s.name !== undefined && (typeof s.name !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(s.name))) throw new PipelineError(`${where} needs a name of lowercase letters, digits, and hyphens`);
-  if (s.with !== undefined && !isPlainObject(s.with)) throw new PipelineError(`${where}: with must be a mapping of param to value`);
-  const params: Record<string, string> = {};
-  for (const [key, value] of Object.entries((s.with as Record<string, unknown> | undefined) ?? {})) {
-    if (value === null || typeof value === "object") throw new PipelineError(`${where}: with.${key} must be a single value`);
-    params[key] = String(value);
-  }
+  const params = parseWith(s.with, where, "with");
   return { kind: "action", name: typeof s.name === "string" ? s.name : defaultActionName(action, params), action, with: params };
 }
 
@@ -192,15 +218,19 @@ export function defaultActionName(action: string, params: Record<string, string>
  */
 export function checkActions(pipeline: Pipeline, actions: Record<string, ActionConfig>): void {
   for (const stage of pipeline.stages) {
-    if (stage.kind !== "action") continue;
     const where = `Pipeline ${pipeline.name} Stage ${stage.name}`;
-    const action = actions[stage.action];
-    if (!action) throw new PipelineError(`${where}: no Action named ${stage.action} in config.yaml`);
-    const missing = action.params.filter((p) => !(p in stage.with));
-    if (missing.length) throw new PipelineError(`${where}: ${stage.action} needs ${missing.map((p) => `with.${p}`).join(", ")}`);
-    const unknown = Object.keys(stage.with).filter((p) => !action.params.includes(p));
-    if (unknown.length) throw new PipelineError(`${where}: ${stage.action} takes no param ${unknown.join(", ")}`);
+    if (stage.kind === "action") checkParams(where, stage.action, stage.with, "with", actions);
+    else if (stage.artifact && stage.artifactWith) checkParams(`${where} artifact`, actionArtifact(stage.artifact)!, stage.artifactWith, "with", actions);
   }
+}
+
+function checkParams(where: string, name: string, given: Record<string, string>, field: string, actions: Record<string, ActionConfig>): void {
+  const action = actions[name];
+  if (!action) throw new PipelineError(`${where}: no Action named ${name} in config.yaml`);
+  const missing = action.params.filter((p) => !(p in given));
+  if (missing.length) throw new PipelineError(`${where}: ${name} needs ${missing.map((p) => `${field}.${p}`).join(", ")}`);
+  const unknown = Object.keys(given).filter((p) => !action.params.includes(p));
+  if (unknown.length) throw new PipelineError(`${where}: ${name} takes no param ${unknown.join(", ")}`);
 }
 
 /**
@@ -240,7 +270,13 @@ export function checkProfiles(pipeline: Pipeline, profiles: Record<string, Profi
 }
 
 export function isKnownArtifact(artifact: string): boolean {
-  return (ARTIFACTS as readonly string[]).includes(artifact) || fileArtifact(artifact) !== null;
+  return (ARTIFACTS as readonly string[]).includes(artifact) || fileArtifact(artifact) !== null || actionArtifact(artifact) !== null;
+}
+
+/** The Action an `action <name>` artifact names, or null when the artifact is not a check Action. */
+export function actionArtifact(artifact: string): string | null {
+  const m = /^action\s+(\S+)$/.exec(artifact);
+  return m && ACTION_NAME.test(m[1]!) ? m[1]! : null;
 }
 
 /** The worktree-relative path of a `file <path>` artifact, or null when the artifact is not one (or escapes the worktree). */

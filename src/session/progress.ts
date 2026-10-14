@@ -6,7 +6,7 @@ import type { Sessions, EndedReason } from "../store/sessions.ts";
 import type { Notifier } from "../notify/notifier.ts";
 import { type ActionStage, type Pipeline, type RunnerStage, type Stage } from "../pipeline/load.ts";
 import type { Mirror } from "../tracker/mirror.ts";
-import { checkArtifact, type PrProbe } from "../artifact/check.ts";
+import { checkArtifact, type ActionProbe, type PrProbe } from "../artifact/check.ts";
 import type { Teardown } from "./teardown.ts";
 
 /** A Trigger that cannot pull right now, with the reason for the human. */
@@ -39,6 +39,8 @@ export interface ProgressDeps {
   mirror: Mirror;
   /** The Ticket's PR for the pr-* artifacts; wired once the Review loop exists. */
   prProbe: (ticket: TicketRow) => PrProbe;
+  /** Runs a check Action artifact for the Ticket at a Stage (ADR 0014). */
+  actionProbe: (ticket: TicketRow, stage: string) => ActionProbe;
   teardown: Teardown;
 }
 
@@ -208,7 +210,7 @@ export class Progress {
   async markDone(ticket: TicketRow, override: boolean): Promise<TicketRow> {
     const { stage } = this.exitStage(ticket);
     if (!override && stage.kind === "runner" && stage.artifact) {
-      const verdict = await checkArtifact(stage.artifact, ticket.worktree, this.deps.prProbe(ticket));
+      const verdict = await checkArtifact(stage.artifact, ticket.worktree, this.deps.prProbe(ticket), this.deps.actionProbe(ticket, stage.name), stage.artifactWith);
       if (!verdict.present) throw new ArtifactWarning(stage.artifact, verdict.detail ?? "missing");
     }
     // The check awaited; the Ticket is re-read so a Trigger that landed meanwhile is not applied twice.

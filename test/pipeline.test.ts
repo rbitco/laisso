@@ -24,6 +24,10 @@ const FAILING: Array<[string, string, RegExp]> = [
   ["two stages with one name", STAGES("  - name: x\n    prompt: p\n  - name: x\n    prompt: q\n"), /has two Stages named x/],
   ["an unknown artifact", STAGES("  - name: x\n    prompt: p\n    artifact: pr-approved\n"), /unknown artifact pr-approved/],
   ["a file artifact that escapes the worktree", STAGES("  - name: x\n    prompt: p\n    artifact: file ../etc/passwd\n"), /unknown artifact file \.\.\/etc\/passwd/],
+  ["a check Action artifact naming no Action name", STAGES("  - name: x\n    prompt: p\n    artifact: action Ci Green\n"), /unknown artifact action Ci Green/],
+  ["a check Action artifact object without action", STAGES("  - name: x\n    prompt: p\n    artifact: { with: { file: a } }\n"), /a check Action artifact needs action: <name>/],
+  ["a check Action artifact object with an unknown key", STAGES("  - name: x\n    prompt: p\n    artifact: { action: grep, params: { file: a } }\n"), /params is not a field of a check Action artifact/],
+  ["a check Action artifact's param that is a list", STAGES("  - name: x\n    prompt: p\n    artifact: { action: grep, with: { file: [a] } }\n"), /artifact\.with\.file must be a single value/],
   ["a repeat trigger other than feedback", STAGES("  - name: x\n    prompt: p\n    repeat: always\n"), /repeat must be feedback/],
   ["a repeating stage with no artifact to end it", STAGES("  - name: x\n    prompt: p\n    repeat: feedback\n"), /a repeating Stage needs an artifact/],
   ["two transitions to one status", STAGES("  - action: tracker.transition\n    with: { status: Done }\n  - action: tracker.transition\n    with: { status: Done }\n"), /has two Stages named transition-done/],
@@ -112,6 +116,28 @@ describe("checkActions", () => {
     expect(check("  - action: notify\n")).toThrow(/Stage notify: notify needs with\.channel/);
     expect(check("  - action: notify\n    with: { channel: ops, loud: true }\n")).toThrow(/notify takes no param loud/);
     expect(check("  - action: tracker.transition\n    with: { status: Done }\n")).toThrow(/Stage transition-done: no Action named tracker\.transition in config\.yaml/);
+  });
+});
+
+describe("a check Action artifact", () => {
+  const actions = { "ci-green": { run: "true", params: [], timeout: "5m" }, grep: { run: "true", params: ["file", "pattern"], timeout: "5m" } };
+  const check = (body: string) => () => checkActions(parsePipeline("p", STAGES(body)), actions);
+
+  it("reads as action <name>, with its params from the object form", () => {
+    const stages = parsePipeline("p", STAGES("  - name: a\n    prompt: p\n    artifact: action ci-green\n  - name: b\n    prompt: p\n    artifact:\n      action: grep\n      with: { file: CHANGELOG.md, pattern: 1 }\n")).stages;
+    expect(stages[0]).toMatchObject({ artifact: "action ci-green", artifactWith: {} });
+    expect(stages[1]).toMatchObject({ artifact: "action grep", artifactWith: { file: "CHANGELOG.md", pattern: "1" } });
+    expect(check("  - name: a\n    prompt: p\n    artifact: { action: grep, with: { file: a, pattern: b } }\n")).not.toThrow();
+  });
+
+  it("is checked against config's Actions like an action Stage", () => {
+    expect(check("  - name: a\n    prompt: p\n    artifact: action deploy-green\n")).toThrow(/Pipeline p Stage a artifact: no Action named deploy-green in config\.yaml/);
+    expect(check("  - name: a\n    prompt: p\n    artifact: action grep\n")).toThrow(/Stage a artifact: grep needs with\.file, with\.pattern/);
+    expect(check("  - name: a\n    prompt: p\n    artifact: { action: ci-green, with: { loud: yes } }\n")).toThrow(/ci-green takes no param loud/);
+  });
+
+  it("cannot end a repeating Stage yet", () => {
+    expect(() => parsePipeline("p", STAGES("  - name: a\n    prompt: p\n    repeat: feedback\n    artifact: action ci-green\n"))).toThrow(/a repeating Stage cannot end on a check Action yet/);
   });
 });
 

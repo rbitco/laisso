@@ -13,6 +13,7 @@ import type { Progress } from "./progress.ts";
 import { adapterFor } from "../runner/adapters.ts";
 import { requestFor, type RunRequest, type Outcome } from "../runner/adapter.ts";
 import { checkArtifact } from "../artifact/check.ts";
+import type { ActionChecks } from "../artifact/action-check.ts";
 import { parseDuration } from "../duration.ts";
 import type { Budgets } from "../budget/budgets.ts";
 import type { Queue } from "./queue.ts";
@@ -33,6 +34,8 @@ export interface RunsDeps {
   budgets: Budgets;
   queue: Queue;
   review: Review;
+  /** Runs a check Action artifact once a Runner has succeeded (ADR 0014). */
+  checks: ActionChecks;
   /** Hears each stdout chunk once it is on disk, so a watching dashboard can read it. */
   stdoutWritten?: (ticket: string, session: string) => void;
   /** Hears a Session end outside shutdown, once its Ticket has advanced or Flagged, so the next Stage need not wait for the timer. */
@@ -350,6 +353,8 @@ export class Runs {
     if (reason === "shutdown" || this.closing || live.takenOver) verdict = null;
     else if (live.spawnError) verdict = { flag: "runner.unavailable", detail: live.spawnError, ...(live.notOnPath ? { retry: false as const } : {}) };
     else verdict = await this.judge(live, end);
+    // Lasso began shutting down while the artifact was checked: the check was cut short, so its verdict is not one.
+    if (this.closing) verdict = null;
     const row = this.deps.sessions.end(sessionId, end);
     this.deps.log.info("session.ended", { session: sessionId, ticket: row.ticket, stage: row.stage, outcome: row.outcome, reason: row.ended_reason, cost: row.cost_usd });
     if (verdict) await this.apply(row, verdict);
@@ -367,8 +372,8 @@ export class Runs {
     if (!ticket) return "wait";
     try {
       if (stage.repeat) return await this.deps.review.judge(ticket, stage, live.request.sessionId);
-      const artifact = await checkArtifact(stage.artifact, live.request.cwd, () => this.deps.review.probe(ticket));
-      return artifact.present ? "advance" : { flag: "artifact.missing", detail: `${stage.artifact}: ${artifact.detail}` };
+      const artifact = await checkArtifact(stage.artifact, live.request.cwd, () => this.deps.review.probe(ticket), this.deps.checks.probe(ticket, stage.name), stage.artifactWith);
+      return artifact.present ? "advance" : { flag: artifact.broken ? "artifact.error" : "artifact.missing", detail: `${stage.artifact}: ${artifact.detail}` };
     } catch (error) {
       // The PR could not be read (gh down, rate limited): the Session still ends, and a human is told why.
       return { flag: "review.poll_failed", detail: error instanceof Error ? error.message : String(error) };

@@ -89,10 +89,11 @@ current Pipeline is offered at Intake.
 _Avoid_: revision, snapshot, release, disabled
 
 **Artifact**:
-What a Stage must have produced for Lasso to count it done, named from a
-fixed catalogue such as a spec on the tracker, commits on the branch, an
-open PR, or a merged PR. Checked after a Runner succeeds, and with
-warn-and-override when a human marks a Stage done.
+What a Stage must have produced for Lasso to count it done: either one
+Lasso knows, such as a spec on the tracker, commits on the branch, an open
+PR, or a merged PR, or a check Action, met when it exits 0. Checked after a
+Runner succeeds, and with warn-and-override when a human marks a Stage
+done. A repeating Stage ends when its Artifact is met.
 _Avoid_: output, deliverable, result, check
 
 **Runner**:

@@ -30,6 +30,7 @@ import { findPackageRoot } from "../package-root.ts";
 import { startupToolCheck } from "../tools/startup.ts";
 import { chooseTerminal } from "../session/openers.ts";
 import { VersionCheck, npmLatest } from "./version-check.ts";
+import { ActionChecks } from "../artifact/action-check.ts";
 
 export interface ServeOptions {
   portFlag?: number;
@@ -109,12 +110,13 @@ export async function serve(opts: ServeOptions): Promise<number> {
   });
   const prs = new PullRequests(log);
   const teardown = new Teardown({ config, home, tickets, log, prs });
-  const progress: Progress = new Progress({ home, tickets, versions, sessions, log, notifier, mirror, prProbe: (ticket) => () => review.probe(ticket), teardown });
+  const checks = new ActionChecks({ config, home, log });
+  const progress: Progress = new Progress({ home, tickets, versions, sessions, log, notifier, mirror, prProbe: (ticket) => () => review.probe(ticket), actionProbe: (ticket, stage) => checks.probe(ticket, stage), teardown });
   const review: Review = new Review({ tickets, sessions, feedback, progress, prs, log });
   const terminal = new Terminal({ config, home, sessions, log, flag: (ticket, reason, detail) => progress.flag(ticket, reason, detail) });
   const budgets = new Budgets({ config, sessions });
   const queue = new Queue({ home, tickets, sessions, progress, log, cap: config.concurrency });
-  const runs = new Runs({ config, home, tickets, sessions, log, progress, budgets, queue, review, stdoutWritten: (ticket, session) => changes.emit({ kind: "stdout", ticket, session }), ended: () => tick.kick("session-end") });
+  const runs = new Runs({ config, home, tickets, sessions, log, progress, budgets, queue, review, checks, stdoutWritten: (ticket, session) => changes.emit({ kind: "stdout", ticket, session }), ended: () => tick.kick("session-end") });
   const actions = new Actions({
     config,
     home,
@@ -188,7 +190,7 @@ export async function serve(opts: ServeOptions): Promise<number> {
     const finished = new Promise<void>((done) => server.close(() => done()));
     // The ended streams leave keep-alive sockets behind once their last bytes are out; drop them then.
     setTimeout(() => (server as { closeIdleConnections?: () => void }).closeIdleConnections?.(), 50).unref();
-    void startup.then(() => tick.settle()).then(() => Promise.all([runs.shutdown(), actions.shutdown()])).then(() => mirror.settle()).then(() => finished).then(() => {
+    void startup.then(() => tick.settle()).then(() => Promise.all([runs.shutdown(), actions.shutdown(), checks.shutdown()])).then(() => mirror.settle()).then(() => finished).then(() => {
       store.close();
       releaseLock();
       resolveExit(0);
