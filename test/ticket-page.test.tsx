@@ -358,6 +358,22 @@ describe("the Ticket's exits", () => {
   });
 });
 
+describe("the Budget gauges on a human Stage", () => {
+  it("grey out wall time and spend as not tracked, keeping what earlier Sessions spent", async () => {
+    const untracked = (spend: number): BudgetView => ({ ...BUDGET, wallTime: { ...BUDGET.wallTime, untracked: true }, spend: { ...BUDGET.spend, used: spend, untracked: true } });
+    fakeLasso([ticket("A", { budget: untracked(0) }), ticket("B", { budget: untracked(1.25) })]);
+    await showPage("A");
+    const gauge = (k: string) => document.querySelector<HTMLElement>(`[data-gauge="${k}"]`)!;
+    expect(gauge("wallTime").textContent).toBe("not trackedwall time");
+    expect(gauge("spend").textContent).toBe("not tracked*spend");
+    expect(gauge("spend").className).toBe("gauge untracked");
+    expect(gauge("spend").title).toMatch(/^not tracked in a terminal Session/);
+    expect(gauge("attempts").className).toBe("gauge");
+    await showPage("B");
+    expect([...document.querySelectorAll('[data-gauge="spend"]')].at(-1)!.textContent).toBe("$1.25 so far*spend");
+  });
+});
+
 describe("the Budget editor", () => {
   it("opens from a gauge with the Ticket's own limits, refuses a non-number, and sends Extend with every field", async () => {
     const lasso = fakeLasso([ticket("A")]);

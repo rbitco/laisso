@@ -90,6 +90,8 @@ describe("a human Stage", () => {
     // The Runner exiting (or never starting) does not end the row.
     const still = await detailOf(lasso, ticket.id);
     expect(still.session!.running).toBe(true);
+    // A terminal Session adds nothing to wall time or spend, so the gauges say so.
+    expect([still.budget.wallTime.untracked, still.budget.spend.untracked, still.budget.attempts.untracked]).toEqual([true, true, undefined]);
 
     const cli = await runCli(["status", ticket.id], lasso);
     expect(cli.stdout).toContain("Needs you");

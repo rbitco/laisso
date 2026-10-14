@@ -30,6 +30,6 @@ export class Budgets {
   }
 
   view(ticket: TicketRow, pipeline: Pipeline | null, stage: Stage | null, rows?: SessionRow[]): BudgetView {
-    return budgetView(this.resolve(ticket, pipeline, stage), this.usage(ticket, pipeline, stage, rows), ticket);
+    return budgetView(this.resolve(ticket, pipeline, stage), this.usage(ticket, pipeline, stage, rows), ticket, stage);
   }
 }

@@ -8,17 +8,24 @@ import { message, ticketRoute } from "./ticket.ts";
 
 type GaugeKey = keyof TicketBudget;
 
-/** The four gauges in the order shown: key, name, and the used/limit text. */
+/**
+ * The four gauges in the order shown: key, name, and the used/limit text. On a human Stage wall time and spend are
+ * not tracked; spend still says what earlier Sessions spent, as that counts against the Ticket.
+ */
 export const GAUGES: Array<[GaugeKey, string, (g: BudgetView[GaugeKey]) => string]> = [
   ["rounds", "Rounds", (g) => g.used + "/" + g.limit],
   ["attempts", "attempts", (g) => g.used + "/" + g.limit],
-  ["wallTime", "wall time", (g) => duration(g.used) + "/" + ("limitText" in g ? g.limitText : "")],
-  ["spend", "spend", (g) => "$" + g.used.toFixed(2) + "/$" + g.limit],
+  ["wallTime", "wall time", (g) => (g.untracked ? "not tracked" : duration(g.used) + "/" + ("limitText" in g ? g.limitText : ""))],
+  ["spend", "spend", (g) => (g.untracked ? (g.used > 0 ? "$" + g.used.toFixed(2) + " so far" : "not tracked") : "$" + g.used.toFixed(2) + "/$" + g.limit)],
 ];
+
+const UNTRACKED = "not tracked in a terminal Session: Lasso reads none of its output";
 
 /** The share of a gauge used, 1 when it has no limit. */
 const shareOf = (g: GaugeView) => (g.limit > 0 ? g.used / g.limit : 1);
 const level = (share: number) => (share >= 1 ? "over" : share >= 0.7 ? "warn" : "");
+/** A gauge's colour class: greyed when untracked, else by the share used. */
+const classOf = (g: GaugeView) => (g.untracked ? "untracked" : level(shareOf(g)));
 
 /** One ring: the arc is the share used, amber from 70 %, red at the limit. */
 function Ring({ gauge, size }: { gauge: GaugeView; size: number }) {
@@ -26,7 +33,7 @@ function Ring({ gauge, size }: { gauge: GaugeView; size: number }) {
   const c = 2 * Math.PI * r;
   const share = Math.min(1, shareOf(gauge));
   return (
-    <svg viewBox={`0 0 ${size} ${size}`} className={level(share)}>
+    <svg viewBox={`0 0 ${size} ${size}`} className={classOf(gauge)}>
       <circle className="track" cx={size / 2} cy={size / 2} r={r} />
       <circle className="arc" cx={size / 2} cy={size / 2} r={r} strokeDasharray={c} strokeDashoffset={c * (1 - share)} />
     </svg>
@@ -52,9 +59,9 @@ export function Gauges({ budget, onOpen }: { budget: BudgetView; onOpen: () => v
     <div className="gauges" data-role="gauges">
       {GAUGES.map(([k, name, text]) => {
         const g = budget[k];
-        const cls = level(shareOf(g));
+        const cls = classOf(g);
         return (
-          <div key={k} className={"gauge" + (cls ? " " + cls : "")} data-gauge={k} title={`set ${SOURCE[g.source]}; click to extend`} onClick={onOpen}>
+          <div key={k} className={"gauge" + (cls ? " " + cls : "")} data-gauge={k} title={(g.untracked ? UNTRACKED + "; " : "") + `set ${SOURCE[g.source]}; click to extend`} onClick={onOpen}>
             <Ring gauge={g} size={56} />
             <span className="value">{text(g) + (g.source === "ticket" ? "*" : "")}</span>
             <span>{name}</span>

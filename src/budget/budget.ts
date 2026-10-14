@@ -124,6 +124,8 @@ export interface GaugeView {
   used: number;
   limit: number;
   source: BudgetLayer;
+  /** Set on a human Stage for what its terminal Session never adds to: wall time and spend (Lasso reads no terminal output). */
+  untracked?: true;
 }
 
 /** The four ring gauges plus the Ticket layer the inline editor edits. Wall time is in milliseconds. */
@@ -135,12 +137,13 @@ export interface BudgetView {
   ticket: TicketBudget;
 }
 
-export function budgetView(budget: Budget, usage: Usage, ticket: TicketRow): BudgetView {
+export function budgetView(budget: Budget, usage: Usage, ticket: TicketRow, stage: Stage | null = null): BudgetView {
+  const untracked = stage?.kind === "runner" && stage.human ? { untracked: true as const } : {};
   return {
     rounds: { used: usage.rounds, limit: budget.rounds.value, source: budget.rounds.source },
     attempts: { used: usage.attempts, limit: budget.attempts.value, source: budget.attempts.source },
-    wallTime: { used: usage.wallTimeMs, limit: parseDuration(budget.wallTime.value), source: budget.wallTime.source, limitText: budget.wallTime.value },
-    spend: { used: usage.spend, limit: budget.spend.value, source: budget.spend.source },
+    wallTime: { used: usage.wallTimeMs, limit: parseDuration(budget.wallTime.value), source: budget.wallTime.source, limitText: budget.wallTime.value, ...untracked },
+    spend: { used: usage.spend, limit: budget.spend.value, source: budget.spend.source, ...untracked },
     ticket: ticketBudget(ticket),
   };
 }
