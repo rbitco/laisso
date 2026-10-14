@@ -21,6 +21,14 @@ class FakeEventSource extends EventTarget {
 }
 vi.stubGlobal("EventSource", FakeEventSource);
 
+// jsdom has <dialog> but not its modal methods; these stand in for what the confirm step uses.
+HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) {
+  this.open = true;
+};
+HTMLDialogElement.prototype.close ??= function (this: HTMLDialogElement) {
+  this.open = false;
+};
+
 const BUDGET: BudgetView = {
   rounds: { used: 0, limit: 3, source: "global" },
   attempts: { used: 1, limit: 3, source: "global" },
@@ -65,6 +73,8 @@ function fakeLasso() {
     changes: [] as TickResult["changes"],
     branchExisted: false,
     held: null as Promise<void> | null,
+    // Holds intake's detect and add requests open, so their busy states can be seen.
+    intakeHeld: null as Promise<void> | null,
     version: { version: "1.2.0", notice: { kind: "none" }, text: null } as VersionView,
     build: "1.2.3",
   };
@@ -75,6 +85,7 @@ function fakeLasso() {
     sent.push({ method, route: url, body });
     if (url === "/api/tickets" || url === "/api/tickets?all=1") {
       if (method === "GET") return json(state.tickets);
+      if (state.intakeHeld) await state.intakeHeld;
       return json({ ...ticket("N"), branch: "app-7-fix", branchExisted: state.branchExisted } satisfies IntakeResult);
     }
     const one = /^\/api\/tickets\/([^/]+)$/.exec(url);
@@ -87,6 +98,7 @@ function fakeLasso() {
     if (url === "/api/tick") return json(state.tick);
     if (url === "/api/version") return json(state.version);
     if (url === "/api/check-now") return json({ at: ago(0), changes: state.changes } satisfies TickResult);
+    if (url === "/api/intake/detect" && state.intakeHeld) await state.intakeHeld;
     if (url === "/api/intake/detect") return json(body.repo ? { ...DETECTED, notes: [`branch app-7 on ${body.repo}`] } : DETECTED);
     if (url === "/api/pipelines") return json([{ name: "default", file: "/p/default.yaml", profile: null, problem: null, stages: [] }] satisfies PipelineListing[]);
     if (url === "/api/pipelines/default/versions/2") return json(VERSION);
@@ -100,6 +112,8 @@ function fakeLasso() {
 const send = (kind: string, data: unknown = {}) => act(() => void events().dispatchEvent(new MessageEvent(kind, { data: JSON.stringify(data) })));
 const dot = () => document.querySelector<HTMLElement>('[data-role="tick-dot"]')!;
 const notice = () => document.querySelector('[data-role="notice"]')!;
+/** The value of the checked radio in the confirm step's group named `group`, or null. */
+const chosen = (confirm: HTMLElement, group: string) => (within(within(confirm).getByRole("radiogroup", { name: group })).getAllByRole("radio") as HTMLInputElement[]).find((r) => r.checked)?.value ?? null;
 const section = (role: string) => document.querySelector<HTMLElement>(`[data-role="${role}"]`)!;
 const shownViews = () => ["ledger", "detail", "pipelines", "config"].filter((r) => !section(r).hidden);
 const navOn = () => [...document.querySelectorAll("nav.views a.on")].map((a) => a.textContent);
@@ -252,22 +266,23 @@ describe("intake", () => {
     await user.click(screen.getByRole("button", { name: "Add" }));
     const confirm = section("confirm");
     await within(confirm).findByText("jira APP-7");
-    expect(lasso.sent.at(-1)).toMatchObject({ method: "POST", route: "/api/intake/detect", body: { input: "APP-7" } });
+    expect(lasso.sent.filter((s) => s.route === "/api/intake/detect").at(-1)).toMatchObject({ method: "POST", body: { input: "APP-7" } });
     expect(within(confirm).getByText("Fix the login page")).toBeTruthy();
     expect(within(confirm).getByText("pick a repo to see the branch")).toBeTruthy();
-    const repo = within(confirm).getByRole("combobox", { name: "repo" }) as HTMLSelectElement;
-    const pipeline = within(confirm).getByRole("combobox", { name: "pipeline" }) as HTMLSelectElement;
-    expect([...repo.options].map((o) => o.textContent)).toEqual(["pick one", "app", "web"]);
-    expect(repo.value).toBe("");
-    expect(pipeline.value).toBe("default");
+    const repos = within(within(confirm).getByRole("radiogroup", { name: "Repo" })).getAllByRole("radio") as HTMLInputElement[];
+    expect(repos.map((r) => r.value)).toEqual(["app", "web"]);
+    expect(repos.filter((r) => r.checked)).toEqual([]);
+    expect(chosen(confirm, "Pipeline")).toBe("default");
 
+    expect(confirm.closest("dialog")!.open).toBe(true);
+    expect(screen.getByRole("dialog", { name: "Import Ticket" })).toBe(confirm.closest("dialog"));
     await user.click(within(confirm).getByRole("button", { name: "Confirm" }));
-    expect(notice().textContent).toBe("repo is ambiguous: pick one");
+    expect(within(confirm).getByText("repo is ambiguous: pick one")).toBeTruthy();
 
-    await user.selectOptions(repo, "web");
-    expect(pipeline.value).toBe("frontend");
+    await user.click(repos[1]!);
+    expect(chosen(confirm, "Pipeline")).toBe("frontend");
     await within(confirm).findByText("branch app-7 on web");
-    expect(lasso.sent.at(-1)).toMatchObject({ route: "/api/intake/detect", body: { input: "APP-7", repo: "web" } });
+    expect(lasso.sent.filter((s) => s.route === "/api/intake/detect").at(-1)).toMatchObject({ body: { input: "APP-7", repo: "web" } });
 
     await user.click(within(confirm).getByRole("button", { name: "Confirm" }));
     await waitFor(() => expect(document.querySelector('[data-role="confirm"]')).toBeNull());
@@ -288,6 +303,57 @@ describe("intake", () => {
     vi.stubGlobal("fetch", async () => new Response(JSON.stringify({ error: "nothing to intake" }), { status: 400 }));
     await user.click(screen.getByRole("button", { name: "Add" }));
     await waitFor(() => expect(notice().textContent).toBe("nothing to intake"));
+  });
+
+  it("says when no repo can take the Ticket, links to Config, and holds Confirm", async () => {
+    fakeLasso();
+    const answer = fetch;
+    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) =>
+      url === "/api/intake/detect" ? new Response(JSON.stringify({ ...DETECTED, repo: { suggestion: null, choices: [] } })) : answer(url, init),
+    );
+    render(<App />);
+    const user = userEvent.setup();
+    await user.type(screen.getByRole("textbox", { name: "Intake" }), "APP-7");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    const confirm = section("confirm");
+    await within(confirm).findByText("No JIRA repo is set up yet.", { exact: false });
+    expect(within(confirm).getByRole("link", { name: "Add one in Config" }).getAttribute("href")).toBe("#config");
+    expect(within(confirm).getByRole("button", { name: "Confirm" })).toHaveProperty("disabled", true);
+  });
+
+  it("shows Add, the repo check and Confirm as busy, with their buttons disabled, until each answers", async () => {
+    const lasso = fakeLasso();
+    let release = () => {};
+    const hold = () => (lasso.state.intakeHeld = new Promise<void>((r) => (release = r)));
+    render(<App />);
+    const user = userEvent.setup();
+    await user.type(screen.getByRole("textbox", { name: "Intake" }), "APP-7");
+    hold();
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    const looking = await screen.findByRole("button", { name: "Looking up" });
+    expect(looking).toHaveProperty("disabled", true);
+    expect(looking.className).toContain("busy");
+    await act(async () => release());
+
+    const confirm = section("confirm");
+    await within(confirm).findByText("jira APP-7");
+    expect(screen.getByRole("button", { name: "Add" })).toHaveProperty("disabled", false);
+    hold();
+    await user.click(within(confirm).getByRole("radio", { name: "web" }));
+    expect(within(confirm).getByText("checking web for an existing branch")).toBeTruthy();
+    expect(within(confirm).getByRole("button", { name: "Confirm" })).toHaveProperty("disabled", true);
+    await act(async () => release());
+    await within(confirm).findByText("branch app-7 on web");
+
+    hold();
+    await user.click(within(confirm).getByRole("button", { name: "Confirm" }));
+    const adding = within(confirm).getByRole("button", { name: "Adding" });
+    expect(adding).toHaveProperty("disabled", true);
+    expect(adding.className).toContain("busy");
+    expect(within(confirm).getByRole("button", { name: "Cancel" })).toHaveProperty("disabled", true);
+    expect(within(confirm).getByRole("radio", { name: "web" }).matches(":disabled")).toBe(true);
+    await act(async () => release());
+    await waitFor(() => expect(document.querySelector('[data-role="confirm"]')).toBeNull());
   });
 });
 
