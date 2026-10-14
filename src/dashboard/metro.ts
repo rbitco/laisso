@@ -10,12 +10,13 @@ import type { RunnerName } from "../pipeline/load.ts";
 /** A Ticket as the diagram reads it: the Ledger's view, with the Sessions the detail adds. */
 export type MetroTicket = TicketView & { sessions?: SessionView[] };
 
-type Colour = "good" | "crit" | "warn" | "run" | "accent" | "muted";
+type Colour = "good" | "crit" | "warn" | "run" | "accent" | "muted" | "done";
 
 /** The colour key each display state paints the current station and the track behind it. */
 export const STATE_COLOUR: Record<DisplayState, Colour> = { flagged: "crit", needs_you: "warn", holding: "warn", ready: "warn", running: "run", queued: "run", quiet: "good", done: "good", abandoned: "muted" };
 const OUTCOME_COLOUR: Record<string, Colour> = { succeeded: "good", failed: "crit", exhausted: "crit", interrupted: "warn" };
-const COL: Record<Colour, string> = { good: "var(--good)", crit: "var(--crit)", warn: "var(--amber)", run: "var(--run)", accent: "var(--accent)", muted: "var(--line)" };
+const COL: Record<Colour, string> = { good: "var(--good)", crit: "var(--crit)", warn: "var(--amber)", run: "var(--run)", accent: "var(--accent)", muted: "var(--line)", done: "var(--ink)" };
+// Stages behind the current one are drawn in the text colour: settled, not a status.
 
 const ESCAPES: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" };
 const esc = (s: unknown) => String(s).replace(/[&<>"]/g, (c) => ESCAPES[c]!);
@@ -132,15 +133,15 @@ export function metroTrack(t: TicketView): string {
   const first = pts[0]!.cx;
   let o = `<svg viewBox="0 0 ${px} 18" preserveAspectRatio="xMinYMid meet" data-role="track" aria-label="${esc(t.stage.label)}, Stage ${ci + 1} of ${pts.length}"><line x1="${first}" y1="9" x2="${pts[pts.length - 1]!.cx}" y2="9" stroke="var(--surface2)" stroke-width="3"/>`;
   const reach = t.state === "done" ? pts.length - 1 : Math.max(0, Math.min(ci, pts.length - 1));
-  if (reach > 0) o += `<line x1="${first}" y1="9" x2="${pts[reach]!.cx}" y2="9" stroke="${t.state === "abandoned" ? "var(--line)" : COL.good}" stroke-width="3" opacity=".85"/>`;
+  if (reach > 0) o += `<line x1="${first}" y1="9" x2="${pts[reach]!.cx}" y2="9" stroke="${t.state === "abandoned" ? "var(--line)" : COL.done}" stroke-width="3" opacity=".85"/>`;
   pts.forEach(({ s, cx }, i) => {
     const done = t.state === "done" || i < ci,
       cur = t.state === "active" && i === ci;
     if (s.kind === "action") {
-      o += `<rect x="${cx - 1}" y="5" width="2" height="8" fill="${done ? COL.good : "var(--line)"}"/>`;
+      o += `<rect x="${cx - 1}" y="5" width="2" height="8" fill="${done ? COL.done : "var(--line)"}"/>`;
       return;
     }
-    const c = done ? COL.good : cur ? COL[state] : "var(--line)";
+    const c = done ? COL.done : cur ? COL[state] : "var(--line)";
     o += cur
       ? `<circle class="current" cx="${cx}" cy="9" r="5" fill="var(--surface)" stroke="${c}" stroke-width="2.5"/><circle cx="${cx}" cy="9" r="2" fill="${c}"/>`
       : `<circle class="${done ? "done" : "ahead"}" cx="${cx}" cy="9" r="4" fill="${done ? c : "var(--surface)"}" stroke="${c}" stroke-width="2"/>`;
@@ -198,24 +199,24 @@ export function metroDiagram(t: MetroTicket, focus: string | null, width: number
   for (let i = 0; i < pts.length - 1; i++) {
     const a = pts[i]!,
       b = pts[i + 1]!;
-    const k = i + 1 < ci || t.state === "done" ? "good" : i + 1 === ci && active ? state : "muted";
+    const k = i + 1 < ci || t.state === "done" ? "done" : i + 1 === ci && active ? state : "muted";
     if (k === "muted") out += `<line class="segment ahead" x1="${a.cx + 14}" y1="${baseY}" x2="${b.cx - 14}" y2="${baseY}" stroke="var(--line)" stroke-width="6" stroke-linecap="round" stroke-dasharray="1 10"/>`;
-    else out += `<line class="segment" x1="${a.cx}" y1="${baseY}" x2="${b.cx}" y2="${baseY}" stroke="${COL[k]}" stroke-width="6" stroke-linecap="round" opacity="${k === "good" ? ".85" : "1"}"/>`;
+    else out += `<line class="segment" x1="${a.cx}" y1="${baseY}" x2="${b.cx}" y2="${baseY}" stroke="${COL[k]}" stroke-width="6" stroke-linecap="round" opacity="${k === "done" ? ".85" : "1"}"/>`;
   }
   pts.forEach(({ s, i, cx }) => {
     const inf = infos[i]!;
     const sel = focus === s.name;
     const name = esc(s.label);
     if (s.kind === "action") {
-      const c = inf.done ? COL.good : inf.cur ? COL.accent : "var(--muted)";
+      const c = inf.done ? COL.done : inf.cur ? COL.accent : "var(--muted)";
       out += `<g class="node action${sel ? " focus" : ""}" data-stage="${esc(s.name)}"><rect x="${cx - 1.5}" y="${baseY - 9}" width="3" height="18" rx="1.5" fill="${c}"/><text class="act" x="${cx}" y="${baseY + 26}" text-anchor="middle">${name}</text><title>action Stage: ${name}</title></g>`;
       return;
     }
-    const c = inf.done ? COL.good : inf.cur ? COL[state] : "var(--muted)";
+    const c = inf.done ? COL.done : inf.cur ? COL[state] : "var(--muted)";
     let shape = "";
     if (sel) shape += `<circle class="focus-ring" cx="${cx}" cy="${baseY}" r="18" fill="none" stroke="${COL.accent}" stroke-width="2" stroke-dasharray="3 3"/>`;
     if (inf.cur && t.flag) shape += `<polygon class="flagged" points="${octagon(cx, baseY, 13)}" fill="${COL.crit}" stroke="var(--surface)" stroke-width="2"/><text x="${cx}" y="${baseY + 4.5}" text-anchor="middle" class="bang">!</text>`;
-    else if (inf.done) shape += `<circle class="done" cx="${cx}" cy="${baseY}" r="11" fill="${COL.good}" stroke="var(--surface)" stroke-width="2"/><path d="M${cx - 5} ${baseY} l3.5 3.5 l6.5 -7" fill="none" stroke="var(--surface)" stroke-width="2.2"/>`;
+    else if (inf.done) shape += `<circle class="done" cx="${cx}" cy="${baseY}" r="11" fill="${COL.done}" stroke="var(--surface)" stroke-width="2"/><path d="M${cx - 5} ${baseY} l3.5 3.5 l6.5 -7" fill="none" stroke="var(--surface)" stroke-width="2.2"/>`;
     else if (inf.cur) shape += `<circle class="current${inf.running ? " pulse" : ""}" cx="${cx}" cy="${baseY}" r="11" fill="var(--surface)" stroke="${c}" stroke-width="3.5"/><circle cx="${cx}" cy="${baseY}" r="4.5" fill="${c}"/>`;
     else shape += `<circle class="ahead" cx="${cx}" cy="${baseY}" r="9" fill="var(--surface)" stroke="var(--line)" stroke-width="3"/>`;
     const cls = inf.done ? "done" : inf.cur ? "current" : "ahead";

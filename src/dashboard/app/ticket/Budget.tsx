@@ -53,17 +53,29 @@ export function MiniRings({ budget }: { budget: BudgetView }) {
 
 const SOURCE = { ticket: "on this Ticket", pipeline: "by the Pipeline", global: "globally" };
 
-/** The four ring gauges; any of them opens the Ticket-layer editor (Extend). A starred value is set on the Ticket. */
+/** "1m30s/30m" as the used part, set large, and the "/30m" after it, set small. */
+const splitValue = (value: string): [string, string] => {
+  const at = value.indexOf("/");
+  return at < 0 ? [value, ""] : [value.slice(0, at), value.slice(at)];
+};
+
+/** The four gauges, a number over a bar each; any of them opens the Ticket-layer editor (Extend). A starred value is set on the Ticket. */
 export function Gauges({ budget, onOpen }: { budget: BudgetView; onOpen: () => void }) {
   return (
     <div className="gauges" data-role="gauges">
       {GAUGES.map(([k, name, text]) => {
         const g = budget[k];
         const cls = classOf(g);
+        const [used, limit] = splitValue(text(g) + (g.source === "ticket" ? "*" : ""));
         return (
           <div key={k} className={"gauge" + (cls ? " " + cls : "")} data-gauge={k} title={(g.untracked ? UNTRACKED + "; " : "") + `set ${SOURCE[g.source]}; click to extend`} onClick={onOpen}>
-            <Ring gauge={g} size={56} />
-            <span className="value">{text(g) + (g.source === "ticket" ? "*" : "")}</span>
+            <span className="value">
+              {used}
+              {limit && <small>{limit}</small>}
+            </span>
+            <span className="meter" aria-hidden="true">
+              <i style={{ width: `${Math.min(1, shareOf(g)) * 100}%` }} />
+            </span>
             <span>{name}</span>
           </div>
         );
