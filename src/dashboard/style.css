@@ -223,6 +223,12 @@ main { padding: 16px; }
 .titlebar .eyebrow a { color: var(--accent); }
 .titlebar .tname { color: var(--ink); font-weight: 600; }
 .titlebar .rename { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer; }
+.titlebar .check { margin-top: 6px; font-size: 13px; display: flex; flex-wrap: wrap; gap: 0 6px; align-items: baseline; }
+.titlebar .check .what { font-weight: 600; }
+.titlebar .check.met .what { color: var(--good); }
+.titlebar .check.error .what { color: var(--crit); }
+.titlebar .check.not_met .what { color: var(--amber); }
+.titlebar .check .line { flex-basis: 100%; font-family: var(--mono); font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .titlebar .rename:hover { text-decoration: underline; }
 .name-editor { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-right: 8px; text-transform: none; letter-spacing: normal; }
 .name-editor input { width: min(320px, 70vw); padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: inherit; font: inherit; font-size: 13px; }

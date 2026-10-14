@@ -44,6 +44,8 @@ export interface TicketRow {
   ended_at: string | null;
   /** A human's profile per Stage name, as JSON; it wins over the Pipeline's choice until cleared (ADR 0011). Null when there are none. */
   profile_overrides: string | null;
+  /** The latest check Action run per Stage name, as JSON (ADR 0014); null before any. */
+  artifact_checks: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -56,6 +58,22 @@ export function overridesOf(ticket: Pick<TicketRow, "profile_overrides">): Recor
 /** The profile a human chose for this Stage of the Ticket, or null when the Pipeline's choice stands. */
 export function overrideFor(ticket: Pick<TicketRow, "profile_overrides">, stage: string): string | null {
   return overridesOf(ticket)[stage] ?? null;
+}
+
+/** How a check Action artifact last came out at a Stage: met (exit 0), not met (exit 1), or broken. */
+export interface ArtifactCheck {
+  action: string;
+  result: "met" | "not_met" | "error";
+  at: string;
+  /** The exit code; null when it timed out or never started. */
+  code: number | null;
+  /** The last line of its output, or why it could not run. */
+  line: string | null;
+}
+
+/** The latest check Action run at this Stage of the Ticket, or null. */
+export function checkFor(ticket: Pick<TicketRow, "artifact_checks">, stage: string): ArtifactCheck | null {
+  return ticket.artifact_checks ? ((JSON.parse(ticket.artifact_checks) as Record<string, ArtifactCheck>)[stage] ?? null) : null;
 }
 
 /** The tail of the ULID humans quote when a Ticket has no tracker reference. */
@@ -144,6 +162,16 @@ export class Tickets {
   /** Queue bookkeeping only: not activity on the Ticket, so updated_at is left alone. */
   setRunnableSince(id: string, since: string | null): void {
     this.db.prepare(`UPDATE tickets SET runnable_since = ? WHERE id = ?`).run(since, id);
+    this.changed(id);
+  }
+
+  /** Keep the latest check at a Stage, over the one before. Not activity on the Ticket, so updated_at is left alone. */
+  setCheck(id: string, stage: string, check: ArtifactCheck): void {
+    const row = this.get(id);
+    if (!row) return;
+    const checks = row.artifact_checks ? (JSON.parse(row.artifact_checks) as Record<string, ArtifactCheck>) : {};
+    checks[stage] = check;
+    this.db.prepare(`UPDATE tickets SET artifact_checks = ? WHERE id = ?`).run(JSON.stringify(checks), id);
     this.changed(id);
   }
 

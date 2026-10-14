@@ -41,7 +41,7 @@ const ago = (seconds: number) => new Date(Date.now() - seconds * 1000).toISOStri
 
 function ticket(id: string): TicketDetail {
   return {
-    id, shortId: id.slice(-8), title: `Ticket ${id}`, reference: `APP-${id}`, name: null, label: `APP-${id}`, origin: "tracker", body: null, repo: "app", branch: `app-${id}`, worktree: `/wt/${id}`,
+    id, shortId: id.slice(-8), title: `Ticket ${id}`, reference: `APP-${id}`, name: null, label: `APP-${id}`, origin: "tracker", body: null, repo: "app", branch: `app-${id}`, worktree: `/wt/${id}`, check: null,
     pipeline: "default", pipelineVersion: 2,
     stage: { name: "plan", kind: "runner", label: "plan", human: false, index: 0, total: 1, repeat: false, override: null },
     state: "active", flag: null, pr: null, display: { state: "quiet", label: "Quiet", why: "waiting" }, queue: null, triggers: [], budget: BUDGET,

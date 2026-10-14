@@ -75,13 +75,17 @@ describe("a check Action artifact", () => {
     const d = await judged(lasso, ticket.id);
     expect(d.flag).toEqual({ reason: "artifact.missing", detail: "action grep-file: no dark in CHANGELOG.md", at: expect.any(String) });
     expect(d.sessions).toHaveLength(1);
+    // The Ticket keeps the latest check at the Stage for its page.
+    expect(d.check).toEqual({ action: "grep-file", result: "not_met", at: expect.any(String), code: 1, line: "no dark in CHANGELOG.md" });
   });
 
   it("Flags artifact.error on any other exit, a timeout, or a missing Action", async () => {
     const broken = await lassoWithTicket({ "grep-file": { params: ["file", "pattern"], run: 'echo "gh: not logged in" >&2; exit 4' } });
     await runImplement(broken.lasso);
     await checkNow(broken.lasso);
-    expect((await judged(broken.lasso, broken.ticket.id)).flag).toMatchObject({ reason: "artifact.error", detail: "action grep-file: grep-file exited 4: gh: not logged in" });
+    const brokenDetail = await judged(broken.lasso, broken.ticket.id);
+    expect(brokenDetail.flag).toMatchObject({ reason: "artifact.error", detail: "action grep-file: grep-file exited 4: gh: not logged in" });
+    expect(brokenDetail.check).toMatchObject({ result: "error", code: 4 });
 
     const slow = await lassoWithTicket({ "grep-file": { params: ["file", "pattern"], timeout: "1s", run: "sleep 30" } });
     await runImplement(slow.lasso);
@@ -112,6 +116,10 @@ describe("a check Action artifact", () => {
     await writeFile(path.join(flagged.worktree, "CHANGELOG.md"), "dark mode\n");
     const done = await lasso.api<TicketDetail>(`/api/tickets/${ticket.id}/done`, { method: "POST", body: "{}" });
     expect(done.stage.name).toBe("ship");
+    // Each check overwrote the one before; ship has no check, so the view shows none.
+    expect(done.check).toBeNull();
+    const row = await lasso.api<TicketDetail>(`/api/tickets/${ticket.id}`);
+    expect(row.sessions.map((s) => s.stage)).toEqual(["implement"]);
   });
 
   it("must name an Action the repo has, with its params, at Intake and on save", async () => {

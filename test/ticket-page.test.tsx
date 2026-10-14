@@ -43,7 +43,7 @@ const profile = (stage: string, name: string, overridden = false): StageProfileV
 function ticket(id: string, over: Partial<TicketDetail> = {}): TicketDetail {
   const s = session({ ticket: id });
   return {
-    id, shortId: id.slice(-8), title: `Ticket ${id}`, reference: `APP-${id}`, name: null, label: `APP-${id}`, origin: "tracker", body: null, repo: "app", branch: `app-${id}`, worktree: `/wt/${id}`,
+    id, shortId: id.slice(-8), title: `Ticket ${id}`, reference: `APP-${id}`, name: null, label: `APP-${id}`, origin: "tracker", body: null, repo: "app", branch: `app-${id}`, worktree: `/wt/${id}`, check: null,
     pipeline: "default", pipelineVersion: 2,
     stage: { name: "implement", kind: "runner", label: "implement", human: false, index: 1, total: 2, repeat: false, override: null },
     state: "active", flag: null, pr: null, display: { state: "quiet", label: "Quiet", why: "waiting on the next tick" }, queue: null,
@@ -190,6 +190,18 @@ describe("a Ticket's page", () => {
     expect([...side.querySelectorAll<HTMLElement>(".qitem")].map((q) => [q.dataset.id, q.classList.contains("sel")])).toEqual([["A", true], ["B", false]]);
     await userEvent.setup().click(within(side).getByText("Ticket B"));
     expect(location.hash).toBe("#B");
+  });
+
+  it("shows how the Stage's check Action last came out, and nothing when it has not run", async () => {
+    const at = new Date(Date.now() - 120_000).toISOString();
+    fakeLasso([ticket("A", { check: { action: "ci-green", result: "not_met", at, code: 1, line: "3 checks pending" } }), ticket("B")]);
+    const a = await showPage("A");
+    const check = document.querySelector<HTMLElement>('[data-role="check"]')!;
+    expect(check.className).toBe("check not_met");
+    expect(check.textContent).toBe("ci-green: not met · 2m ago3 checks pending");
+    a.unmount();
+    await showPage("B");
+    expect(document.querySelector('[data-role="check"]')).toBeNull();
   });
 
   it("narrows the timeline to a station clicked in the flow, and widens it again with All Stages", async () => {

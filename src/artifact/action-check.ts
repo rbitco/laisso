@@ -2,20 +2,22 @@ import { existsSync } from "node:fs";
 import { actionsFor, currentConfig, type Config } from "../server/config.ts";
 import type { LassoHome } from "../server/home.ts";
 import type { Logger } from "../server/log.ts";
-import type { TicketRow } from "../store/tickets.ts";
+import type { Tickets, TicketRow } from "../store/tickets.ts";
 import { actionEnv, lastLine, missingParams, runCommand, type RunningCommand } from "../session/command.ts";
 import type { ActionProbe, ArtifactVerdict } from "./check.ts";
 
 export interface ActionChecksDeps {
   config: Config;
   home: LassoHome;
+  tickets: Tickets;
   log: Logger;
 }
 
 /**
  * Check Actions (ADR 0014): an Action from config.yaml run as a Stage's
  * Artifact, in the Ticket's worktree with the variables an action Stage
- * gets. No Session is recorded; the exit code is the verdict.
+ * gets. No Session is recorded; the exit code is the verdict, and the
+ * latest at each Stage is kept on the Ticket for the page to show.
  */
 export class ActionChecks {
   private deps: ActionChecksDeps;
@@ -38,12 +40,23 @@ export class ActionChecks {
   }
 
   private async run(ticket: TicketRow, stage: string, name: string, params: Record<string, string>): Promise<ArtifactVerdict> {
+    const { verdict, code } = await this.verdict(ticket, stage, name, params);
+    // Shutdown cut it short: it is no verdict, so nothing is kept.
+    if (code !== "shutdown") {
+      const result = verdict.present ? "met" : verdict.broken ? "error" : "not_met";
+      this.deps.tickets.setCheck(ticket.id, stage, { action: name, result, at: new Date().toISOString(), code: typeof code === "number" ? code : null, line: verdict.detail });
+    }
+    return verdict;
+  }
+
+  private async verdict(ticket: TicketRow, stage: string, name: string, params: Record<string, string>): Promise<{ verdict: ArtifactVerdict; code: number | null | "shutdown" }> {
     const config = currentConfig(this.deps.home, this.deps.config);
     const action = actionsFor(config, ticket.repo)[name];
-    if (!action) return { present: false, detail: `no Action named ${name} in config.yaml`, broken: true };
+    const cannot = (detail: string) => ({ verdict: { present: false, detail, broken: true }, code: null });
+    if (!action) return cannot(`no Action named ${name} in config.yaml`);
     const missing = missingParams(action, params);
-    if (missing.length) return { present: false, detail: `${name} needs ${missing.map((p) => `with.${p}`).join(", ")}`, broken: true };
-    if (!existsSync(ticket.worktree)) return { present: false, detail: `the worktree ${ticket.worktree} is missing`, broken: true };
+    if (missing.length) return cannot(`${name} needs ${missing.map((p) => `with.${p}`).join(", ")}`);
+    if (!existsSync(ticket.worktree)) return cannot(`the worktree ${ticket.worktree} is missing`);
     const command = runCommand(action, ticket.worktree, actionEnv(this.deps.config, ticket, stage, "", params));
     this.live.add(command);
     const { code, killed, spawnError, tail } = await command.done.finally(() => this.live.delete(command));
@@ -56,6 +69,6 @@ export class ActionChecks {
       : code === 1 ? { present: false, detail: last || `${name} exited 1` }
       : { present: false, detail: `${name} exited ${code ?? "on a signal"}${last ? `: ${last}` : ""}`, broken: true };
     this.deps.log.info("artifact.checked", { ticket: ticket.id, stage, action: name, code, present: verdict.present, broken: verdict.broken ?? false });
-    return verdict;
+    return { verdict, code: killed === "shutdown" ? "shutdown" : code };
   }
 }

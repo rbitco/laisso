@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNod
 import { createPortal } from "react-dom";
 import type { TicketDetail, TicketView } from "../../../api/views.ts";
 import type { Drift } from "../../../store/versions.ts";
+import type { ArtifactCheck } from "../../../store/tickets.ts";
 import { relative } from "../../metro.ts";
 import { api } from "../api.ts";
 import { useEvents } from "../events.ts";
@@ -253,11 +254,25 @@ function TitleBar({ ticket: t, refresh, children }: { ticket: TicketDetail; refr
         </div>
         <h2>{t.title}</h2>
         <div className="why">{t.display.why + (t.mirrorPending ? " · tracker labels not written yet" : "")}</div>
+        {t.check && <CheckLine check={t.check} />}
       </div>
       <div className="right">
         <span className={"pill " + t.display.state}>{t.display.label}</span>
         {children}
       </div>
+    </div>
+  );
+}
+
+const CHECK_WORDS: Record<ArtifactCheck["result"], string> = { met: "met", not_met: "not met", error: "broken" };
+
+/** How the Stage's check Action last came out (ADR 0014): the Action, met or not, when, and its last line. */
+function CheckLine({ check }: { check: ArtifactCheck }) {
+  return (
+    <div className={"check " + check.result} data-role="check">
+      <span className="what">{check.action + ": " + CHECK_WORDS[check.result]}</span>
+      <span className="muted">{" · " + relative(check.at)}</span>
+      {check.line && <span className="line">{check.line}</span>}
     </div>
   );
 }

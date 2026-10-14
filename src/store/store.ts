@@ -216,6 +216,10 @@ const MIGRATIONS: Array<(db: DatabaseSync) => void> = [
   (db) => {
     db.exec(`ALTER TABLE tickets ADD COLUMN name TEXT;`);
   },
+  // Check Action artifacts (LASSO-116, ADR 0014): the latest check per Stage name, as JSON.
+  (db) => {
+    db.exec(`ALTER TABLE tickets ADD COLUMN artifact_checks TEXT;`);
+  },
 ];
 
 /** The schema version this Lasso migrates a store up to. */

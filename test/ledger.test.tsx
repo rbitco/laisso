@@ -28,7 +28,7 @@ const ago = (seconds: number) => new Date(Date.now() - seconds * 1000).toISOStri
 
 function view(id: string, over: Partial<TicketView> = {}): TicketView {
   return {
-    id, shortId: id.slice(-8), title: `Ticket ${id}`, reference: `APP-${id}`, name: null, label: `APP-${id}`, origin: "tracker", body: null, repo: "app", branch: `app-${id}`, worktree: `/wt/${id}`,
+    id, shortId: id.slice(-8), title: `Ticket ${id}`, reference: `APP-${id}`, name: null, label: `APP-${id}`, origin: "tracker", body: null, repo: "app", branch: `app-${id}`, worktree: `/wt/${id}`, check: null,
     pipeline: "default", pipelineVersion: 1,
     stage: { name: "implement", kind: "runner", label: "implement", human: false, index: 1, total: 2, repeat: false, override: null },
     state: "active", flag: null, pr: null, display: { state: "quiet", label: "Quiet", why: "waiting on the next tick" }, queue: null, triggers: [], budget: BUDGET,

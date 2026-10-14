@@ -1,4 +1,4 @@
-import { overrideFor, shortId, ticketLabel, type TicketRow } from "../store/tickets.ts";
+import { checkFor, overrideFor, shortId, ticketLabel, type ArtifactCheck, type TicketRow } from "../store/tickets.ts";
 import { runnerOf, type SessionProfile, type SessionRow } from "../store/sessions.ts";
 import { type Pipeline, type RunnerName, type RunnerStage, type Stage } from "../pipeline/load.ts";
 import type { PipelineSource } from "../pipeline/files.ts";
@@ -102,6 +102,8 @@ export interface TicketView {
   budget: BudgetView;
   /** Every Stage of the Pipeline, for the Metro track and diagram; empty when the Pipeline does not load. */
   stages: Array<Pick<StageView, "name" | "kind" | "label" | "human">>;
+  /** How the current Stage's check Action artifact last came out (ADR 0014), or null when it has none or has not run. */
+  check: ArtifactCheck | null;
   /** True while a label push to the tracker is owed and the tick will retry it. */
   mirrorPending: boolean;
   createdAt: string;
@@ -351,6 +353,7 @@ export function ticketView(ticket: TicketRow, ctx: ViewContext): TicketView {
     triggers,
     budget,
     stages: (pipeline?.stages ?? []).map((s) => ({ name: s.name, kind: s.kind, label: stageLabel(s), human: s.kind === "runner" && s.human })),
+    check: stage?.kind === "runner" && stage.artifactWith ? checkFor(ticket, stage.name) : null,
     mirrorPending: ticket.mirror_pending !== null,
     createdAt: ticket.created_at,
     updatedAt: ticket.updated_at,
