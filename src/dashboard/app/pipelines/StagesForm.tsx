@@ -1,13 +1,14 @@
 import { Fragment, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import type { Config } from "../../../server/config.ts";
 import type { ActionListing, ConfigFile, PipelineFile, PipelineView } from "../../../api/views.ts";
+import { ARTIFACTS } from "../../../pipeline/artifacts.ts";
 import { stageProfileView } from "../../metro.ts";
 import { api } from "../api.ts";
 import { showNotice } from "../notice.tsx";
 import { openProfileDrawer } from "../profiles/drawer.tsx";
 import { ProfileButton } from "../profiles/ProfileButton.tsx";
 import { firstLine, RailStage, StagesHead } from "./Rail.tsx";
-import { actionKeys, addStage, FieldError, moveStage, paramsOf, pipelinePatch, removeStage, stageTitle, type ActionDraft, type Card, type Params, type PipelineDraft, type RunnerDraft, draftOf } from "./stages.ts";
+import { actionKeys, addStage, artifactKeys, checkAction, FieldError, moveStage, paramsOf, pipelinePatch, removeStage, stageTitle, type ActionDraft, type Card, type Params, type PipelineDraft, type RunnerDraft, draftOf } from "./stages.ts";
 
 /** A Pipeline file that loads, as the Stage editor takes it. */
 export type LoadedPipeline = PipelineFile & { pipeline: PipelineView };
@@ -192,7 +193,7 @@ function Editor({ file, params, start, onSaved }: { file: LoadedPipeline; params
               {card.draft.kind === "action" ? (
                 <ActionCard {...shared} draft={card.draft} params={params} onEdit={(change) => editStage(card.id, change)} />
               ) : (
-                <RunnerCard {...shared} draft={card.draft} pipeline={file.name} pipelineProfile={draft.profile || null} config={config} onConfig={setConfig} onEdit={(change) => editStage(card.id, change)} />
+                <RunnerCard {...shared} draft={card.draft} params={params} pipeline={file.name} pipelineProfile={draft.profile || null} config={config} onConfig={setConfig} onEdit={(change) => editStage(card.id, change)} />
               )}
               <AddStage
                 after={label}
@@ -291,6 +292,7 @@ function ActionCard({ card, station, tools, onToggle, draft, params, onEdit }: C
 
 interface RunnerCardProps extends CardProps {
   draft: RunnerDraft;
+  params: Params;
   pipeline: string;
   /** The Pipeline dropdown's choice, which a Stage naming no profile inherits. */
   pipelineProfile: string | null;
@@ -300,14 +302,14 @@ interface RunnerCardProps extends CardProps {
 }
 
 /** A Runner or Human Stage: its task, how it runs, when it is done, and its limits. */
-function RunnerCard({ card, station, tools, onToggle, draft, pipeline, pipelineProfile, config, onConfig, onEdit }: RunnerCardProps) {
+function RunnerCard({ card, station, tools, onToggle, draft, params, pipeline, pipelineProfile, config, onConfig, onEdit }: RunnerCardProps) {
   const byDefault = (v: number | string | undefined) => (v === undefined ? "default" : `default (${v})`);
   // The closed card's line: who runs it, what it leaves behind, and anything unusual about how it moves on.
   const v = stageProfileView(draft.profile, pipelineProfile, config);
-  const bits = [v.name || "no profile", draft.artifact.trim() ? "leaves " + draft.artifact.trim() : "no artifact"];
+  const bits = [v.name || "no profile", draft.artifact ? "leaves " + artifactSummary(draft) : "no artifact"];
   if (draft.repeat) bits.push("repeats on Feedback");
   if (!draft.advance) bits.push("waits for Start");
-  const text = (name: "name" | "skills" | "artifact" | "rounds" | "attempts" | "wallTime", placeholder: string) => (
+  const text = (name: "name" | "skills" | "rounds" | "attempts" | "wallTime", placeholder: string) => (
     <input name={name} value={draft[name]} placeholder={placeholder} onChange={(ev) => onEdit({ [name]: ev.target.value })} />
   );
   return (
@@ -326,9 +328,7 @@ function RunnerCard({ card, station, tools, onToggle, draft, pipeline, pipelineP
         <Check label="Human Stage: opens a terminal for you to work in" name="human" on={draft.human} onChange={(human) => onEdit({ human })} />
       </Group>
       <Group title="Done when">
-        <Field label="Artifact" wide>
-          {text("artifact", "commits-on-branch, file NOTES.md")}
-        </Field>
+        <ArtifactPicker card={card} draft={draft} params={params} onEdit={onEdit} />
         <Check label="Move to the next Stage on its own" name="advance" on={draft.advance} onChange={(advance) => onEdit({ advance })} />
         <Check label="Repeat on Feedback until the artifact is met" name="repeat" on={draft.repeat} onChange={(repeat) => onEdit({ repeat })} />
       </Group>
@@ -338,6 +338,62 @@ function RunnerCard({ card, station, tools, onToggle, draft, pipeline, pipelineP
         <Field label="Time per Session">{text("wallTime", byDefault(config.budget.wallTime))}</Field>
       </Group>
     </RailStage>
+  );
+}
+
+function artifactSummary(draft: RunnerDraft): string {
+  if (draft.artifact === "file") return "file " + (draft.artifactPath.trim() || "(no path)");
+  return draft.artifact;
+}
+
+/**
+ * A Runner Stage's Artifact: the built-ins, a file, or one of config's Actions as a check, with a field per param
+ * it takes. An Artifact the Stage was saved with that the picker lacks stays pickable.
+ */
+function ArtifactPicker({ card, draft, params, onEdit }: { card: Card; draft: RunnerDraft; params: Params; onEdit: (change: Partial<RunnerDraft>) => void }) {
+  const s = card.stage;
+  if (s.kind !== "runner") throw new Error("an Artifact picker needs a Runner Stage");
+  const actions = Object.keys(params).sort().map((name) => "action " + name);
+  const known = new Set<string>(["", "file", ...ARTIFACTS, ...actions]);
+  const saved = draft.artifact === "file" ? null : s.artifact;
+  const extra = saved && !known.has(saved) ? saved : null;
+  const keys = artifactKeys(s, draft.artifact, params);
+  return (
+    <>
+      <Field label="Artifact" wide>
+        <select name="artifact" value={draft.artifact} onChange={(ev) => onEdit({ artifact: ev.target.value })}>
+          <option value="">none</option>
+          {extra && <option value={extra}>{checkAction(extra) ? extra + " (not in config.yaml)" : extra}</option>}
+          <optgroup label="Built in">
+            {ARTIFACTS.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+            <option value="file">file in the worktree</option>
+          </optgroup>
+          {actions.length > 0 && (
+            <optgroup label="Check Actions">
+              {actions.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </optgroup>
+          )}
+        </select>
+      </Field>
+      {draft.artifact === "file" && (
+        <Field label="Path">
+          <input name="artifactPath" value={draft.artifactPath} placeholder="NOTES.md" onChange={(ev) => onEdit({ artifactPath: ev.target.value })} />
+        </Field>
+      )}
+      {keys.map((key) => (
+        <Field key={key} label={key}>
+          <input name={"artifact." + key} value={draft.artifactWith[key] ?? ""} placeholder="required" onChange={(ev) => onEdit({ artifactWith: { ...draft.artifactWith, [key]: ev.target.value } })} />
+        </Field>
+      ))}
+    </>
   );
 }
 

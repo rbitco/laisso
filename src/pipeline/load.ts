@@ -4,11 +4,12 @@ import { parse } from "yaml";
 import { hyphenate } from "../intake/slug.ts";
 import { count, duration, isPlainObject, mapping, money, text, type Fail } from "../fields.ts";
 import { ACTION_NAME, PROFILE_NAME, type ActionConfig, type ProfileConfig } from "../server/config.ts";
+import { ARTIFACTS } from "./artifacts.ts";
+
+export { ARTIFACTS };
 
 export const RUNNERS = ["claude", "codex", "pi"] as const;
 export type RunnerName = (typeof RUNNERS)[number];
-
-export const ARTIFACTS = ["tracker-spec", "tracker-comment", "commits-on-branch", "pr-exists", "pr-review", "pr-merged"] as const;
 
 export interface StageBudget {
   rounds?: number;

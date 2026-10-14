@@ -11,7 +11,12 @@ export interface RunnerDraft {
   prompt: string;
   skills: string;
   profile: string | null;
+  /** The Artifact picked: blank for none, a built-in's name, `file`, or `action <name>`. */
   artifact: string;
+  /** A `file` Artifact's path. */
+  artifactPath: string;
+  /** A check Action's params as typed, kept when another Action is picked. */
+  artifactWith: Record<string, string>;
   human: boolean;
   advance: boolean;
   repeat: boolean;
@@ -73,6 +78,18 @@ export function paramsOf(actions: ActionListing[]): Params {
   return params;
 }
 
+/** The params a check Action Artifact shows: config's, or for the Action the Stage was saved with and config lacks, its own. */
+export function artifactKeys(stage: RunnerFields, artifact: string, params: Params): string[] {
+  const action = checkAction(artifact);
+  if (action === null) return [];
+  return params[action] ?? (artifact === stage.artifact ? Object.keys(stage.artifactWith ?? {}) : []);
+}
+
+/** The Action an `action <name>` Artifact names, or null. */
+export function checkAction(artifact: string): string | null {
+  return /^action\s+(\S+)$/.exec(artifact)?.[1] ?? null;
+}
+
 /** The params an Action Stage shows for `action`: config's, or for the Action the Stage was saved with and config lacks, its own. */
 export function actionKeys(stage: ActionFields, action: string, params: Params): string[] {
   return params[action] ?? (action === stage.action ? Object.keys(stage.with) : []);
@@ -87,7 +104,7 @@ export function stageDraft(s: StageFields): StageDraft {
     prompt: s.prompt ?? "",
     skills: s.skills.join(", "),
     profile: s.profile,
-    artifact: s.artifact ?? "",
+    ...artifactDraft(s),
     human: s.human,
     advance: s.advance,
     repeat: s.repeat === "feedback",
@@ -95,6 +112,39 @@ export function stageDraft(s: StageFields): StageDraft {
     attempts: text(s.budget.attempts),
     wallTime: s.budget.wallTime ?? "",
   };
+}
+
+// A `file <path>` Artifact picks `file` and fills its path; any other is picked as written.
+function artifactDraft(s: RunnerFields): Pick<RunnerDraft, "artifact" | "artifactPath" | "artifactWith"> {
+  const file = /^file\s+(\S+)$/.exec(s.artifact ?? "");
+  return { artifact: file ? "file" : (s.artifact ?? ""), artifactPath: file?.[1] ?? "", artifactWith: { ...s.artifactWith } };
+}
+
+/**
+ * What a Runner Stage's Artifact saves as: null for none, `file <path>`, a name, `action <name>` for a check Action
+ * with no params, or `{ action, with }` with them. A blank path or param is refused.
+ */
+function artifactValue(s: RunnerFields, d: RunnerDraft, params: Params, at: number): string | { action: string; with: Record<string, string> } | null {
+  if (!d.artifact) return null;
+  if (d.artifact === "file") {
+    const file = d.artifactPath.trim();
+    if (!file) throw new FieldError(at, "artifactPath", "a file Artifact needs a path");
+    return "file " + file;
+  }
+  const keys = artifactKeys(s, d.artifact, params);
+  if (!keys.length) return d.artifact;
+  const values: Record<string, string> = {};
+  for (const key of keys) {
+    values[key] = (d.artifactWith[key] ?? "").trim();
+    if (!values[key]) throw new FieldError(at, "artifact." + key, `${d.artifact} needs ${key}`);
+  }
+  return { action: checkAction(d.artifact)!, with: values };
+}
+
+/** A Runner Stage's Artifact as saved, in the shape artifactValue gives. */
+function savedArtifact(s: RunnerFields): string | { action: string; with: Record<string, string> } | null {
+  const action = s.artifact ? checkAction(s.artifact) : null;
+  return action && s.artifactWith && Object.keys(s.artifactWith).length ? { action, with: s.artifactWith } : s.artifact;
 }
 
 let ids = 0;
@@ -185,7 +235,8 @@ export function stagePatch(card: Card, params: Params, at: number): Record<strin
   const skills = d.skills.split(",").map((x) => x.trim()).filter(Boolean);
   if (skills.join(",") !== s.skills.join(",")) patch.skills = skills.length ? skills : null;
   if (d.profile !== s.profile) patch.profile = d.profile;
-  changed(patch, "artifact", s.artifact, d.artifact.trim() || null);
+  const artifact = artifactValue(s, d, params, at);
+  if (JSON.stringify(artifact) !== JSON.stringify(savedArtifact(s))) patch.artifact = artifact;
   if (d.human !== s.human) patch.human = d.human ? true : null;
   if (d.advance !== s.advance) patch.advance = d.advance ? null : false;
   if (d.repeat !== (s.repeat === "feedback")) patch.repeat = d.repeat ? "feedback" : null;

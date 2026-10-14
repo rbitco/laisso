@@ -65,6 +65,9 @@ export function VersionView({ name, version }: { name: string; version: number }
           <div className="fields">
             <Value label="profile" value={s.profile || (pipeline.profile ? `Pipeline's (${pipeline.profile})` : "config default")} />
             <Value label="artifact" value={s.artifact || "none"} />
+            {Object.entries(s.artifactWith ?? {}).map(([key, value]) => (
+              <Value key={key} label={"artifact " + key} value={value} />
+            ))}
             <Value label="skills" value={s.skills.join(", ") || "none"} />
             <Value label="advances on its own" value={yes(s.advance)} />
             <Value label="repeats on Feedback" value={yes(s.repeat === "feedback")} />

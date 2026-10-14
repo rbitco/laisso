@@ -81,7 +81,10 @@ export class PipelineFiles {
         const index = current.pipeline.stages.findIndex((s) => s.name === stageName);
         if (index < 0) throw new PipelineError(`Pipeline ${name} has no Stage named ${stageName}`);
         if (!isPlainObject(fields)) throw new PipelineError(`Stage ${stageName}: fields must be a mapping`);
-        applyPatch(doc, fields, ["stages", index]);
+        // A check Action artifact `{ action, with }` replaces whatever artifact was there whole, not key by key.
+        const { artifact, ...rest } = fields;
+        if (isPlainObject(artifact)) doc.setIn(["stages", index, "artifact"], artifactNode(doc, artifact));
+        applyPatch(doc, isPlainObject(artifact) ? rest : fields, ["stages", index]);
       }
     }
     if (order !== undefined) reorderStages(doc, name, current.pipeline.stages.map((s) => s.name), order);
@@ -142,8 +145,23 @@ function reorderStages(doc: Document, pipeline: string, names: string[], order: 
 /** A new Stage's node: null fields left out, lists and an action's `with` written inline as the default Pipeline writes them. */
 function newStage(doc: Document, fields: Record<string, unknown>) {
   const node = doc.createNode(Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== null)));
-  for (const pair of node.items) if (isSeq(pair.value) || (isMap(pair.value) && isScalar(pair.key) && pair.key.value === "with")) pair.value.flow = true;
+  for (const pair of node.items) {
+    if (isSeq(pair.value) || (isMap(pair.value) && isScalar(pair.key) && pair.key.value === "with")) pair.value.flow = true;
+    if (isMap(pair.value) && isScalar(pair.key) && pair.key.value === "artifact") flowWith(pair.value);
+  }
   return node;
+}
+
+/** A check Action artifact's node, its `with` written inline as an action Stage's is. */
+function artifactNode(doc: Document, artifact: Record<string, unknown>) {
+  const node = doc.createNode(artifact);
+  flowWith(node);
+  return node;
+}
+
+function flowWith(node: unknown): void {
+  const params = isMap(node) ? node.get("with", true) : null;
+  if (isMap(params)) params.flow = true;
 }
 
 function checkName(name: string): void {

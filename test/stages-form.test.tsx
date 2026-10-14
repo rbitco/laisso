@@ -28,6 +28,7 @@ const ACTIONS: ActionListing[] = [
   { name: "transition", repo: null, params: ["status"], timeout: "5m", run: "./move" },
   { name: "deploy", repo: null, params: ["env", "region"], timeout: "5m", run: "./deploy" },
   { name: "deploy", repo: "web", params: ["env"], timeout: "5m", run: "./web-deploy" },
+  { name: "ci-green", repo: null, params: [], timeout: "5m", run: "gh pr checks" },
 ];
 
 const CONFIG: Config = {
@@ -122,7 +123,7 @@ describe("the Stage line", () => {
     await user.click(toggle("plan"));
     const plan = stage("plan");
     await user.click(within(plan).getByRole("checkbox", { name: "Human Stage: opens a terminal for you to work in" }));
-    await user.clear(within(plan).getByRole("textbox", { name: "Artifact" }));
+    await user.selectOptions(within(plan).getByRole("combobox", { name: "Artifact" }), "none");
     await user.click(within(plan).getByRole("checkbox", { name: "Move to the next Stage on its own" }));
     await user.click(within(plan).getByRole("checkbox", { name: "Repeat on Feedback until the artifact is met" }));
     expect(plan.className).toBe("stage k-human open");
@@ -148,8 +149,8 @@ describe("Save", () => {
     await user.clear(within(plan).getByRole("textbox", { name: "Feedback rounds" }));
     await user.type(within(plan).getByRole("textbox", { name: "Time per Session" }), "45m");
     // Changed and changed back: nothing for it.
-    await user.type(within(plan).getByRole("textbox", { name: "Artifact" }), "x");
-    await user.type(within(plan).getByRole("textbox", { name: "Artifact" }), "{Backspace}");
+    await user.selectOptions(within(plan).getByRole("combobox", { name: "Artifact" }), "pr-merged");
+    await user.selectOptions(within(plan).getByRole("combobox", { name: "Artifact" }), "spec");
     await user.click(toggle("notify"));
     await user.clear(within(stage("notify")).getByRole("textbox", { name: "status" }));
     await user.type(within(stage("notify")).getByRole("textbox", { name: "status" }), "Done");
@@ -171,7 +172,7 @@ describe("Save", () => {
     await user.type(within(plan).getByRole("textbox", { name: "Name" }), "think");
     await user.clear(within(plan).getByRole("textbox", { name: "Prompt" }));
     await user.clear(within(plan).getByRole("textbox", { name: "Skills" }));
-    await user.clear(within(plan).getByRole("textbox", { name: "Artifact" }));
+    await user.selectOptions(within(plan).getByRole("combobox", { name: "Artifact" }), "none");
     await save(user);
     await waitFor(() => expect(lasso.sent).toHaveLength(1));
     expect(lasso.sent[0]!.body).toEqual({ stages: { plan: { name: "think", prompt: null, skills: null, artifact: null } } });
@@ -207,7 +208,7 @@ describe("Save", () => {
     const action = within(fresh).getByRole("combobox", { name: "Action" });
     expect(document.activeElement).toBe(action);
     // Each Action once, a global one ahead of a repo's of the same name.
-    expect(within(action).getAllByRole("option").map((o) => o.textContent)).toEqual(["pick one", "deploy", "transition"]);
+    expect(within(action).getAllByRole("option").map((o) => o.textContent)).toEqual(["pick one", "ci-green", "deploy", "transition"]);
     expect(within(fresh).getByText("no Action picked", { selector: ".sum" })).toBeTruthy();
     await user.selectOptions(action, "deploy");
     expect(within(fresh).getAllByRole("textbox").map((i) => i.getAttribute("name"))).toEqual(["env", "region"]);
@@ -237,7 +238,7 @@ describe("Save", () => {
     const { user } = await showForm({ ...PIPELINE, stages: [PIPELINE.stages[0]!, { kind: "action", name: "page", label: "ops", action: "pager", with: { team: "ops" } }] });
     await user.click(toggle("page"));
     const action = within(stage("page")).getByRole("combobox", { name: "Action" });
-    expect(within(action).getAllByRole("option").map((o) => o.textContent)).toEqual(["pager (not in config.yaml)", "deploy", "transition"]);
+    expect(within(action).getAllByRole("option").map((o) => o.textContent)).toEqual(["pager (not in config.yaml)", "ci-green", "deploy", "transition"]);
     expect((within(stage("page")).getByRole("textbox", { name: "team" }) as HTMLInputElement).value).toBe("ops");
   });
 
@@ -340,5 +341,81 @@ describe("a Stage's Agent Profile", () => {
     await save(user);
     await waitFor(() => expect(lasso.sent).toHaveLength(1));
     expect(lasso.sent[0]!.body).toEqual({ stages: { plan: { profile: "codex" } } });
+  });
+});
+
+describe("the Artifact picker", () => {
+  const artifact = (card: HTMLElement) => within(card).getByRole("combobox", { name: "Artifact" }) as HTMLSelectElement;
+
+  it("lists the built-in Artifacts, a file, and config's Actions as checks, keeping a saved one config lacks", async () => {
+    fakeLasso();
+    const { user } = await showForm();
+    await user.click(toggle("plan"));
+    const picker = artifact(stage("plan"));
+    expect(picker.value).toBe("spec");
+    expect(within(picker).getAllByRole("option").map((o) => o.textContent)).toEqual(["none", "spec", "tracker-spec", "tracker-comment", "commits-on-branch", "pr-exists", "pr-review", "pr-merged", "file in the worktree", "action ci-green", "action deploy", "action transition"]);
+    expect([...picker.querySelectorAll("optgroup")].map((g) => g.label)).toEqual(["Built in", "Check Actions"]);
+  });
+
+  it("shows a field per param of the Action picked and saves it as action and with", async () => {
+    const lasso = fakeLasso();
+    const { user } = await showForm();
+    await user.click(toggle("plan"));
+    const plan = stage("plan");
+    await user.selectOptions(artifact(plan), "action deploy");
+    expect(within(plan).getByText("claude-opus, leaves action deploy", { selector: ".sum" })).toBeTruthy();
+    await user.type(within(plan).getByRole("textbox", { name: "env" }), "prod");
+    // A param left blank is refused before anything is sent, and its field is focused.
+    await save(user);
+    expect(notice().textContent).toBe("action deploy needs region");
+    expect(lasso.sent).toEqual([]);
+    await waitFor(() => expect(document.activeElement).toBe(within(plan).getByRole("textbox", { name: "region" })));
+    await user.type(within(plan).getByRole("textbox", { name: "region" }), " eu ");
+    await save(user);
+    await waitFor(() => expect(lasso.sent).toHaveLength(1));
+    expect(lasso.sent[0]!.body).toEqual({ stages: { plan: { artifact: { action: "deploy", with: { env: "prod", region: "eu" } } } } });
+  });
+
+  it("saves an Action with no params as one line", async () => {
+    const lasso = fakeLasso();
+    const { user } = await showForm();
+    await user.click(toggle("plan"));
+    const plan = stage("plan");
+    await user.selectOptions(artifact(plan), "action ci-green");
+    expect(within(plan).queryByRole("textbox", { name: "env" })).toBeNull();
+    await save(user);
+    await waitFor(() => expect(lasso.sent).toHaveLength(1));
+    expect(lasso.sent[0]!.body).toEqual({ stages: { plan: { artifact: "action ci-green" } } });
+  });
+
+  it("saves a file Artifact by its path, and refuses one with none", async () => {
+    const lasso = fakeLasso();
+    const { user } = await showForm();
+    await user.click(toggle("plan"));
+    const plan = stage("plan");
+    await user.selectOptions(artifact(plan), "file");
+    await save(user);
+    expect(notice().textContent).toBe("a file Artifact needs a path");
+    await user.type(within(plan).getByRole("textbox", { name: "Path" }), "NOTES.md");
+    await save(user);
+    await waitFor(() => expect(lasso.sent).toHaveLength(1));
+    expect(lasso.sent[0]!.body).toEqual({ stages: { plan: { artifact: "file NOTES.md" } } });
+  });
+
+  it("opens a saved check Action and its params as written, sending nothing until they change", async () => {
+    const lasso = fakeLasso();
+    const plan = { ...PIPELINE.stages[0]!, artifact: "action deploy", artifactWith: { env: "prod", region: "eu" } } as PipelineView["stages"][number];
+    const { user } = await showForm({ ...PIPELINE, stages: [plan, PIPELINE.stages[1]!] });
+    await user.click(toggle("plan"));
+    const card = stage("plan");
+    expect(artifact(card).value).toBe("action deploy");
+    expect((within(card).getByRole("textbox", { name: "region" }) as HTMLInputElement).value).toBe("eu");
+    await save(user);
+    expect(notice().textContent).toBe("nothing changed");
+    await user.clear(within(card).getByRole("textbox", { name: "region" }));
+    await user.type(within(card).getByRole("textbox", { name: "region" }), "us");
+    await save(user);
+    await waitFor(() => expect(lasso.sent).toHaveLength(1));
+    expect(lasso.sent[0]!.body).toEqual({ stages: { plan: { artifact: { action: "deploy", with: { env: "prod", region: "us" } } } } });
   });
 });

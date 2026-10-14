@@ -6,7 +6,7 @@ import type { TicketDetail, IntakeResult } from "../src/api/views.ts";
 import type { PipelineFile, PipelineListing, ConfigFile, PipelineVersionView, ActionListing } from "../src/api/views.ts";
 import type { TickChange } from "../src/server/tick.ts";
 import { DEFAULT_CONFIG } from "../src/server/config.ts";
-import { addStage, draftOf, moveStage, pipelinePatch, removeStage, type RunnerDraft } from "../src/dashboard/app/pipelines/stages.ts";
+import { addStage, draftOf, moveStage, paramsOf, pipelinePatch, removeStage, type RunnerDraft } from "../src/dashboard/app/pipelines/stages.ts";
 
 // Seam one: Pipelines and config are edited through the API the dashboard
 // uses, in place, with comments and ordering kept (LASSO-40).
@@ -525,6 +525,23 @@ describe("config Actions in the Pipeline editor", () => {
     const swapped = await lasso.api<PipelineFile>("/api/pipelines/work", { method: "PATCH", body: json({ stages: { tell: { action: "deploy", with: { channel: null, env: "prod", region: "eu" } } } }) });
     expect(swapped.pipeline!.stages[1]).toMatchObject({ name: "tell", action: "deploy", with: { env: "prod", region: "eu" } });
     expect(swapped.text).toContain("    action: deploy\n    with: { env: prod, region: eu }\n");
+  });
+
+  it("writes a check Action artifact as the editor sends it, and back to a built-in", async () => {
+    const lasso = await lassoWithActions();
+    const patch = (body: unknown) => lasso.api<PipelineFile>("/api/pipelines/work", { method: "PATCH", body: json(body) });
+    const checked = await patch({ stages: { implement: { artifact: { action: "deploy", with: { env: "prod", region: "eu" } } } } });
+    expect(checked.text).toContain("    artifact:\n      action: deploy\n      with: { env: prod, region: eu }\n");
+    // What the editor opens it as, and an edit to one param sends the whole artifact again.
+    const draft = draftOf(checked.pipeline!);
+    expect(draft.cards[0]!.draft).toMatchObject({ artifact: "action deploy", artifactWith: { env: "prod", region: "eu" } });
+    const edited = { ...draft, cards: draft.cards.map((c, i) => (i === 0 ? { ...c, draft: { ...(c.draft as RunnerDraft), artifactWith: { env: "prod", region: "us" } } } : c)) };
+    const params = paramsOf(await lasso.api<ActionListing[]>("/api/actions"));
+    const regioned = await patch(pipelinePatch(checked.pipeline!, edited, params));
+    expect(regioned.text).toContain("      with: { env: prod, region: us }\n");
+    await expect(patch({ stages: { implement: { artifact: { action: "notify", with: {} } } } })).rejects.toThrow(/Stage implement artifact: notify needs with\.channel/);
+    const plain = await patch({ stages: { implement: { artifact: "commits-on-branch" } } });
+    expect(plain.text).toContain("    artifact: commits-on-branch\n  - name: tell\n");
   });
 });
 

@@ -200,7 +200,7 @@ export interface PipelineView {
 }
 
 export type StageFields =
-  | { kind: "runner"; name: string; label: string; prompt: string | null; skills: string[]; profile: string | null; human: boolean; advance: boolean; artifact: string | null; repeat: "feedback" | null; budget: { rounds?: number; attempts?: number; wallTime?: string } }
+  | { kind: "runner"; name: string; label: string; prompt: string | null; skills: string[]; profile: string | null; human: boolean; advance: boolean; artifact: string | null; artifactWith?: Record<string, string>; repeat: "feedback" | null; budget: { rounds?: number; attempts?: number; wallTime?: string } }
   | { kind: "action"; name: string; label: string; action: string; with: Record<string, string> };
 
 export interface PipelineListing {
