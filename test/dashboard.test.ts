@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { startLassoWithRepos, waitFor, claudeFixture, type Lasso, type LassoConfig, type TrackerReply } from "./harness.ts";
 import { sortForLedger, type TicketView, type TicketDetail, type IntakeResult, type DisplayState } from "../src/api/views.ts";
-import { metroDiagram, metroTrack, sessionsForStage, quickAction, relative, tickIndicator, sessionProfile, profileApplies, profileLine, profileSummary, profileUsers, usedByLine, profileWarnings, MODEL_SUGGESTIONS, stageProfileView, profileIndex, scopeNote, profileScopes, overridableRepos, scopedProfile, profileRoute, ticketProfileView, ledgerStageText, pipelineLine } from "../src/dashboard/metro.ts";
+import { metroDiagram, metroTrack, sessionsForStage, quickAction, relative, tickIndicator, TICK_GRACE_MS, sessionProfile, profileApplies, profileLine, profileSummary, profileUsers, usedByLine, profileWarnings, MODEL_SUGGESTIONS, stageProfileView, profileIndex, scopeNote, profileScopes, overridableRepos, scopedProfile, profileRoute, ticketProfileView, ledgerStageText, pipelineLine } from "../src/dashboard/metro.ts";
 import type { ConfigFile, PipelineListing, PipelineFile } from "../src/api/views.ts";
 import type { ProfileConfig } from "../src/server/config.ts";
 import type { TickChange, TickStatus } from "../src/server/tick.ts";
@@ -254,7 +254,7 @@ describe("the Metro drawings from API data", () => {
 });
 
 describe("the Tick dot", () => {
-  it("is idle with the time since the last Tick and the countdown to the next, from a real status", async () => {
+  it("is healthy with the time since the last Tick and the countdown to the next, from a real status", async () => {
     const { lasso } = await lassoWithTicket();
     await checkNow(lasso);
     const real = await lasso.api<TickStatus>("/api/tick");
@@ -263,36 +263,44 @@ describe("the Tick dot", () => {
     // The real status with the next Tick pinned 23s after the last, so the countdown is a known number.
     const last = Date.parse(real.lastTick!);
     const status = { ...real, nextTick: new Date(last + 23_000).toISOString() };
-    expect(tickIndicator(status, last + 12_000)).toEqual({ state: "idle", title: "last tick 12s ago · next in 11s" });
+    expect(tickIndicator(status, last + 12_000)).toEqual({ state: "healthy", label: "Healthy", detail: "last tick 12s ago · next in 11s" });
     // Timing reads at minute scale too.
-    expect(tickIndicator({ ...real, nextTick: new Date(last + 3 * 60_000 + 5_000).toISOString() }, last + 3 * 60_000).title).toBe("last tick 3m ago · next in 5s");
+    expect(tickIndicator({ ...real, nextTick: new Date(last + 3 * 60_000 + 5_000).toISOString() }, last + 3 * 60_000).detail).toBe("last tick 3m ago · next in 5s");
   });
 
-  it("says next: manual when the timer is off", async () => {
+  it("stays healthy just past the next Tick's due time, then is late", async () => {
+    const { lasso } = await lassoWithTicket();
+    const real = { ...(await lasso.api<TickStatus>("/api/tick")), tickSeconds: 60 };
+    const last = Date.parse("2026-10-15T10:00:00Z");
+    const status = { ...real, running: false, lastTick: new Date(last).toISOString(), nextTick: new Date(last + 60_000).toISOString() };
+    expect(tickIndicator(status, last + 60_000 + TICK_GRACE_MS).state).toBe("healthy");
+    expect(tickIndicator(status, last + 3 * 60_000)).toEqual({ state: "late", label: "Tick delayed", detail: "last tick 3m ago · next was due 2m ago; ticks run every 60s" });
+  });
+
+  it("says next: manual when the timer is off, and is never late then", async () => {
     const { lasso } = await lassoWithTicket();
     await checkNow(lasso);
     // A running Lasso always has a timer, so the real status stands in with nextTick cleared.
     const status = { ...(await lasso.api<TickStatus>("/api/tick")), nextTick: null };
-    expect(tickIndicator(status, Date.parse(status.lastTick!) + 3 * 60_000)).toEqual({ state: "idle", title: "last tick 3m ago · next: manual" });
+    expect(tickIndicator(status, Date.parse(status.lastTick!) + 3 * 60_000)).toEqual({ state: "healthy", label: "Healthy", detail: "last tick 3m ago · next: manual" });
   });
 
   it("says no tick yet before the first Tick", async () => {
     const { lasso } = await lassoWithTicket();
     // The startup Tick may already have run, so the fresh status stands in with lastTick cleared.
     const status = { ...(await lasso.api<TickStatus>("/api/tick")), lastTick: null };
-    expect(tickIndicator(status, Date.now())).toEqual({ state: "idle", title: "no tick yet" });
-    expect(tickIndicator({ ...status, nextTick: null }, Date.now())).toEqual({ state: "idle", title: "no tick yet" });
+    expect(tickIndicator(status, Date.now())).toEqual({ state: "healthy", label: "Healthy", detail: "no tick yet" });
   });
 
   it("is running while a Tick is in flight", async () => {
     const { lasso } = await lassoWithTicket();
     // Catching a real in-flight Tick is racy, so the real status stands in with running set.
     const status = { ...(await lasso.api<TickStatus>("/api/tick")), running: true };
-    expect(tickIndicator(status, Date.now())).toEqual({ state: "running", title: "tick running" });
+    expect(tickIndicator(status, Date.now())).toEqual({ state: "running", label: "Healthy", detail: "tick running" });
   });
 
   it("is down while Lasso is unreachable", () => {
-    expect(tickIndicator("down", Date.now())).toEqual({ state: "down", title: "lasso unreachable; reconnecting" });
+    expect(tickIndicator("down", Date.now())).toEqual({ state: "down", label: "Not connected", detail: "Can't reach Lasso; reconnecting on its own" });
   });
 });
 

@@ -111,6 +111,9 @@ function fakeLasso() {
 
 const send = (kind: string, data: unknown = {}) => act(() => void events().dispatchEvent(new MessageEvent(kind, { data: JSON.stringify(data) })));
 const dot = () => document.querySelector<HTMLElement>('[data-role="tick-dot"]')!;
+const toggle = () => document.querySelector<HTMLElement>('[data-role="tick-toggle"]')!;
+const popover = () => document.querySelector<HTMLElement>('[data-role="tick-pop"]');
+const status = () => document.querySelector<HTMLElement>('[data-role="tick-status"]')!;
 const notice = () => document.querySelector('[data-role="notice"]')!;
 /** The value of the checked radio in the confirm step's group named `group`, or null. */
 const chosen = (confirm: HTMLElement, group: string) => (within(within(confirm).getByRole("radiogroup", { name: group })).getAllByRole("radio") as HTMLInputElement[]).find((r) => r.checked)?.value ?? null;
@@ -130,42 +133,72 @@ afterEach(() => {
   vi.stubGlobal("EventSource", FakeEventSource);
 });
 
-describe("the Tick dot", () => {
-  it("has no tooltip until the first status, then is idle, pulses while a Tick runs, and is red while Lasso is unreachable", async () => {
+describe("the status dot", () => {
+  it("is grey until Lasso answers, green when Ticks are on time, orange when one is overdue, and grey while unreachable", async () => {
     const lasso = fakeLasso();
     render(<App />);
     await screen.findByText("Ticket A");
-    expect(dot().className).toBe("dot tick-dot");
-    expect(dot().hasAttribute("title")).toBe(false);
+    expect(dot().className).toBe("dot tick-dot connecting");
+    expect(toggle().getAttribute("aria-label")).toBe("Lasso status: Connecting");
     send("hello", (lasso.state.tick = freshTick()));
-    expect(dot().className).toBe("dot tick-dot idle");
-    expect(dot().getAttribute("title")).toBe("last tick 10s ago · next in 20s");
-    expect(screen.getByRole("img", { name: "last tick 10s ago · next in 20s" })).toBe(dot());
+    expect(dot().className).toBe("dot tick-dot healthy");
+    expect(screen.getByRole("button", { name: "Lasso status: Healthy" })).toBe(toggle());
     send("tick", { ...lasso.state.tick, running: true });
     expect(dot().className).toBe("dot tick-dot running");
-    expect(dot().title).toBe("tick running");
+    // The next Tick was due two minutes ago.
+    send("tick", { tickSeconds: 30, lastTick: ago(150), nextTick: ago(120), running: false });
+    // The running Tick's pulse is held one cycle first.
+    await waitFor(() => expect(dot().className).toBe("dot tick-dot late"), { timeout: 3000 });
+    expect(toggle().getAttribute("aria-label")).toBe("Lasso status: Tick delayed");
     send("error");
     expect(dot().className).toBe("dot tick-dot down");
-    expect(dot().title).toBe("lasso unreachable; reconnecting");
+    expect(toggle().getAttribute("aria-label")).toBe("Lasso status: Not connected");
   });
 
-  it("holds a fast Tick's pulse for one cycle, though the tooltip follows at once", async () => {
+  it("opens a popover with the status in words, the Tick's timing and Check now; Escape or a click away closes it", async () => {
+    const lasso = fakeLasso();
+    render(<App />);
+    await screen.findByText("Ticket A");
+    send("hello", (lasso.state.tick = freshTick()));
+    expect(popover()).toBeNull();
+    const user = userEvent.setup();
+    await user.click(toggle());
+    expect(toggle().getAttribute("aria-expanded")).toBe("true");
+    expect(within(popover()!).getByText("Healthy")).toBeTruthy();
+    expect(status().textContent).toBe("last tick 10s ago · next in 20s");
+    expect(within(popover()!).getByRole("button", { name: "Check now" })).toBeTruthy();
+    await user.keyboard("{Escape}");
+    expect(popover()).toBeNull();
+    await user.click(toggle());
+    send("tick", { tickSeconds: 30, lastTick: ago(150), nextTick: ago(120), running: false });
+    expect(within(popover()!).getByText("Tick delayed")).toBeTruthy();
+    expect(status().textContent).toBe("last tick 3m ago · next was due 2m ago; ticks run every 30s");
+    send("error");
+    expect(within(popover()!).getByText("Not connected")).toBeTruthy();
+    expect((within(popover()!).getByRole("button", { name: "Check now" }) as HTMLButtonElement).disabled).toBe(true);
+    await user.click(screen.getByText("Ticket A"));
+    expect(popover()).toBeNull();
+  });
+
+  it("holds a fast Tick's pulse for one cycle, though the popover follows at once", async () => {
     const lasso = fakeLasso();
     render(<App />);
     send("hello", (lasso.state.tick = freshTick()));
+    await userEvent.setup().click(toggle());
     // The Tick ran and ended between two events: a newer lastTick than a still status.
     send("tick", { ...lasso.state.tick, lastTick: ago(0) });
     expect(dot().className).toBe("dot tick-dot running");
-    expect(dot().title).toMatch(/^last tick 0s ago/);
-    await waitFor(() => expect(dot().className).toBe("dot tick-dot idle"), { timeout: 3000 });
+    expect(status().textContent).toMatch(/^last tick 0s ago/);
+    await waitFor(() => expect(dot().className).toBe("dot tick-dot healthy"), { timeout: 3000 });
   });
 
   it("moves its countdown each second", async () => {
     const lasso = fakeLasso();
     render(<App />);
     send("hello", (lasso.state.tick = freshTick()));
-    expect(dot().title).toBe("last tick 10s ago · next in 20s");
-    await waitFor(() => expect(dot().title).toBe("last tick 11s ago · next in 19s"), { timeout: 2000 });
+    await userEvent.setup().click(toggle());
+    expect(status().textContent).toBe("last tick 10s ago · next in 20s");
+    await waitFor(() => expect(status().textContent).toBe("last tick 11s ago · next in 19s"), { timeout: 2000 });
   });
 
   it("reads everything again when Lasso comes back after being unreachable", async () => {
@@ -177,7 +210,7 @@ describe("the Tick dot", () => {
     expect(lasso.gets("/api/tickets")).toBe(2);
     send("error");
     send("hello", (lasso.state.tick = freshTick()));
-    expect(dot().className).toBe("dot tick-dot idle");
+    expect(dot().className).toBe("dot tick-dot healthy");
     await waitFor(() => expect(lasso.gets("/api/tickets")).toBe(4));
   });
 });
@@ -241,7 +274,9 @@ describe("Check now", () => {
       { ticket: "A", summary: "APP-A: review started" },
       { ticket: "B", summary: "APP-B: PR merged" },
     ];
-    await userEvent.setup().click(screen.getByRole("button", { name: "Check now" }));
+    const user = userEvent.setup();
+    await user.click(toggle());
+    await user.click(screen.getByRole("button", { name: "Check now" }));
     expect(dot().className).toBe("dot tick-dot running");
     await waitFor(() => expect(notice().textContent).toBe("APP-A: review started; APP-B: PR merged"));
     expect(lasso.sent.filter((s) => s.method === "POST").map((s) => s.route)).toEqual(["/api/check-now"]);
@@ -251,9 +286,12 @@ describe("Check now", () => {
   });
 
   it("says nothing new when nothing changed", async () => {
-    fakeLasso();
+    const lasso = fakeLasso();
     render(<App />);
-    await userEvent.setup().click(screen.getByRole("button", { name: "Check now" }));
+    send("hello", (lasso.state.tick = freshTick()));
+    const user = userEvent.setup();
+    await user.click(toggle());
+    await user.click(screen.getByRole("button", { name: "Check now" }));
     await waitFor(() => expect(notice().textContent).toBe("nothing new"));
   });
 });
@@ -401,7 +439,7 @@ describe("the page's views", () => {
     expect(tickets().textContent).toBe("Tickets");
   });
 
-  it("shrinks the nav to an icon rail on a Ticket's page, its links and Check now still named", async () => {
+  it("shrinks the nav to an icon rail on a Ticket's page, its links and status dot still named", async () => {
     fakeLasso();
     render(<App />);
     await screen.findByText("Ticket A");
@@ -417,7 +455,7 @@ describe("the page's views", () => {
       ["Config", "Config"],
     ]);
     expect(within(section("nav")).getByRole("link", { name: "LASSO" }).getAttribute("href")).toBe("#");
-    expect(within(section("nav")).getByRole("button", { name: "Check now" }).getAttribute("title")).toBe("Check now");
+    expect(within(section("nav")).getByRole("button", { name: "Lasso status: Connecting" }).getAttribute("title")).toBe("Lasso status: Connecting");
     go("");
     await waitFor(() => expect(section("nav").className).toBe("pages"));
   });

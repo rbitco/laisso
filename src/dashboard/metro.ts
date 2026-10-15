@@ -40,13 +40,25 @@ export function relative(iso: string | null, now: number = Date.now()): string {
   return m < 60 ? m + "m ago" : Math.round(m / 60) + "h ago";
 }
 
-/** The header's Tick dot: idle, running, or down while Lasso is unreachable ('down' in place of a status), with its tooltip. */
-export function tickIndicator(status: TickStatus | "down", now: number): { state: "idle" | "running" | "down"; title: string } {
-  if (status === "down") return { state: "down", title: "lasso unreachable; reconnecting" };
-  if (status.running) return { state: "running", title: "tick running" };
-  if (!status.lastTick) return { state: "idle", title: "no tick yet" };
-  const next = status.nextTick ? "next in " + wholeSeconds(new Date(status.nextTick).getTime() - now) + "s" : "next: manual";
-  return { state: "idle", title: "last tick " + relative(status.lastTick, now) + " · " + next };
+/** How long past its due time a Tick may start before the dot calls it late. */
+export const TICK_GRACE_MS = 5_000;
+
+/** What the nav's status dot shows: green while connected and ticking on time, orange when a Tick is overdue, grey when Lasso is unreachable. */
+export type TickHealth = "healthy" | "running" | "late" | "down";
+
+/**
+ * The nav's status dot ('down' in place of a status while Lasso is unreachable): its state, the word its popover leads
+ * with, and the line under it saying when the last Tick ran and the next is due, or why something is wrong.
+ */
+export function tickIndicator(status: TickStatus | "down", now: number): { state: TickHealth; label: string; detail: string } {
+  if (status === "down") return { state: "down", label: "Not connected", detail: "Can't reach Lasso; reconnecting on its own" };
+  if (status.running) return { state: "running", label: "Healthy", detail: "tick running" };
+  if (!status.lastTick) return { state: "healthy", label: "Healthy", detail: "no tick yet" };
+  const last = "last tick " + relative(status.lastTick, now);
+  if (!status.nextTick) return { state: "healthy", label: "Healthy", detail: last + " · next: manual" };
+  const overdue = now - new Date(status.nextTick).getTime();
+  if (overdue > TICK_GRACE_MS) return { state: "late", label: "Tick delayed", detail: last + " · next was due " + relative(status.nextTick, now) + "; ticks run every " + status.tickSeconds + "s" };
+  return { state: "healthy", label: "Healthy", detail: last + " · next in " + wholeSeconds(-overdue) + "s" };
 }
 
 /**

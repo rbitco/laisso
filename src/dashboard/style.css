@@ -41,7 +41,7 @@ body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 var(
 header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; min-height: var(--top-h); padding: 12px 16px; border-bottom: 1px solid var(--line); }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 /* The nav: a sidebar of the views, an icon rail on a Ticket's page, and a bottom tab bar on a phone. */
-nav.pages { position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; gap: 4px; padding: 16px 12px; background: var(--side); border-right: 1px solid var(--line); }
+nav.pages { position: sticky; top: 0; z-index: 10; height: 100vh; display: flex; flex-direction: column; gap: 4px; padding: 16px 12px; background: var(--side); border-right: 1px solid var(--line); }
 nav.pages .brand { font-size: 13.5px; font-weight: 600; margin: 0; padding: 4px 10px 18px; letter-spacing: 0.16em; display: flex; align-items: center; gap: 8px; }
 nav.pages .brand a { color: inherit; text-decoration: none; }
 nav.pages .mark { display: none; }
@@ -52,37 +52,42 @@ nav.pages .views a:hover { color: var(--ink); background: var(--surface2); }
 nav.pages .views a.on { color: var(--ink); background: var(--surface2); font-weight: 500; }
 nav.pages .count { margin-left: auto; font-size: 11.5px; font-weight: 600; min-width: 20px; text-align: center; padding: 0 6px; border-radius: 999px; color: var(--amber); background: var(--amber-bg); font-variant-numeric: tabular-nums; }
 nav.pages a:focus-visible, nav.pages button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-nav.pages .foot { margin-top: auto; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px 8px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
-nav.pages .tick { display: contents; }
-nav.pages .tick-line { grid-column: 1 / -1; }
-nav.pages .tick-line { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; }
-nav.pages .tick-status { min-width: 0; line-height: 1.35; }
+nav.pages .foot { margin-top: auto; display: flex; align-items: center; gap: 6px; padding: 0 4px; }
 nav.pages .foot button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; }
-nav.pages .theme { width: 36px; padding: 0; color: var(--muted); }
-nav.pages .theme:hover { color: var(--ink); }
+/* The status dot opens a popover above it with the Tick's details and Check now. */
+nav.pages .tick { position: relative; }
+nav.pages .tick-toggle { width: 36px; height: 36px; padding: 0; background: none; border-color: transparent; }
+nav.pages .tick-toggle:hover, nav.pages .tick-toggle[aria-expanded="true"] { background: var(--surface2); }
+nav.pages .tick-toggle .dot { width: 10px; height: 10px; }
+.tick-pop { position: absolute; z-index: 30; left: 0; bottom: calc(100% + 8px); width: 248px; display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow); color: var(--muted); font-size: 12px; line-height: 1.4; }
+.tick-pop .tick-head { display: flex; align-items: center; gap: 8px; color: var(--ink); font-size: 13px; }
+.tick-pop .tick-head strong { font-weight: 600; }
+.tick-pop.late .tick-head { color: var(--amber); }
+.tick-pop button { justify-self: start; }
+nav.pages .theme { width: 36px; height: 36px; padding: 0; background: none; border-color: transparent; color: var(--muted); }
+nav.pages .theme:hover { color: var(--ink); background: var(--surface2); }
 @media (min-width: 700px) {
   nav.pages.compact { align-items: center; padding: 16px 0; gap: 6px; }
   nav.pages.compact .brand { padding: 0 0 14px; }
   nav.pages.compact .word { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   nav.pages.compact .mark { display: block; font-size: 15px; font-weight: 700; letter-spacing: 0; color: var(--accent); }
-  nav.pages.compact .dev-badge, nav.pages.compact .tick-status { display: none; }
+  nav.pages.compact .dev-badge { display: none; }
   nav.pages.compact .label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   nav.pages.compact .views { gap: 6px; }
   nav.pages.compact .views a { width: 36px; height: 36px; padding: 0; justify-content: center; }
   nav.pages.compact .count { position: absolute; top: 5px; right: 5px; width: 7px; height: 7px; min-width: 0; padding: 0; background: var(--amber); box-shadow: 0 0 0 2px var(--side); }
   nav.pages.compact .count .n { display: none; }
-  nav.pages.compact .foot { grid-template-columns: auto; padding: 0; border: 0; background: none; justify-items: center; gap: 6px; }
-  nav.pages.compact .tick-line { justify-content: center; padding-bottom: 4px; }
-  nav.pages.compact .foot button { width: 36px; height: 36px; padding: 0; background: none; border-color: transparent; color: var(--muted); }
-  nav.pages.compact .foot button:hover { color: var(--ink); background: var(--surface2); }
+  nav.pages.compact .foot { flex-direction: column; padding: 0; }
+  nav.pages.compact .foot > button { width: 36px; height: 36px; padding: 0; background: none; border-color: transparent; color: var(--muted); }
+  nav.pages.compact .foot > button:hover { color: var(--ink); background: var(--surface2); }
 }
 @media (max-width: 699px) {
   .shell, .shell.compact { grid-template-columns: minmax(0, 1fr); }
   nav.pages { position: static; height: auto; flex-direction: row; align-items: center; padding: 12px 16px 0; background: none; border-right: 0; }
   nav.pages .brand { padding: 0; }
   nav.pages .foot { margin: 0 0 0 auto; padding: 0; border: 0; background: none; display: flex; align-items: center; gap: 8px; }
-  nav.pages .tick-status { display: none; }
-  nav.pages .foot button { padding: 4px 11px; font-size: 12px; }
+  nav.pages .tick-toggle { width: 32px; height: 30px; }
+  .tick-pop { left: auto; right: 0; bottom: auto; top: calc(100% + 8px); }
   nav.pages .theme { width: 32px; height: 30px; padding: 0; }
   nav.pages .views { position: fixed; z-index: 20; left: 0; right: 0; bottom: 0; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; padding: 8px 6px calc(8px + env(safe-area-inset-bottom)); background: var(--side); border-top: 1px solid var(--line); }
   nav.pages .views a { flex-direction: column; gap: 3px; padding: 4px 0; font-size: 11px; }
@@ -113,8 +118,10 @@ main { padding: 16px; }
 .eyebrow { font-size: 12px; color: var(--muted); }
 .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.35; } 100% { opacity: 1; } }
-/* The header's Tick dot: still when idle, pulsing while a Tick runs, red and still while Lasso is unreachable. */
-.tick-dot.down { background: var(--crit); animation: none; }
+/* The nav's status dot: green and still when on time, pulsing while a Tick runs, orange when late, grey when unreachable. */
+.dot.tick-dot.healthy, .dot.tick-dot.running { background: var(--good); }
+.dot.tick-dot.late { background: var(--amber); }
+.dot.tick-dot.down, .dot.tick-dot.connecting { background: var(--muted); animation: none; }
 @media (prefers-reduced-motion: reduce) { .pulse, .dot.running { animation: none !important; } }
 
 /* status */

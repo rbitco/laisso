@@ -18,9 +18,10 @@ function pulseMs(): number {
 }
 
 /**
- * The nav's Tick dot, its status, and Check now. The dot is still when idle, pulses while a Tick runs, and is red and
- * still while Lasso is unreachable; the status beside it, and its tooltip, say when the last Tick ran and the next is
- * due, and move each second. Until the first status or error neither shows. `onChecked` follows a Check now, so the page reads again.
+ * The nav's status dot: green while Lasso is connected and ticking on time (pulsing while a Tick runs), orange when a
+ * Tick is overdue, grey while Lasso is unreachable or not yet heard from. Clicking it opens a popover saying so in
+ * words, when the last Tick ran and the next is due (moving each second), and Check now. `onChecked` follows a Check
+ * now, so the page reads again.
  */
 export function Tick({ onChecked }: { onChecked: () => void }) {
   const [seen, setSeen] = useState<Seen>("connecting");
@@ -28,6 +29,8 @@ export function Tick({ onChecked }: { onChecked: () => void }) {
   // A running Tick pulses the dot for at least one full cycle of the pulse animation, so a fast one still shows.
   // The tooltip follows the status at once and does not wait for the hold.
   const [pulseUntil, setPulseUntil] = useState(0);
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
   const [, redraw] = useReducer((n: number) => n + 1, 0);
   useClock();
 
@@ -49,12 +52,29 @@ export function Tick({ onChecked }: { onChecked: () => void }) {
 
   const now = Date.now();
   const drawn = seen === "connecting" ? null : tickIndicator(seen, now);
-  const held = drawn?.state === "idle" && now < pulseUntil;
+  const held = (drawn?.state === "healthy" || drawn?.state === "late") && now < pulseUntil;
   useEffect(() => {
     if (!held) return;
     const timer = setTimeout(redraw, pulseUntil - Date.now());
     return () => clearTimeout(timer);
   }, [held, pulseUntil]);
+
+  // A click outside the popover or Escape closes it.
+  useEffect(() => {
+    if (!open) return;
+    const away = (ev: PointerEvent) => {
+      if (!box.current?.contains(ev.target as Node)) setOpen(false);
+    };
+    const escape = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", away);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("pointerdown", away);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [open]);
 
   const check = async () => {
     // The click shows at once rather than waiting on the server's tick event.
@@ -73,18 +93,28 @@ export function Tick({ onChecked }: { onChecked: () => void }) {
     }
   };
 
+  const state = drawn ? (held ? "running" : drawn.state) : "connecting";
+  const label = drawn?.label ?? "Connecting";
   return (
-    <div className="tick">
-      <div className="tick-line">
-        <span className={"dot tick-dot" + (drawn ? " " + (held ? "running" : drawn.state) : "")} data-role="tick-dot" role="img" title={drawn?.title} aria-label={drawn?.title} />
-        <span className="tick-status" data-role="tick-status" aria-hidden="true">
-          {drawn?.title}
-        </span>
-      </div>
-      <button type="button" data-role="check-now" title="Check now" onClick={check}>
-        <RefreshCw aria-hidden="true" />
-        <span className="label">Check now</span>
+    <div className="tick" ref={box}>
+      <button type="button" className="tick-toggle" data-role="tick-toggle" aria-expanded={open} aria-controls="tick-pop" aria-label={"Lasso status: " + label} title={"Lasso status: " + label} onClick={() => setOpen((o) => !o)}>
+        <span className={"dot tick-dot " + state} data-role="tick-dot" aria-hidden="true" />
       </button>
+      {open && (
+        <div className={"tick-pop " + state} id="tick-pop" role="dialog" aria-label="Lasso status" data-role="tick-pop">
+          <div className="tick-head">
+            <span className={"dot tick-dot " + state} aria-hidden="true" />
+            <strong data-role="tick-label">{label}</strong>
+          </div>
+          <div className="tick-status" data-role="tick-status">
+            {drawn?.detail ?? "Waiting for Lasso to answer"}
+          </div>
+          <button type="button" data-role="check-now" disabled={!drawn || drawn.state === "down"} onClick={check}>
+            <RefreshCw aria-hidden="true" />
+            <span>Check now</span>
+          </button>
+        </div>
+      )}
     </div>
   );
 }
