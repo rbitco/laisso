@@ -151,3 +151,9 @@ tracker updates, and starts Queued Sessions. A Tick runs on an interval, on
 Check now, and when a Session ends; one already under way is joined, never
 doubled.
 _Avoid_: poll, refresh, sync, heartbeat
+
+**PR List**:
+A named list of pull requests found by one GitHub search, shown on the
+Pull Requests page. It shows PRs whether or not Lasso made them; a PR that
+is a Ticket's PR links to that Ticket. A PR List only shows; it never acts.
+_Avoid_: column, widget, lane, section, saved search
