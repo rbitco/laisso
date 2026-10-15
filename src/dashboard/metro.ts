@@ -15,7 +15,7 @@ type Colour = "good" | "crit" | "warn" | "run" | "accent" | "muted" | "done";
 /** The colour key each display state paints the current station and the track behind it. */
 export const STATE_COLOUR: Record<DisplayState, Colour> = { flagged: "crit", needs_you: "warn", holding: "warn", ready: "warn", running: "run", queued: "run", quiet: "good", done: "good", abandoned: "muted" };
 const OUTCOME_COLOUR: Record<string, Colour> = { succeeded: "good", failed: "crit", exhausted: "crit", interrupted: "warn" };
-const COL: Record<Colour, string> = { good: "var(--good)", crit: "var(--crit)", warn: "var(--amber)", run: "var(--run)", accent: "var(--accent)", muted: "var(--line)", done: "var(--ink)" };
+const COL: Record<Colour, string> = { good: "var(--good)", crit: "var(--crit)", warn: "var(--amber)", run: "var(--run)", accent: "var(--accent)", muted: "var(--line)", done: "var(--good)" };
 // Stages behind the current one are drawn in the text colour: settled, not a status.
 
 const ESCAPES: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" };
