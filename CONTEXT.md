@@ -121,6 +121,13 @@ killed or crashed), with the Runner's final message. Lasso, not the Runner,
 decides from an Outcome whether the Ticket is Flagged.
 _Avoid_: result, exit code, status, verdict
 
+**Latest Message**:
+The most recent text the main agent of a Session wrote, ignoring its
+thinking, its tool calls, and any subagent's words; for an Action, its last
+non-empty line of output. It changes while the Session runs and is kept
+after it ends, beside the Outcome's final message, which may differ.
+_Avoid_: last output, status line, stdout
+
 **Owned PR**:
 A pull request that carries a Ticket's own work. Lasso polls it for
 Feedback, runs Rounds on it, and waits for it to merge. A Ticket may have
