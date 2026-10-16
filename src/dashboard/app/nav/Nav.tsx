@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { GitPullRequest, ListChecks, Settings2, Workflow, type LucideIcon } from "lucide-react";
-import type { DisplayState, TicketView } from "../../../api/views.ts";
+import type { DisplayState, PrListsStatus, TicketView } from "../../../api/views.ts";
 import { api } from "../api.ts";
 import { useEvents } from "../events.ts";
 import { DevBadge } from "../header/DevBadge.tsx";
@@ -53,13 +53,48 @@ function useNeedsYou(): number {
 }
 
 /**
- * The page's nav: the name and dev badge, the four views with how many Tickets need you, and
+ * Whether a PR List needs a look: gh is missing or logged out, or a list's last fetch failed. Read on load, after a
+ * burst of prlists or config events, and when Lasso comes back. The status endpoint answers from the cache alone, so
+ * reading it never counts as the Pull Requests page being open.
+ */
+function usePrListsFailing(): boolean {
+  const [failing, setFailing] = useState(false);
+  const [reads, setReads] = useState(0);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    let live = true;
+    api<PrListsStatus>("/api/pr-lists/status").then(
+      (status) => live && setFailing(status.failing),
+      () => undefined,
+    );
+    return () => void (live = false);
+  }, [reads]);
+  const gather = () => {
+    timer.current ??= setTimeout(() => {
+      timer.current = null;
+      setReads((n) => n + 1);
+    }, GATHER_MS);
+  };
+  useEvents(["prlists", "config"], gather);
+  const everOpen = useRef(false);
+  useEvents(["hello"], () => {
+    if (everOpen.current) gather();
+    everOpen.current = true;
+  });
+  useEffect(() => () => clearTimeout(timer.current ?? undefined), []);
+  return failing;
+}
+
+/**
+ * The page's nav: the name and dev badge, the four views with how many Tickets need you and an amber dot while a PR
+ * List is failing, and
  * the Tick and theme button at the foot.
  * It is a sidebar; `compact` (a Ticket's page) shrinks it to an icon rail, and below 700px the views become a bottom
  * tab bar. `onChecked` follows a Check now, so the page reads again.
  */
 export function Nav({ on, compact, onChecked }: { on: NavView; compact: boolean; onChecked: () => void }) {
   const needs = useNeedsYou();
+  const prsFailing = usePrListsFailing();
   return (
     <nav className={"pages" + (compact ? " compact" : "")} aria-label="Pages" data-role="nav">
       <h1 className="brand">
@@ -80,6 +115,11 @@ export function Nav({ on, compact, onChecked }: { on: NavView; compact: boolean;
               <span className="count" data-role="needs-you">
                 <span className="n">{needs}</span>
                 <span className="sr">{" need you"}</span>
+              </span>
+            )}
+            {view === "prs" && prsFailing && (
+              <span className="alert-dot" data-role="prs-failing" title="A PR List's last refresh failed">
+                <span className="sr">{" a PR List's last refresh failed"}</span>
               </span>
             )}
           </a>

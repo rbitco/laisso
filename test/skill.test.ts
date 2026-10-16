@@ -197,7 +197,7 @@ describe("the skill in lasso doctor", () => {
   it("reports the skill in --json and never changes the exit code", async () => {
     const lassoHome = mkdtempSync(path.join(tmpdir(), "lasso-doctor-"));
     // A config that needs only git, and a PATH whose git is a stand-in, so the tools are all found.
-    writeFileSync(path.join(lassoHome, "config.yaml"), "profiles: {}\ndefault_profile: null\nnotifications: { enabled: false }\n");
+    writeFileSync(path.join(lassoHome, "config.yaml"), "profiles: {}\ndefault_profile: null\nnotifications: { enabled: false }\npr_lists: {}\n");
     mkdirSync(path.join(lassoHome, "pipelines"));
     writeFileSync(path.join(lassoHome, "pipelines", "only.yaml"), "stages:\n  - name: work\n    prompt: Work.\n");
     const bin = mkdtempSync(path.join(tmpdir(), "lasso-doctor-bin-"));

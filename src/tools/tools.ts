@@ -66,7 +66,8 @@ const PR_ARTIFACTS = new Set(["pr-exists", "pr-review", "pr-merged"]);
  * the Runner of every Agent Profile something names (default_profile, a
  * repo's default, a Pipeline, a Stage, a Ticket's override); gh or acli when
  * a repo's tracker talks through it, an Action's run text names it, or (gh)
- * a Stage reads the PR. A Runner nothing names is not listed.
+ * a Stage reads the PR, and gh while any PR List is configured. A Runner
+ * nothing names is not listed.
  * herdr or tmux when terminal: names it. terminal-notifier is optional
  * while notifications are on.
  */
@@ -115,6 +116,7 @@ export function neededTools(use: ToolUse): NeededTool[] {
   };
   actionNeeds(config.actions, "");
   for (const [repo, r] of Object.entries(config.repos)) actionNeeds(r.actions, `repo ${repo}'s `);
+  if (Object.keys(config.pr_lists).length) need("gh", "PR Lists (pr_lists)");
 
   // auto opens herdr or tmux only when Lasso already runs inside it, so only a terminal config names outright is needed.
   if (config.terminal === "herdr" || config.terminal === "tmux") need(config.terminal, `terminal: ${config.terminal}`);

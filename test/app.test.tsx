@@ -4,7 +4,7 @@ import { render, screen, cleanup, act, waitFor, within } from "@testing-library/
 import { userEvent } from "@testing-library/user-event";
 import { DEFAULT_CONFIG } from "../src/server/config.ts";
 import type { BudgetView } from "../src/budget/budget.ts";
-import type { ConfigFile, PrListsView, Reviewer, IntakeResult, PipelineListing, PipelineVersionView, TicketDetail, VersionView, Health } from "../src/api/views.ts";
+import type { ConfigFile, PrListsStatus, PrListsView, Reviewer, IntakeResult, PipelineListing, PipelineVersionView, TicketDetail, VersionView, Health } from "../src/api/views.ts";
 import type { Detection } from "../src/intake/detect.ts";
 import type { TickResult, TickStatus } from "../src/server/tick.ts";
 import { App } from "../src/dashboard/app/App.tsx";
@@ -72,6 +72,8 @@ const PR_LISTS: PrListsView = {
     { name: "Review requested", query: "is:open review-requested:@me", search: "is:pr is:open review-requested:@me repo:rbitco/lasso sort:updated-desc", url: "https://github.com/pulls?q=review", limit: 25, total: 0, fetchedAt: ago(30), fetching: false, error: null, rows: [] },
   ],
   pausedUntil: null,
+  ghProblem: null,
+  example: null,
 };
 
 const VERSION: PipelineVersionView = { name: "default", version: 2, createdAt: ago(180), live: 1, deleted: false, pipeline: { profile: null, budget: {}, stages: [] } };
@@ -95,6 +97,7 @@ function fakeLasso() {
     version: { version: "1.2.0", notice: { kind: "none" }, text: null } as VersionView,
     build: "1.2.3",
     prLists: PR_LISTS,
+    prStatus: { failing: false } as PrListsStatus,
   };
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
   vi.stubGlobal("fetch", async (url: string, init: RequestInit = {}) => {
@@ -123,6 +126,7 @@ function fakeLasso() {
     if (url === "/api/config") return json({ file: "/c/config.yaml", text: "", config: DEFAULT_CONFIG, restart: [] } satisfies ConfigFile);
     if (url === "/api/actions") return json([]);
     if (url === "/api/pr-lists") return json(state.prLists);
+    if (url === "/api/pr-lists/status") return json(state.prStatus);
     return json({ error: `not found: ${url}` }, 404);
   });
   return { sent, state, gets: (route: string) => sent.filter((s) => s.method === "GET" && s.route === route).length };
@@ -463,6 +467,25 @@ describe("the page's views", () => {
     expect(tickets().textContent).toBe("Tickets");
   });
 
+  it("puts an amber dot on Pull Requests while a PR List is failing, on every page, without reading the lists", async () => {
+    const lasso = fakeLasso();
+    lasso.state.prStatus = { failing: true };
+    render(<App />);
+    const prs = () => within(section("nav")).getByRole("link", { name: /^Pull Requests/ });
+    await waitFor(() => expect(prs().textContent).toBe("Pull Requests a PR List's last refresh failed"));
+    // A refresh succeeds: its "prlists" event re-reads the status, and the dot clears.
+    lasso.state.prStatus = { failing: false };
+    send("prlists");
+    await waitFor(() => expect(section("prs-failing")).toBeNull());
+    // It fails again while Lasso was away: the reconnect's hello re-reads.
+    lasso.state.prStatus = { failing: true };
+    send("hello", freshTick());
+    send("hello", freshTick());
+    await waitFor(() => expect(section("prs-failing")).not.toBeNull());
+    // Only the light status was read: reading the lists would count as the page being open.
+    expect(lasso.gets("/api/pr-lists")).toBe(0);
+  });
+
   it("shrinks the nav to an icon rail on a Ticket's page, its links and status dot still named", async () => {
     fakeLasso();
     render(<App />);
@@ -592,7 +615,7 @@ describe("the Pull Requests page", () => {
     const lists = [...document.querySelectorAll<HTMLElement>('[data-role="pr-list"]')];
     expect(lists.map((l) => l.getAttribute("aria-label"))).toEqual(["Mine", "Review requested"]);
     expect(within(lists[1]!).getByText("0 of 0")).toBeTruthy();
-    expect(within(lists[1]!).queryByRole("link")).toBeNull();
+    expect(within(lists[1]!).queryByRole("link", { name: /^All/ })).toBeNull();
     const all = within(lists[0]!).getByRole("link", { name: /^All 4 on GitHub/ });
     expect([all.getAttribute("href"), all.getAttribute("target")]).toEqual(["https://github.com/pulls?q=mine", "_blank"]);
     const row = section("pr-row");
@@ -611,7 +634,7 @@ describe("the Pull Requests page", () => {
   it("holds placeholder rows before a list's first fetch, shows its age and a spinner, and re-reads on each change and Tick", async () => {
     const lasso = fakeLasso();
     const [mine, review] = PR_LISTS.lists;
-    lasso.state.prLists = { lists: [{ ...mine!, limit: 25, rows: [], total: 0, fetchedAt: null, fetching: true }, { ...review!, fetchedAt: ago(5 * 60) }], pausedUntil: null };
+    lasso.state.prLists = { lists: [{ ...mine!, limit: 25, rows: [], total: 0, fetchedAt: null, fetching: true }, { ...review!, fetchedAt: ago(5 * 60) }], pausedUntil: null, ghProblem: null, example: null };
     location.hash = "#prs";
     await new Promise((r) => setTimeout(r, 10));
     render(<App />);
@@ -622,7 +645,7 @@ describe("the Pull Requests page", () => {
     expect([first!.querySelector('[data-role="pr-age"] .spin') !== null, first!.querySelector('[data-role="pr-age"]')!.textContent]).toEqual([true, ""]);
     expect([second!.querySelector('[data-role="pr-age"]')!.textContent, second!.querySelector(".spin")]).toEqual(["updated 5m ago", null]);
     // The fetch finishes: a "prlists" event re-reads, and the rows and age take the placeholders' place.
-    lasso.state.prLists = { lists: [{ ...mine!, fetchedAt: ago(10) }, { ...review!, fetchedAt: ago(5 * 60) }], pausedUntil: null };
+    lasso.state.prLists = { lists: [{ ...mine!, fetchedAt: ago(10) }, { ...review!, fetchedAt: ago(5 * 60) }], pausedUntil: null, ghProblem: null, example: null };
     send("prlists");
     await screen.findByText("1 of 4");
     expect(document.querySelector('[data-role="pr-placeholders"]')).toBeNull();
@@ -685,7 +708,7 @@ describe("the Pull Requests page", () => {
     const [mine] = PR_LISTS.lists;
     const plain = mine!.rows[0]!;
     const linked = { ...plain, title: "Sleep-proof Tick", number: 102, url: "https://github.com/rbitco/lasso/pull/102", ticket: { id: "A", ref: "APP-A", stage: "review", flag: null } };
-    lasso.state.prLists = { lists: [{ ...mine!, total: 2, rows: [linked, plain] }], pausedUntil: null };
+    lasso.state.prLists = { lists: [{ ...mine!, total: 2, rows: [linked, plain] }], pausedUntil: null, ghProblem: null, example: null };
     location.hash = "#prs";
     await new Promise((r) => setTimeout(r, 10));
     render(<App />);
@@ -704,6 +727,82 @@ describe("the Pull Requests page", () => {
     expect([pr.getAttribute("href"), pr.getAttribute("target")]).toEqual(["https://github.com/rbitco/lasso/pull/102", "_blank"]);
     await userEvent.setup().click(open(withTicket!));
     expect(location.hash).toBe("#A");
+  });
+
+  /** Renders the Pull Requests page over `view` and waits for its first read. */
+  async function prsPage(view: PrListsView) {
+    const lasso = fakeLasso();
+    lasso.state.prLists = view;
+    location.hash = "#prs";
+    await new Promise((r) => setTimeout(r, 10));
+    render(<App />);
+    await waitFor(() => expect(lasso.gets("/api/pr-lists")).toBeGreaterThan(0));
+    await waitFor(() => expect(section("prs").textContent).not.toContain("Reading PR Lists"));
+    return lasso;
+  }
+
+  it("shows one notice in place of the lists while gh is not logged in, or not installed", async () => {
+    await prsPage({ ...PR_LISTS, ghProblem: { kind: "not-logged-in", message: "gh is not logged in" } });
+    const notice = section("pr-gh-problem");
+    expect(notice.textContent).toBe("gh is not logged in, so Lasso cannot search GitHub.Run gh auth login, then Check now");
+    expect(notice.querySelector("code")!.textContent).toBe("gh auth login");
+    expect(document.querySelectorAll('[data-role="pr-list"]')).toHaveLength(0);
+    cleanup();
+    await prsPage({ ...PR_LISTS, ghProblem: { kind: "gh-missing", message: "gh is not installed" } });
+    expect(section("pr-gh-problem").textContent).toBe("gh is not installed, so Lasso cannot search GitHub.Install gh from cli.github.com, then restart Lasso");
+  });
+
+  it("fails only the list whose query GitHub rejected, with GitHub's message, the search as sent and where to fix it", async () => {
+    const [mine, review] = PR_LISTS.lists;
+    await prsPage({ ...PR_LISTS, lists: [mine!, { ...review!, fetchedAt: null, error: { kind: "rejected", message: "The listed users cannot be searched" } }] });
+    const [ok, bad] = [...document.querySelectorAll<HTMLElement>('[data-role="pr-list"]')];
+    expect(ok!.querySelectorAll('[data-role="pr-row"]')).toHaveLength(1);
+    expect(bad!.querySelector("h2 .name")!.textContent).toBe("Review requested");
+    const error = bad!.querySelector<HTMLElement>('[data-role="pr-error"]')!;
+    expect([error.className, error.querySelector("b")!.textContent, error.querySelector("pre")!.textContent, error.querySelector(".why")!.textContent]).toEqual([
+      "card problem pr-problem",
+      "GitHub rejected this query: The listed users cannot be searched",
+      "is:pr is:open review-requested:@me repo:rbitco/lasso sort:updated-desc",
+      "Fix it under pr_lists in config.yaml",
+    ]);
+    expect(bad!.querySelector('[data-role="pr-count"]')).toBeNull();
+    expect(bad!.querySelector('[data-role="pr-empty"]')).toBeNull();
+  });
+
+  it("keeps the rows when a refresh fails after a good fetch, the age amber with why; before one, says why in their place", async () => {
+    const [mine, review] = PR_LISTS.lists;
+    await prsPage({ ...PR_LISTS, lists: [{ ...mine!, fetchedAt: ago(12 * 60), error: { kind: "failed", message: "timed out" } }, { ...review!, fetchedAt: null, error: { kind: "failed", message: "timed out" } }] });
+    const [kept, never] = [...document.querySelectorAll<HTMLElement>('[data-role="pr-list"]')];
+    const age = kept!.querySelector<HTMLElement>('[data-role="pr-age"]')!;
+    expect([age.textContent, age.className]).toEqual(["updated 12m ago · last refresh failed: timed out", "age failed"]);
+    expect(kept!.querySelectorAll('[data-role="pr-row"]')).toHaveLength(1);
+    expect(kept!.querySelector('[data-role="pr-error"]')).toBeNull();
+    expect(never!.querySelector('[data-role="pr-error"] b')!.textContent).toBe("Couldn't fetch this list: timed out");
+    expect(never!.querySelector('[data-role="pr-placeholders"]')).toBeNull();
+  });
+
+  it("says a scoped list with no GitHub repos has nothing to search, and how to fix it", async () => {
+    const [mine] = PR_LISTS.lists;
+    await prsPage({ ...PR_LISTS, lists: [{ ...mine!, search: null, url: null, rows: [], total: 0, fetchedAt: null, error: { kind: "no-github-repos", message: "no repo in config.yaml has a github.com origin, so there is nothing to search. Add one under repos:, or name repo:, org: or user: in the query" } }] });
+    const error = section("pr-error");
+    expect([error.dataset.kind, error.textContent]).toEqual(["no-github-repos", "No repo in config.yaml has a github.com origin, so there is nothing to search. Add one under repos:, or name repo:, org: or user: in the query"]);
+  });
+
+  it("keeps an empty list's heading and says No PRs match, linking the search on GitHub", async () => {
+    await prsPage(PR_LISTS);
+    const empty = [...document.querySelectorAll<HTMLElement>('[data-role="pr-list"]')][1]!;
+    expect(empty.querySelector("h2 .name")!.textContent).toBe("Review requested");
+    const line = empty.querySelector<HTMLElement>('[data-role="pr-empty"]')!;
+    const link = within(line).getByRole("link", { name: /^Search on GitHub/ });
+    expect([line.textContent, link.getAttribute("href"), link.getAttribute("target")]).toEqual(["No PRs match · Search on GitHub ↗", "https://github.com/pulls?q=review", "_blank"]);
+  });
+
+  it("says there are no PR Lists with pr_lists: {}, with the defaults as an example, and keeps the nav entry", async () => {
+    const example = "pr_lists:\n  Mine:\n    query: is:open author:@me\n    limit: 25\n";
+    await prsPage({ lists: [], pausedUntil: null, ghProblem: null, example });
+    const none = section("pr-none");
+    expect([none.querySelector(".note")!.textContent, none.querySelector("pre")!.textContent]).toEqual(["No PR Lists. Add them under pr_lists in config.yaml", example]);
+    expect(navOn()).toEqual(["Pull Requests"]);
   });
 });
 

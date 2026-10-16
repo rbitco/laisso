@@ -23,6 +23,7 @@ profiles:
   pi-gpt: { runner: pi, model: openai/gpt-5 }
 default_profile: claude-opus
 notifications: { enabled: false }
+pr_lists: {}
 `;
 
 const WORK = parsePipeline("work", `stages:
@@ -43,6 +44,14 @@ describe("the tools a config needs", () => {
     expect(tool(tools, "claude")!.reasons).toEqual(["profile claude-opus (default_profile)"]);
     expect(tool(tools, "codex")).toBeUndefined();
     expect(tool(tools, "pi")).toBeUndefined();
+  });
+
+  it("needs gh while any PR List is configured, the defaults included, and not with pr_lists: {}", () => {
+    expect(tool(needs(configOf(PROFILES)), "gh")).toBeUndefined();
+    const defaults = needs(configOf(PROFILES.replace("pr_lists: {}\n", "")));
+    expect(tool(defaults, "gh")!.reasons).toEqual(["PR Lists (pr_lists)"]);
+    const one = needs(configOf(PROFILES.replace("pr_lists: {}", "pr_lists:\n  Mine: { query: is:open author:@me }")));
+    expect(tool(one, "gh")!.reasons).toEqual(["PR Lists (pr_lists)"]);
   });
 
   it("needs the Runner a Pipeline, a Stage, a repo's default or a Ticket's override names", () => {

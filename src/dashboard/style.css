@@ -51,6 +51,7 @@ nav.pages .views a { display: flex; align-items: center; gap: 10px; padding: 8px
 nav.pages .views a:hover { color: var(--ink); background: var(--surface2); }
 nav.pages .views a.on { color: var(--ink); background: var(--surface2); font-weight: 500; }
 nav.pages .count { margin-left: auto; font-size: 11.5px; font-weight: 600; min-width: 20px; text-align: center; padding: 0 6px; border-radius: 999px; color: var(--amber); background: var(--amber-bg); font-variant-numeric: tabular-nums; }
+nav.pages .alert-dot { margin-left: auto; width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--amber); }
 nav.pages a:focus-visible, nav.pages button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 nav.pages .foot { margin-top: auto; display: flex; align-items: center; gap: 6px; padding: 0 4px; }
 nav.pages .foot button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; }
@@ -77,6 +78,7 @@ nav.pages .theme:hover { color: var(--ink); background: var(--surface2); }
   nav.pages.compact .views a { width: 36px; height: 36px; padding: 0; justify-content: center; }
   nav.pages.compact .count { position: absolute; top: 5px; right: 5px; width: 7px; height: 7px; min-width: 0; padding: 0; background: var(--amber); box-shadow: 0 0 0 2px var(--side); }
   nav.pages.compact .count .n { display: none; }
+  nav.pages.compact .alert-dot { position: absolute; top: 5px; right: 5px; width: 7px; height: 7px; box-shadow: 0 0 0 2px var(--side); }
   nav.pages.compact .foot { flex-direction: column; padding: 0; }
   nav.pages.compact .foot > button { width: 36px; height: 36px; padding: 0; background: none; border-color: transparent; color: var(--muted); }
   nav.pages.compact .foot > button:hover { color: var(--ink); background: var(--surface2); }
@@ -95,6 +97,7 @@ nav.pages .theme:hover { color: var(--ink); background: var(--surface2); }
   nav.pages .views a.on { background: none; color: var(--accent); }
   nav.pages .views svg { width: 20px; height: 20px; }
   nav.pages .count { position: absolute; top: 0; left: calc(50% + 8px); margin: 0; min-width: 0; font-size: 10px; padding: 0 5px; }
+  nav.pages .alert-dot { position: absolute; top: 2px; left: calc(50% + 8px); margin: 0; width: 7px; height: 7px; }
   .shell main { padding-bottom: calc(88px + env(safe-area-inset-bottom)); }
 }
 /* A dev build's mark, so a dev clone's dashboard is never taken for the installed Lasso's. */
@@ -564,7 +567,16 @@ button.quiet { background: transparent; }
 .pr-list h2 .age { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 400; }
 .pr-list h2 .spin { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--line); border-top-color: var(--muted); animation: spin 0.8s linear infinite; }
 @media (prefers-reduced-motion: reduce) { .pr-list h2 .spin { animation: none; } }
-.pr-error { margin: 0; font-size: 12.5px; color: var(--amber); }
+.pr-list h2 .age.failed { color: var(--amber); }
+/* A list that cannot show rows, or gh that cannot search: the Config and Pipelines pages' problem card. */
+.pr-problem { gap: 6px; padding: 12px 16px; font-size: 13px; }
+.pr-problem b { font-weight: 600; color: var(--crit); overflow-wrap: anywhere; }
+.pr-problem pre { padding: 8px 10px; border-radius: 8px; background: var(--surface2); overflow-wrap: anywhere; }
+.pr-problem code { font: 12px var(--mono); }
+.pr-empty a { color: var(--accent); text-decoration: none; }
+.pr-empty a:hover { text-decoration: underline; }
+.pr-none { display: grid; gap: 10px; }
+.pr-example { margin: 0; padding: 10px 12px; border-radius: 8px; background: var(--term-bg); color: var(--term-ink); font: 12px/1.55 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .pr-rows { display: grid; gap: 8px; }
 /* A PR row: the verdict pill, the title over the reason, the reviewers, the checks, where it is on GitHub, then its Ticket. Fixed widths line the rows up. */
 .pr-row { position: relative; display: grid; grid-template-columns: 136px minmax(0, 1fr) 140px 132px auto 140px; gap: 4px 16px; align-items: center; padding: 12px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }

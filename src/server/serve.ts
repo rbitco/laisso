@@ -1,7 +1,7 @@
 import { serve as listen } from "@hono/node-server";
 import { resolveHome, ensureHome } from "./home.ts";
 import { migrateConfigProfiles, migrateHome, migrateVersions } from "./migrate.ts";
-import { applyLive, loadConfig } from "./config.ts";
+import { applyLive, loadConfig, prListsBlock } from "./config.ts";
 import { acquireLock, AlreadyRunning } from "./lock.ts";
 import { createLogger } from "./log.ts";
 import { Store, StoreTooNew } from "../store/store.ts";
@@ -141,6 +141,7 @@ export async function serve(opts: ServeOptions): Promise<number> {
     tickMs: () => config.tick * 1000,
     refreshMs: () => parseDuration(config.pr_list_refresh),
     changed: () => changes.emit({ kind: "prlists" }),
+    example: `pr_lists:\n${prListsBlock("").trimEnd().replace(/^/gm, "  ")}\n`,
   });
   // One tick: the PR Lists, which only start their fetches (a Tick never waits on a PR search), then owed mirror
   // pushes, then action Stages, then the PR poll (a Round it makes due starts below), then headless starts, then the

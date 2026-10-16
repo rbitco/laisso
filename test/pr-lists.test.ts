@@ -101,7 +101,7 @@ describe("the PR List cache", () => {
         }
       },
     };
-    t.cache = new PrLists({ lists: () => lists, repos: async () => opts.repos ?? { lasso: LASSO }, search, tickMs: () => TICK, refreshMs: () => REFRESH, changed: () => t.changes++, now: () => now });
+    t.cache = new PrLists({ lists: () => lists, repos: async () => opts.repos ?? { lasso: LASSO }, search, tickMs: () => TICK, refreshMs: () => REFRESH, changed: () => t.changes++, example: "pr_lists: ...", now: () => now });
     return t;
   }
 
@@ -218,7 +218,8 @@ describe("the PR List cache", () => {
     await t.cache.checkNow();
     await t.cache.settle();
     const failed = (await t.cache.read()).lists[0]!;
-    expect([failed.error, failed.rows, failed.fetchedAt]).toEqual(["timed out", good.rows, good.fetchedAt]);
+    expect([failed.error, failed.rows, failed.fetchedAt]).toEqual([{ kind: "failed", message: "timed out" }, good.rows, good.fetchedAt]);
+    expect(t.cache.status()).toEqual({ failing: true });
     // Reads while the page is open don't retry it; the next due Tick does.
     await t.openFor(4);
     expect(t.calls).toHaveLength(2);
@@ -226,6 +227,7 @@ describe("the PR List cache", () => {
     await t.openFor(1);
     const recovered = (await t.cache.read()).lists[0]!;
     expect([recovered.error, recovered.rows.map((r) => r.number), t.calls.length]).toEqual([null, [4, 5], 3]);
+    expect(t.cache.status()).toEqual({ failing: false });
   });
 
   it("reports a list it cannot search without fetching it", async () => {
@@ -233,10 +235,85 @@ describe("the PR List cache", () => {
     const view = await t.cache.read();
     await t.cache.settle();
     expect(view.lists.map((l) => [l.error, l.fetching])).toEqual([
-      [NO_GITHUB_REPOS, false],
+      [{ kind: "no-github-repos", message: NO_GITHUB_REPOS }, false],
       [null, true],
     ]);
     expect(t.calls).toEqual(["is:pr org:example sort:updated-desc"]);
+    // A list that cannot search is a config problem, not a failed fetch: it does not light the nav's dot.
+    expect(t.cache.status()).toEqual({ failing: false });
+  });
+
+  it("holds gh missing as the page's problem, not a list's, keeping the rows, and clears it on the next fetch gh answers", async () => {
+    const t = setup();
+    await t.cache.read();
+    await t.cache.settle();
+    t.setAnswer(() => ({ ok: false, problem: "gh-missing", message: "gh is not installed" }));
+    await t.cache.checkNow();
+    await t.cache.settle();
+    const missing = await t.cache.read();
+    expect(missing.ghProblem).toEqual({ kind: "gh-missing", message: "gh is not installed" });
+    expect(missing.lists.map((l) => [l.error, l.rows.length])).toEqual([
+      [null, 1],
+      [null, 2],
+    ]);
+    expect(t.cache.status()).toEqual({ failing: true });
+    t.setAnswer(() => ok(1, 3));
+    await t.cache.checkNow();
+    await t.cache.settle();
+    expect((await t.cache.read()).ghProblem).toBeNull();
+    expect(t.cache.status()).toEqual({ failing: false });
+  });
+
+  it("holds gh logged out as the page's problem before any good fetch", async () => {
+    const t = setup({ answer: () => ({ ok: false, problem: "not-logged-in", message: "gh is not logged in" }) });
+    await t.cache.read();
+    await t.cache.settle();
+    const view = await t.cache.read();
+    expect([view.ghProblem, view.lists.map((l) => l.error)]).toEqual([{ kind: "not-logged-in", message: "gh is not logged in" }, [null, null]]);
+  });
+
+  it("fails only the list whose query GitHub rejects, dropping its rows, and the others load", async () => {
+    const t = setup();
+    await t.cache.read();
+    await t.cache.settle();
+    t.setAnswer((s) => (s.includes("review-requested") ? { ok: false, problem: "rejected", message: "The listed users cannot be searched" } : ok(1, 3)));
+    await t.cache.checkNow();
+    await t.cache.settle();
+    const view = await t.cache.read();
+    expect(view.lists.map((l) => [l.name, l.error, l.rows.length, l.fetchedAt])).toEqual([
+      ["Mine", null, 1, "2026-10-15T12:00:00.000Z"],
+      ["Review requested", { kind: "rejected", message: "The listed users cannot be searched" }, 0, null],
+    ]);
+    expect([view.ghProblem, t.cache.status()]).toEqual([null, { failing: true }]);
+  });
+
+  it("does not count a rate-limited fetch, a pause or an empty list as failing", async () => {
+    const t = setup({ answer: (s) => (s.includes("review-requested") ? { ok: false, problem: "rate-limited", message: "GitHub rate limit" } : ok(0)) });
+    await t.cache.read();
+    await t.cache.settle();
+    const view = await t.cache.read();
+    expect(view.lists.map((l) => [l.error, l.rows.length])).toEqual([
+      [null, 0],
+      [{ kind: "rate-limited", message: "GitHub rate limit" }, 0],
+    ]);
+    expect(t.cache.status()).toEqual({ failing: false });
+  });
+
+  it("answers its status without opening the page or fetching", async () => {
+    const t = setup();
+    expect(t.cache.status()).toEqual({ failing: false });
+    await t.cache.onTick();
+    expect(t.calls).toEqual([]);
+  });
+
+  it("gives the example to show when config has no lists, and never fails then", async () => {
+    const t = setup({ answer: () => ({ ok: false, problem: "gh-missing", message: "gh is not installed" }) });
+    await t.cache.read();
+    await t.cache.settle();
+    expect(t.cache.status()).toEqual({ failing: true });
+    t.setLists([]);
+    expect(await t.cache.read()).toEqual({ lists: [], pausedUntil: null, ghProblem: null, example: "pr_lists: ..." });
+    expect(t.cache.status()).toEqual({ failing: false });
   });
 
   it("pauses every list below 500 GitHub points until the reset, keeping the rows, and resumes on the first Tick after it", async () => {

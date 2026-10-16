@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import type { CheckCounts, PrListsView, PrListView, PrRow, Reviewer, ReviewerState } from "../../../api/views.ts";
+import type { CheckCounts, GhProblem, PrListError, PrListsView, PrListView, PrRow, Reviewer, ReviewerState } from "../../../api/views.ts";
 import { api } from "../api.ts";
 import { useClock } from "../clock.ts";
 import { useEvents } from "../events.ts";
@@ -77,29 +77,68 @@ export function PrsPage({ visit }: { visit: number }) {
       </div>
       {!view ? (
         <p className="note">Reading PR Lists…</p>
-      ) : view.lists.length ? (
-        view.lists.map((list) => <PrListBlock key={list.name} list={list} pausedUntil={view.pausedUntil} />)
+      ) : !view.lists.length ? (
+        <NoLists example={view.example} />
+      ) : view.ghProblem ? (
+        <GhNotice problem={view.ghProblem} />
       ) : (
-        <p className="note">No PR Lists. Add some under pr_lists: in config.yaml, or on the Config page.</p>
+        view.lists.map((list) => <PrListBlock key={list.name} list={list} pausedUntil={view.pausedUntil} />)
       )}
     </div>
   );
 }
 
+/** What stands in for every list while gh cannot search: the problem, and the fix. */
+function GhNotice({ problem }: { problem: GhProblem }) {
+  return (
+    <div className="card problem pr-problem" data-role="pr-gh-problem" role="alert">
+      <b>{problem.kind === "gh-missing" ? "gh is not installed, so Lasso cannot search GitHub." : "gh is not logged in, so Lasso cannot search GitHub."}</b>
+      <span>
+        {problem.kind === "gh-missing" ? (
+          "Install gh from cli.github.com, then restart Lasso"
+        ) : (
+          <>
+            Run <code>gh auth login</code>, then Check now
+          </>
+        )}
+      </span>
+    </div>
+  );
+}
+
+/** pr_lists: {} — no lists, and the defaults as the example to start from. */
+function NoLists({ example }: { example: string | null }) {
+  return (
+    <div className="pr-none" data-role="pr-none">
+      <p className="note">No PR Lists. Add them under pr_lists in config.yaml</p>
+      {example && <pre className="pr-example">{example}</pre>}
+    </div>
+  );
+}
+
+/** A message with its first letter capitalised, to stand as a sentence of its own. */
+const sentence = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
 /**
  * One PR List: its heading (name, "N of total", the link to the rest on GitHub, and how fresh it is), then its rows.
- * Before its first fetch, grey placeholder rows hold its place.
+ * Before its first fetch, grey placeholder rows hold its place. A list that cannot search, whose query GitHub rejected,
+ * or that has failed before any good fetch shows why in place of rows; a failure after a good fetch keeps the rows and
+ * says so in the heading. A list with no PRs says so, linking the same search on GitHub.
  */
 function PrListBlock({ list, pausedUntil }: { list: PrListView; pausedUntil: string | null }) {
   const cut = list.total > list.rows.length;
+  const blocked = list.error !== null && list.fetchedAt === null;
   const waiting = list.fetchedAt === null && list.search !== null && !list.error;
+  const empty = list.fetchedAt !== null && list.error?.kind !== "rejected" && list.rows.length === 0;
   return (
     <section className="pr-list" data-role="pr-list" aria-label={list.name}>
       <h2>
         <span className="name">{list.name}</span>
-        <span className="n" data-role="pr-count">
-          {list.rows.length} of {list.total}
-        </span>
+        {!blocked && (
+          <span className="n" data-role="pr-count">
+            {list.rows.length} of {list.total}
+          </span>
+        )}
         {cut && list.url && (
           <a className="more" href={list.url} target="_blank" rel="noreferrer" data-role="pr-all">
             All {list.total} on GitHub ↗
@@ -107,7 +146,20 @@ function PrListBlock({ list, pausedUntil }: { list: PrListView; pausedUntil: str
         )}
         <Freshness list={list} pausedUntil={pausedUntil} />
       </h2>
-      {list.error && <p className="pr-error">{list.error}</p>}
+      {blocked && list.error && <ListProblem list={list} error={list.error} />}
+      {empty && (
+        <p className="note pr-empty" data-role="pr-empty">
+          No PRs match
+          {list.url && (
+            <>
+              {" · "}
+              <a href={list.url} target="_blank" rel="noreferrer">
+                Search on GitHub ↗
+              </a>
+            </>
+          )}
+        </p>
+      )}
       {waiting && (
         <div className="pr-rows" data-role="pr-placeholders" aria-hidden="true">
           {Array.from({ length: Math.min(list.limit, PLACEHOLDER_ROWS) }, (_, i) => (
@@ -127,15 +179,42 @@ function PrListBlock({ list, pausedUntil }: { list: PrListView; pausedUntil: str
 }
 
 /**
+ * Why a list has no rows to show, in the error styling: no configured repo is on GitHub; GitHub rejected the query,
+ * with its message, the search as sent and where to fix it; or the fetch failed before any good one.
+ */
+function ListProblem({ list, error }: { list: PrListView; error: PrListError }) {
+  return (
+    <div className="card problem pr-problem" data-role="pr-error" data-kind={error.kind}>
+      {error.kind === "no-github-repos" ? (
+        <span>{sentence(error.message)}</span>
+      ) : error.kind === "rejected" ? (
+        <>
+          <b>GitHub rejected this query: {error.message}</b>
+          {list.search && <pre data-role="pr-search">{list.search}</pre>}
+          <span className="why">Fix it under pr_lists in config.yaml</span>
+        </>
+      ) : (
+        <>
+          <b>Couldn't fetch this list: {error.message}</b>
+          <span className="why">Lasso tries again at the next refresh.</span>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
  * How fresh a list is, at the heading's right: a spinner while it fetches, then "paused until 3:40, GitHub rate limit"
- * while GitHub points are low, else "updated 4m ago", moving as time passes.
+ * while GitHub points are low, else "updated 4m ago", moving as time passes. When a refresh after a good fetch failed,
+ * it turns amber and adds why.
  */
 function Freshness({ list, pausedUntil }: { list: PrListView; pausedUntil: string | null }) {
   useClock();
-  const words = pausedUntil ? `paused until ${clockTime(pausedUntil)}, GitHub rate limit` : list.fetchedAt ? updatedLabel(list.fetchedAt) : null;
+  const failed = !pausedUntil && list.fetchedAt !== null && (list.error?.kind === "failed" || list.error?.kind === "rate-limited") ? list.error : null;
+  const words = pausedUntil ? `paused until ${clockTime(pausedUntil)}, GitHub rate limit` : list.fetchedAt ? updatedLabel(list.fetchedAt) + (failed ? ` · last refresh failed: ${failed.message}` : "") : null;
   if (!words && !list.fetching) return null;
   return (
-    <span className="age" data-role="pr-age" title={list.fetchedAt ?? undefined}>
+    <span className={failed ? "age failed" : "age"} data-role="pr-age" title={list.fetchedAt ?? undefined}>
       {list.fetching && <span className="spin" role="status" aria-label="refreshing" />}
       {words}
     </span>

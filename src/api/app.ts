@@ -335,6 +335,8 @@ export function createApp(deps: AppDeps): Hono {
   });
   // The Pull Requests page: every PR List in config order, fetching any not fetched yet.
   app.get("/api/pr-lists", async (c) => c.json(await deps.prLists.read()));
+  // The nav's dot, on every page: read from the cache alone, so it never counts as the page being open.
+  app.get("/api/pr-lists/status", (c) => c.json(deps.prLists.status()));
   // What still names a profile is listed first and the delete waits for ?confirm=1, as those Stages would be Flagged at their next Session.
   app.delete("/api/profiles/:name", (c) => {
     const name = c.req.param("name");

@@ -252,7 +252,7 @@ export interface PrListsYaml {
   text: string;
 }
 
-export type { PrListsView, PrListView } from "../prs/lists.ts";
+export type { PrListsView, PrListView, PrListError, PrListsStatus, GhProblem } from "../prs/lists.ts";
 export type { CheckCounts, PrRow, PrTicket, Reviewer, ReviewerState } from "../prs/rows.ts";
 
 /** The running version and what Lasso has to say about it; `text` is the line to show, null when there is nothing to say. */
