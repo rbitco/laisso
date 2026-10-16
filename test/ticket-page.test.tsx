@@ -38,7 +38,7 @@ const BUDGET: BudgetView = {
 function session(over: Partial<SessionView> = {}): SessionView {
   return {
     id: "S1", ticket: "A", stage: "plan", ordinal: 1, round: null, feedback: [], mode: "headless", startedBy: "auto", startedAt: T0, endedAt: T0, endedBy: null,
-    endedReason: null, outcome: "succeeded", finalMessage: "Planned.", costUsd: 0.5, usage: null, limitsHonoured: [], openedAt: null, runnerSessionId: null,
+    endedReason: null, outcome: "succeeded", finalMessage: "Planned.", latestMessage: null, costUsd: 0.5, usage: null, limitsHonoured: [], openedAt: null, runnerSessionId: null,
     profile: { name: "claude-opus", runner: "claude", model: "opus", effort: null, permission: null, args: [] }, runner: "claude", stdoutPath: "/out/S1.log", transcriptPath: null,
     running: false, durationMs: 60_000, ...over,
   };
@@ -327,6 +327,35 @@ describe("keeping up with Lasso", () => {
     await user.click(within(pane).getByRole("button", { name: "View stdout" }));
     act(() => void document.querySelector('[data-role="stdout"]')!.dispatchEvent(new Event("cancel", { cancelable: true })));
     expect(document.querySelector('[data-role="stdout"]')).toBeNull();
+  });
+
+  it("shows a running Session's Latest Message, live, with a placeholder before the first", async () => {
+    const running = session({ ticket: "A", id: "S9", stage: "implement", running: true, outcome: null, finalMessage: null });
+    const lasso = fakeLasso([ticket("A", { session: running, sessions: [running] })]);
+    await showPage("A");
+    const words = document.querySelector<HTMLElement>('[data-role="words"]')!;
+    expect(words.textContent).toBe("Latest Message" + "Waiting for the agent's first message…");
+    expect(words.querySelector(".live-dot")).toBeTruthy();
+    const said = { ...running, latestMessage: "Adding the toggle." };
+    lasso.state.tickets.A = { ...lasso.state.tickets.A!, session: said, sessions: [said] };
+    act(() => void events().dispatchEvent(new MessageEvent("ticket", { data: JSON.stringify({ ticket: "A" }) })));
+    await waitFor(() => expect(document.querySelector('[data-role="latest"]')!.textContent).toBe("Adding the toggle."));
+  });
+
+  it("shows an ended Session's final message, with the agent's last words only when they differ", async () => {
+    const same = session({ finalMessage: "Planned.", latestMessage: "Planned." });
+    fakeLasso([ticket("A", { session: same, sessions: [same] })]);
+    await showPage("A");
+    expect(document.querySelector('[data-role="final"]')!.textContent).toBe("Planned.");
+    expect(document.querySelector('[data-role="final"]')!.className).toBe("words-text ok");
+    expect(document.querySelector('[data-role="last-words"]')).toBeNull();
+    cleanup();
+
+    const killed = session({ outcome: "interrupted", finalMessage: "killed: stop", latestMessage: "Adding the toggle." });
+    fakeLasso([ticket("A", { session: killed, sessions: [killed] })]);
+    await showPage("A");
+    expect(document.querySelector('[data-role="final"]')!.className).toBe("words-text");
+    expect(document.querySelector('[data-role="words"]')!.textContent).toBe("Final message" + "killed: stop" + "Agent's last words" + "Adding the toggle.");
   });
 
   it("offers no stdout for a built-in action Session", async () => {

@@ -39,12 +39,12 @@ function storeAt(file: string, schema: number): void {
   db.close();
 }
 
-/** A store one migration behind: the last migration (a Ticket's check results) undone. */
+/** A store one migration behind: the last migration (a Session's Latest Message) undone. */
 function storeOneBehind(file: string): DatabaseSync {
   new Store(file).close();
   const db = new DatabaseSync(file);
   db.exec("PRAGMA journal_mode = WAL");
-  db.exec("ALTER TABLE tickets DROP COLUMN artifact_checks");
+  db.exec("ALTER TABLE sessions DROP COLUMN latest_message");
   db.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run(String(SCHEMA_VERSION - 1));
   return db;
 }
@@ -100,12 +100,28 @@ describe("the store backup before migrating", () => {
     const db = new DatabaseSync(copy);
     try {
       expect(db.prepare(`SELECT pipeline FROM pipeline_versions`).all()).toEqual([{ pipeline: "work" }]);
-      const columns = (db.prepare(`PRAGMA table_info(tickets)`).all() as Array<{ name: string }>).map((c) => c.name);
-      expect(columns).not.toContain("artifact_checks");
+      const columns = (db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map((c) => c.name);
+      expect(columns).not.toContain("latest_message");
     } finally {
       db.close();
     }
     expect(schemaOf(file)).toBe(SCHEMA_VERSION);
+  });
+
+  it("leaves a Session from before Latest Message with none", async () => {
+    const dir = await tempDir();
+    const file = path.join(dir, "lasso.db");
+    const old = storeOneBehind(file);
+    old.exec("PRAGMA foreign_keys = OFF");
+    old.exec(`INSERT INTO sessions (id, ticket, stage, ordinal, stage_snapshot, mode, started_by, started_at, final_message)
+              VALUES ('01S', '01T', 'plan', 1, '{}', 'headless', 'auto', '2026-10-13', 'done')`);
+    old.close();
+    const store = new Store(file, { backupsDir: path.join(dir, "backups") });
+    try {
+      expect(store.db.prepare(`SELECT latest_message, final_message FROM sessions`).get()).toEqual({ latest_message: null, final_message: "done" });
+    } finally {
+      store.close();
+    }
   });
 
   it("is not taken when nothing migrates, or for a brand-new store", async () => {

@@ -77,6 +77,8 @@ export interface RunnerAdapter {
   sessionIds: "lasso" | "runner";
   command(request: RunRequest): Command;
   parse(stdout: string, request: Pick<RunRequest, "cwd" | "sessionId">): Outcome;
+  /** The agent's own words in one complete line of headless stdout, or null when the line holds none: the Latest Message as it streams. */
+  message(line: string): string | null;
   /** Where the Runner will keep its own transcript for this request; null when the Runner has none. */
   transcriptPath(request: Pick<RunRequest, "cwd" | "sessionId">): string | null;
   /**

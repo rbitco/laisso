@@ -83,7 +83,7 @@ function Duration({ session: s }: { session: SessionView }) {
 }
 
 /**
- * The latest Session: its header, Stop, Take over or Open terminal while it runs, its last word, its stdout behind a button, and the paths to
+ * The latest Session: its header, Stop, Take over or Open terminal while it runs, the agent's words, its stdout behind a button, and the paths to
  * copy. `refresh` follows a Stop or Open terminal that went through.
  */
 export function SessionPane({ ticket: t, session: s, refresh }: { ticket: TicketDetail; session: SessionView; refresh: () => Promise<void> }) {
@@ -176,7 +176,7 @@ export function SessionPane({ ticket: t, session: s, refresh }: { ticket: Ticket
     <section className="session" data-role="session">
       {head}
       <FeedbackList items={s.feedback} />
-      {final}
+      <Words session={s} />
       <div className="paths">
         {s.stdoutPath && (
           <button type="button" className="stdout-open" data-role="stdout-open" onClick={() => setStdout(true)}>
@@ -189,6 +189,43 @@ export function SessionPane({ ticket: t, session: s, refresh }: { ticket: Ticket
       </div>
       {stdout && <StdoutModal ticket={t} session={s} onClose={() => setStdout(false)} />}
     </section>
+  );
+}
+
+/**
+ * What the agent said: its Latest Message while the Session runs; once it ends, the final message, with the agent's
+ * last words beneath when they differ from it.
+ */
+function Words({ session: s }: { session: SessionView }) {
+  if (s.running) {
+    return (
+      <div className="words" data-role="words">
+        <div className="words-label">
+          <span className="live-dot" />
+          Latest Message
+        </div>
+        <div className="words-text" data-role="latest">
+          {s.latestMessage ?? <span className="dim">{s.mode === "action" ? "Waiting for the first line of output…" : "Waiting for the agent's first message…"}</span>}
+        </div>
+      </div>
+    );
+  }
+  const differs = s.latestMessage !== null && s.latestMessage.trim() !== (s.finalMessage ?? "").trim();
+  return (
+    <div className="words" data-role="words">
+      <div className="words-label">Final message</div>
+      <div className={"words-text" + (s.outcome === "succeeded" ? " ok" : "")} data-role="final">
+        {s.finalMessage ?? <span className="dim">No final message.</span>}
+      </div>
+      {differs && (
+        <>
+          <div className="words-label">Agent's last words</div>
+          <div className="words-text dim" data-role="last-words">
+            {s.latestMessage}
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 

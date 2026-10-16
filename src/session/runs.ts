@@ -12,6 +12,7 @@ import type { Pipeline, RunnerStage } from "../pipeline/load.ts";
 import type { Progress } from "./progress.ts";
 import { adapterFor } from "../runner/adapters.ts";
 import { requestFor, type RunRequest, type Outcome } from "../runner/adapter.ts";
+import { LatestMessageTracker } from "./latest-message.ts";
 import { checkArtifact } from "../artifact/check.ts";
 import type { ActionChecks } from "../artifact/action-check.ts";
 import { parseDuration } from "../duration.ts";
@@ -53,6 +54,8 @@ interface Live {
   stdoutPath: string;
   fd: number;
   stderr: string;
+  /** Keeps the Session's Latest Message as stdout streams. */
+  messages: LatestMessageTracker;
   wallTimer: NodeJS.Timeout | null;
   killReason: EndedReason | null;
   /** A human is taking the Session over in a terminal: however it ends, Lasso reaches no verdict on it. */
@@ -193,13 +196,15 @@ export class Runs {
     });
     let resolve!: (row: SessionRow) => void;
     const done = new Promise<SessionRow>((r) => (resolve = r));
-    const live: Live = { child, ticket: ticket.id, stage, request, stdoutPath, fd, stderr: "", wallTimer: null, killReason: null, takenOver: false, spawnError: null, notOnPath: false, exit: null, done, resolve };
+    const live: Live = { child, ticket: ticket.id, stage, request, stdoutPath, fd, stderr: "", messages: new LatestMessageTracker((line) => adapter.message(line)), wallTimer: null, killReason: null, takenOver: false, spawnError: null, notOnPath: false, exit: null, done, resolve };
     this.live.set(sessionId, live);
     if (command.stdin !== undefined) child.stdin!.end(command.stdin);
 
     child.stdout!.on("data", (chunk: Buffer) => {
       writeSync(fd, chunk);
       this.deps.stdoutWritten?.(ticket.id, sessionId);
+      const message = live.messages.feed(chunk);
+      if (message !== null) sessions.setLatestMessage(sessionId, message);
     });
     child.stderr!.on("data", (chunk: Buffer) => (live.stderr += chunk.toString()));
     // The pid is recorded at once, so a Lasso killed before the spawn event still leaves a reconcilable row.
@@ -326,6 +331,8 @@ export class Runs {
   private async end(sessionId: string, live: Live): Promise<void> {
     const adapter = adapterFor(live.request.profile.runner);
     const stdout = live.spawnError ? "" : readFileSync(live.stdoutPath, "utf8");
+    const message = live.messages.flush();
+    if (message !== null) this.deps.sessions.setLatestMessage(sessionId, message);
     const parsed = adapter.parse(stdout, live.request);
     // A signal death, whoever sent it (exit 143 is SIGTERM under a shell), is an interruption whatever stdout says.
     const terminated = live.exit?.code === 143 || live.exit?.signal != null;

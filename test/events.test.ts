@@ -56,6 +56,20 @@ async function lassoWith() {
 const admit = (lasso: Lasso) => lasso.api<IntakeResult>("/api/tickets", { method: "POST", body: JSON.stringify({ input: "Add dark mode", repo: "app", pipeline: "one" }) });
 
 describe("the event stream", () => {
+  it("names the Ticket when a running Session's Latest Message changes", async () => {
+    const lasso = await lassoWith();
+    const ticket = await admit(lasso);
+    const stream = listen(lasso);
+    await stream.seen("hello", (e) => e.event === "hello");
+    await lasso.runner.script({ stdout: JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "On it." }] }, parent_tool_use_id: null }), delayMs: 500, hang: true });
+    await lasso.api("/api/check-now", { method: "POST" });
+    const out = await stream.seen("stdout", (e) => e.event === "stdout" && e.data.ticket === ticket.id);
+    await stream.seen("the Ticket after stdout", (e) => stream.events.indexOf(e) > stream.events.indexOf(out) && e.event === "ticket" && e.data.ticket === ticket.id);
+    const d = await lasso.api<TicketDetail>(`/api/tickets/${ticket.id}`);
+    expect(d.session!.latestMessage).toBe("On it.");
+    stream.close();
+  });
+
   it("says hello with the tick status, then names each Ticket that changed, a burst of writes as one event", async () => {
     const lasso = await lassoWith();
     const stream = listen(lasso);

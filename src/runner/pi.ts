@@ -73,6 +73,11 @@ export const piAdapter: RunnerAdapter = {
   },
 
   /** The directory Pi keeps this worktree's sessions in; the file is named by the run's own timestamp. */
+  // Read from LASSO-155; until then a Session of this Runner keeps no Latest Message.
+  message(): string | null {
+    return null;
+  },
+
   transcriptPath(request): string {
     return sessionsDir(request.cwd);
   },

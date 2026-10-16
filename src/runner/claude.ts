@@ -75,6 +75,24 @@ export const claudeAdapter: RunnerAdapter = {
     };
   },
 
+  // The main agent's text blocks: a subagent's turn names its parent tool use, and thinking and tool calls are not words to a human.
+  // The result record repeats the last of them, so it is never read here.
+  message(line: string): string | null {
+    if (!line.startsWith('{"type":"assistant"')) return null;
+    const record = jsonLines(line)[0];
+    if (!record || record.parent_tool_use_id != null) return null;
+    const content = obj(record.message)?.content;
+    if (!Array.isArray(content)) return null;
+    const text = content
+      .map((block: unknown) => obj(block))
+      .filter((block) => block?.type === "text")
+      .map((block) => str(block!.text))
+      .filter((part): part is string => part !== null)
+      .join("\n\n")
+      .trim();
+    return text || null;
+  },
+
   transcriptPath(request): string {
     return path.join(homedir(), ".claude", "projects", request.cwd.replace(/[^a-zA-Z0-9]/g, "-"), `${request.sessionId}.jsonl`);
   },

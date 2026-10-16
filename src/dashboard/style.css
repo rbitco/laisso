@@ -346,6 +346,12 @@ dialog.modal::backdrop { background: rgba(0, 0, 0, 0.55); backdrop-filter: blur(
 .session pre[data-trimmed]::before { content: '… earlier output trimmed; the whole log is at the path above'; display: block; color: var(--muted); }
 .session .final { color: var(--term-bright); border-top: 1px solid var(--term-line); padding-top: 8px; white-space: pre-wrap; }
 .session .final.ok { color: var(--term-ok); }
+.session .words { display: grid; gap: 6px; border-top: 1px solid var(--term-line); padding-top: 10px; }
+.session .words-label { font-size: 11px; color: var(--term-dim); text-transform: uppercase; letter-spacing: .06em; display: flex; align-items: center; gap: 6px; }
+.session .words-text { color: var(--term-bright); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; }
+.session .words-text.ok { color: var(--term-ok); }
+.session .words .dim { color: var(--term-dim); }
+.session .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--run); animation: pulse var(--pulse) infinite; }
 .session .paths { display: flex; flex-wrap: wrap; gap: 6px; }
 .session .paths button { font: inherit; font-size: 11px; padding: 2px 8px; background: var(--term-pill); color: var(--term-dim); border-color: var(--term-line); }
 .session button.stop { background: var(--crit); color: #fff; border-color: var(--crit); font: inherit; }

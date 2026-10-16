@@ -47,6 +47,8 @@ export interface SessionRow {
   runner_session_id: string | null;
   /** A SessionProfile as JSON; null for action Sessions and those from before Agent Profiles. */
   profile: string | null;
+  /** The newest message the agent wrote while the Session ran; null until it writes one. Not the Outcome's final message. */
+  latest_message: string | null;
 }
 
 export type NewSession = Pick<SessionRow, "id" | "ticket" | "stage" | "stage_snapshot" | "mode" | "started_by" | "stdout_path" | "limits_honoured"> & Partial<Pick<SessionRow, "transcript_path" | "round" | "profile">>;
@@ -107,6 +109,11 @@ export class Sessions {
 
   setRunnerSession(id: string, runnerSessionId: string): SessionRow {
     this.db.prepare(`UPDATE sessions SET runner_session_id = ? WHERE id = ?`).run(runnerSessionId, id);
+    return this.touched(id);
+  }
+
+  setLatestMessage(id: string, message: string): SessionRow {
+    this.db.prepare(`UPDATE sessions SET latest_message = ? WHERE id = ?`).run(message, id);
     return this.touched(id);
   }
 

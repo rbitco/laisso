@@ -139,6 +139,8 @@ export interface SessionView {
   endedReason: SessionRow["ended_reason"];
   outcome: SessionRow["outcome"];
   finalMessage: string | null;
+  /** The newest message the agent wrote as it ran; null before its first, and for Runners and Actions not yet read. */
+  latestMessage: string | null;
   costUsd: number | null;
   usage: Record<string, unknown> | null;
   /** Which of the requested limits the Runner honoured itself. */
@@ -406,6 +408,7 @@ export function sessionView(row: SessionRow, now: number = Date.now(), feedback:
     endedReason: row.ended_reason,
     outcome: row.outcome,
     finalMessage: row.final_message,
+    latestMessage: row.latest_message,
     costUsd: row.cost_usd,
     usage: row.usage ? (JSON.parse(row.usage) as Record<string, unknown>) : null,
     limitsHonoured: row.limits_honoured ? (JSON.parse(row.limits_honoured) as string[]) : [],

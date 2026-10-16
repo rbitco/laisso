@@ -78,6 +78,11 @@ export const codexAdapter: RunnerAdapter = {
   },
 
   /** The rollout file is named by Codex at thread creation; nothing to promise before then. */
+  // Read from LASSO-155; until then a Session of this Runner keeps no Latest Message.
+  message(): string | null {
+    return null;
+  },
+
   transcriptPath(): null {
     return null;
   },

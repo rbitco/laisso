@@ -87,6 +87,21 @@ describe("a headless Stage", () => {
     await expect(lasso.api(`/api/tickets/${ticket.id}/sessions/${session.id}/stop`, { method: "POST" })).rejects.toThrow("is not running");
   });
 
+  it("keeps the Latest Message as the Runner writes, apart from the final message", async () => {
+    const { lasso, ticket } = await lassoWithTicket();
+    const said = (text: string, parent: string | null = null) => JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text }] }, parent_tool_use_id: parent });
+    await lasso.runner.script({ stdout: [said("Reading the code."), said("A subagent's words.", "toolu_1"), said("Adding the toggle.")].join("\n"), hang: true });
+    await checkNow(lasso);
+    const live = await waitFor(async () => {
+      const d = await detailOf(lasso, ticket.id);
+      return d.session?.latestMessage === "Adding the toggle." ? d : null;
+    }, "the Latest Message");
+    expect(live.session).toMatchObject({ running: true, finalMessage: null });
+
+    const stopped = await lasso.api<SessionView>(`/api/tickets/${ticket.id}/sessions/${live.session!.id}/stop`, { method: "POST" });
+    expect(stopped).toMatchObject({ finalMessage: "killed: stop", latestMessage: "Adding the toggle." });
+  });
+
   it("advances on succeeded with the artifact present, and finishes the Ticket after the last Stage", async () => {
     const { lasso, ticket } = await lassoWithTicket();
     // One check-now: implement's end kicks the tick, which starts notes without waiting for the timer.
