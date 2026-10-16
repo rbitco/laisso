@@ -3,12 +3,14 @@ import { buildSearch, searchUrl, NO_GITHUB_REPOS, type GitHubRepo } from "../src
 import { parseGitHubRemote } from "../src/prs/origins.ts";
 import { PrLists, type PrListSetting } from "../src/prs/lists.ts";
 import type { PrSearchClient, SearchResult } from "../src/prs/search.ts";
-import { prRow, teamInitials, type PrNode, type Verdict } from "../src/prs/rows.ts";
+import { prRow, teamInitials, ticketForPr, ticketMatcher, type PrNode, type TicketForPr, type Verdict } from "../src/prs/rows.ts";
 import { checksLabel } from "../src/dashboard/app/prs/PrsPage.tsx";
+import type { TicketRow } from "../src/store/tickets.ts";
 
 // PR Lists (LASSO-138): the search each list's query becomes, the repos it is scoped to, and the cache the page reads.
 // PR rows (LASSO-132): each row's verdict and check counts, and the checks cell's words.
 // Reviewers (LASSO-133): who reviews a PR, in what state, worst first, and who "Needs review" waits on.
+// Tickets on rows (LASSO-137): the Lasso Ticket each PR matches, by PR URL or by repo and branch, and its Flag.
 
 const LASSO: GitHubRepo = { owner: "rbitco", name: "lasso" };
 const SITE: GitHubRepo = { owner: "rbitco", name: "site" };
@@ -71,7 +73,7 @@ describe("the PR List cache", () => {
       { name: "Mine", query: "is:open author:@me", limit: 25 },
     ];
     const { calls, search } = fake((s) => (s.includes("review-requested") ? ok(31, 1, 2) : ok(1, 3)));
-    const cache = new PrLists({ lists: () => lists, repos: async () => [LASSO], search, now: () => Date.parse("2026-10-15T12:05:00Z") });
+    const cache = new PrLists({ lists: () => lists, repos: async () => ({ lasso: LASSO }), search, now: () => Date.parse("2026-10-15T12:05:00Z") });
     const [a, b] = await Promise.all([cache.read(), cache.read()]);
     expect(a).toEqual(b);
     expect(a.lists.map((l) => [l.name, l.rows.map((r) => r.number), l.total, l.fetchedAt])).toEqual([
@@ -91,7 +93,7 @@ describe("the PR List cache", () => {
   it("reports a list it cannot search or fetch, and tries a failed fetch again on the next read", async () => {
     let fail = true;
     const { calls, search } = fake(() => (fail ? { ok: false, problem: "failed", message: "timed out" } : ok(1, 1)));
-    const cache = new PrLists({ lists: () => [{ name: "Mine", query: "is:open", limit: 25 }, { name: "Elsewhere", query: "org:example", limit: 25 }], repos: async () => [], search });
+    const cache = new PrLists({ lists: () => [{ name: "Mine", query: "is:open", limit: 25 }, { name: "Elsewhere", query: "org:example", limit: 25 }], repos: async () => ({}), search });
     const first = await cache.read();
     expect(first.lists.map((l) => l.error)).toEqual([NO_GITHUB_REPOS, "timed out"]);
     fail = false;
@@ -129,6 +131,7 @@ describe("a PR row", () => {
       verdict: { word: "Ready to merge", reason: "checks green, approved", tone: "good" },
       checks: {},
       reviewers: [],
+      ticket: null,
     });
     expect(prRow({})).toBeNull();
     expect(prRow(pr({ author: null }))!.author).toBe("ghost");
@@ -281,5 +284,80 @@ describe("a PR's reviewers", () => {
     expect(reason(pr({ latest: [{ login: "lpinca", state: "DISMISSED" }], requests: [{ login: "jo" }, { team: "rbitco/web-platform" }] }))).toBe("waiting on lpinca, jo, @rbitco/web-platform");
     expect(reason(pr({ requests: [{ hidden: true }] }))).toBe("waiting on a team you can't see");
     expect(reason(pr({ requests: [{ login: "a" }, { login: "b" }, { login: "c" }, { login: "d" }, { login: "e" }] }))).toBe("waiting on a, b, c and 2 more");
+  });
+});
+
+describe("a PR row's Ticket", () => {
+  const ID = "01TICKET0000000000000000AB";
+  const node = (fields: Partial<PrNode> = {}): PrNode => ({
+    number: 7,
+    title: "Add the PR page",
+    url: "https://github.com/rbitco/lasso/pull/7",
+    repository: { nameWithOwner: "rbitco/lasso" },
+    author: { login: "matt" },
+    headRefName: "lasso-7-pr-page",
+    reviewDecision: "APPROVED",
+    commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { checkRunCountsByState: [{ state: "IN_PROGRESS", count: 1 }] } } } }] },
+    ...fields,
+  });
+  type Row = Parameters<typeof ticketForPr>[0];
+  const row = (fields: Partial<Row> = {}): Row => ({ id: ID, name: null, reference: "LASSO-7", stage: "review", state: "active", flagged_at: null, flag_reason: null, pr: null, branch: "lasso-7-pr-page", ...fields });
+  const one = (fields: Partial<Row> = {}, github: GitHubRepo | null = LASSO) => ticketForPr(row(fields), github)!;
+  const ticketOf = (pr: PrNode, ...tickets: TicketForPr[]) => prRow(pr, ticketMatcher(tickets))!.ticket;
+
+  it("matches by PR URL, ignoring case and trailing slashes", () => {
+    expect(ticketOf(node(), one({ pr: "https://GitHub.com/rbitco/Lasso/pull/7/", branch: "something-else" }, null))).toEqual({ id: ID, ref: "LASSO-7", stage: "review", flag: null });
+    expect(ticketOf(node(), one({ pr: "https://github.com/rbitco/lasso/pull/8", branch: "something-else" }))).toBeNull();
+  });
+
+  it("matches by GitHub repo and head branch when no Ticket has the PR's URL", () => {
+    expect(ticketOf(node(), one({}, { owner: "RBITCO", name: "lasso" }))?.ref).toBe("LASSO-7");
+    // The same branch in another repo, a repo not on github.com, or a PR with no head branch: no match.
+    expect(ticketOf(node(), one({}, SITE))).toBeNull();
+    expect(ticketOf(node(), one({}, null))).toBeNull();
+    expect(ticketOf(node({ headRefName: null }), one())).toBeNull();
+  });
+
+  it("prefers a URL match over a branch match, and an active Ticket over a done one", () => {
+    const byBranch = one({ id: "BRANCH", reference: "LASSO-1" });
+    const byUrl = one({ id: "URL", reference: "LASSO-2", branch: "other", pr: "https://github.com/rbitco/lasso/pull/7" });
+    expect(ticketOf(node(), byBranch, byUrl)?.id).toBe("URL");
+    const done = one({ id: "DONE", state: "done" });
+    expect(ticketOf(node(), done, one({ id: "ACTIVE" }))?.id).toBe("ACTIVE");
+    // A done Ticket still links its PR, with "done" in place of a Stage.
+    expect(ticketOf(node(), done)).toMatchObject({ id: "DONE", stage: "done" });
+  });
+
+  it("leaves Abandoned Tickets out, and a row with no Ticket empty", () => {
+    expect(ticketForPr(row({ state: "abandoned" }), LASSO)).toBeNull();
+    expect(ticketOf(node())).toBeNull();
+  });
+
+  it("names the Ticket as the Ledger does, and adds its Flag to the verdict's reason", () => {
+    expect(one({ name: "PR page" }).ref).toBe("PR page");
+    expect(one({ reference: null }).ref).toBe("000000AB");
+    const flagged = prRow(node(), ticketMatcher([one({ flagged_at: "2026-10-15T12:00:00Z", flag_reason: "review.unaddressed" })]))!;
+    expect(flagged.verdict).toEqual({ word: "Checks running", reason: "waiting on CI · Flagged: review.unaddressed", tone: "run" });
+    // A Flag that has been cleared leaves its reason behind, which is not shown.
+    expect(prRow(node(), ticketMatcher([one({ flag_reason: "review.unaddressed" })]))!.verdict.reason).toBe("waiting on CI");
+  });
+
+  it("is matched at each read of the cache, so a Ticket's changes show without a fetch", async () => {
+    let tickets: TicketRow[] = [];
+    let fetches = 0;
+    const cache = new PrLists({
+      lists: () => [{ name: "Mine", query: "is:open", limit: 25 }],
+      repos: async () => ({ lasso: LASSO }),
+      tickets: () => tickets,
+      search: async () => {
+        fetches++;
+        return { ok: true, total: 1, nodes: [node()], rateLimit: null };
+      },
+    });
+    expect((await cache.read()).lists[0]!.rows[0]!.ticket).toBeNull();
+    // A Ticket in a repo with no GitHub origin can't match by branch.
+    tickets = [{ ...row({ id: "ELSEWHERE" }), repo: "elsewhere" } as TicketRow, { ...row({ stage: "implement" }), repo: "lasso" } as TicketRow];
+    expect((await cache.read()).lists[0]!.rows[0]!.ticket).toMatchObject({ id: ID, stage: "implement" });
+    expect(fetches).toBe(1);
   });
 });

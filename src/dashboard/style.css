@@ -563,8 +563,17 @@ button.quiet { background: transparent; }
 .pr-list h2 .more:hover { text-decoration: underline; }
 .pr-error { margin: 0; font-size: 12.5px; color: var(--amber); }
 .pr-rows { display: grid; gap: 8px; }
-/* A PR row: the verdict pill, the title over the reason, the checks, then where it is on GitHub. Fixed pill and checks widths line the rows up. */
-.pr-row { display: grid; grid-template-columns: 136px minmax(0, 1fr) 140px 132px auto; gap: 4px 16px; align-items: center; padding: 12px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+/* A PR row: the verdict pill, the title over the reason, the reviewers, the checks, where it is on GitHub, then its Ticket. Fixed widths line the rows up. */
+.pr-row { position: relative; display: grid; grid-template-columns: 136px minmax(0, 1fr) 140px 132px auto 140px; gap: 4px 16px; align-items: center; padding: 12px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.pr-row:hover { border-color: var(--muted); }
+/* The title is the row's link: its ::after covers the row, under the reviewers and the "repo #n" link. */
+.pr-row a.title { display: block; color: inherit; text-decoration: none; outline: none; }
+.pr-row a.title::after { content: ""; position: absolute; inset: 0; border-radius: inherit; }
+.pr-row a.title:focus-visible::after { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 12px; }
+.pr-row .where a, .pr-row .reviewers { z-index: 1; }
+.pr-row .reviewers:hover, .pr-row .reviewers:focus-visible { z-index: 2; }
+.pr-row .ticket { display: grid; gap: 2px; min-width: 0; }
+.pr-row .ticket b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--accent); font-size: 13px; font-weight: 600; }
 .pr-verdict { justify-self: start; padding: 3px 10px; border-radius: 999px; font-size: 12.5px; white-space: nowrap; }
 .pr-verdict.crit { background: var(--crit-bg); color: var(--crit); }
 .pr-verdict.amber { background: var(--amber-bg); color: var(--amber); }
@@ -579,7 +588,7 @@ button.quiet { background: transparent; }
 .pr-row .checks .icon.run { color: var(--run); }
 .pr-row .checks .icon.good { color: var(--good); }
 .pr-row .where { display: grid; gap: 2px; justify-items: end; text-align: right; }
-.pr-row .where a { color: inherit; text-decoration: none; white-space: nowrap; }
+.pr-row .where a { position: relative; color: inherit; text-decoration: none; white-space: nowrap; }
 .pr-row .where a:hover { text-decoration: underline; }
 .pr-row .where a:focus-visible, .pr-list h2 .more:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .pr-row .ext { color: var(--muted); font-size: 11px; }
@@ -608,7 +617,8 @@ button.quiet { background: transparent; }
 @media (max-width: 699px) {
   .pr-row { grid-template-columns: minmax(0, 1fr); }
   .pr-row .title { white-space: normal; }
-  .pr-row .checks:empty, .pr-row .reviewers:empty { display: none; }
+  .pr-row .checks:empty, .pr-row .reviewers:empty, .pr-row .ticket:empty { display: none; }
+  .pr-row .ticket { grid-auto-flow: column; justify-content: start; gap: 8px; }
   .pr-row .where { justify-items: start; text-align: left; grid-auto-flow: column; justify-content: start; gap: 8px; }
 }
 textarea.raw.pr-lists-yaml { min-height: 200px; }

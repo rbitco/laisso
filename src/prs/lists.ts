@@ -1,5 +1,6 @@
 import { buildSearch, type GitHubRepo } from "./query.ts";
-import { prRow, type PrRow } from "./rows.ts";
+import type { TicketRow } from "../store/tickets.ts";
+import { prRow, ticketForPr, ticketMatcher, type PrNode, type PrRow, type TicketForPr } from "./rows.ts";
 import type { PrSearchClient } from "./search.ts";
 
 /** One PR List as config.yaml names it, in page order. */
@@ -34,16 +35,21 @@ export interface PrListsView {
 export interface PrListsDeps {
   /** The PR Lists config has now; read at each read, so an edit applies at once. */
   lists: () => PrListSetting[];
-  /** The GitHub owner/name of each configured repo, for scoping. */
-  repos: () => Promise<GitHubRepo[]>;
+  /** The GitHub owner/name of each configured repo, by its name in config.yaml, for scoping and Ticket matching. */
+  repos: () => Promise<Record<string, GitHubRepo>>;
+  /** Lasso's Tickets as they are now, matched to the rows at each read; none when left out. */
+  tickets?: () => TicketRow[];
   search: PrSearchClient;
   now?: () => number;
 }
 
-/** What the cache holds for one list: the search it ran, its last good rows, and any fetch under way. */
+/**
+ * What the cache holds for one list: the search it ran, its last good search results, and any fetch under way. It
+ * keeps GitHub's nodes rather than rows, so each read matches them to the Tickets as they are then.
+ */
 interface Entry {
   key: string;
-  rows: PrRow[];
+  nodes: PrNode[];
   total: number;
   fetchedAt: string | null;
   error: string | null;
@@ -69,10 +75,10 @@ export class PrLists {
 
   async read(): Promise<PrListsView> {
     const settings = this.deps.lists();
-    const repos = settings.length ? await this.deps.repos() : [];
+    const repos = settings.length ? await this.deps.repos() : {};
     const shown: { setting: PrListSetting; search: string | null; url: string | null; problem: string | null; entry: Entry | null }[] = [];
     for (const setting of settings) {
-      const built = buildSearch(setting.query, repos);
+      const built = buildSearch(setting.query, Object.values(repos));
       if ("problem" in built) {
         shown.push({ setting, search: null, url: null, problem: built.problem, entry: null });
         continue;
@@ -80,7 +86,7 @@ export class PrLists {
       const key = `${built.search}\n${setting.limit}`;
       let entry = this.entries.get(setting.name);
       if (!entry || entry.key !== key) {
-        entry = { key, rows: [], total: 0, fetchedAt: null, error: null, fetched: false, inflight: null };
+        entry = { key, nodes: [], total: 0, fetchedAt: null, error: null, fetched: false, inflight: null };
         this.entries.set(setting.name, entry);
       }
       if (!entry.fetched) entry.inflight ??= this.fetch(entry, built.search, setting.limit);
@@ -89,6 +95,9 @@ export class PrLists {
     const names = new Set(settings.map((s) => s.name));
     for (const name of [...this.entries.keys()]) if (!names.has(name)) this.entries.delete(name);
     await Promise.all(shown.map((s) => s.entry?.inflight));
+    // Tickets are read after the fetches, so a row links the Ticket as it is now, not as it was at the fetch.
+    const tickets = (this.deps.tickets?.() ?? []).map((t) => ticketForPr(t, repos[t.repo] ?? null)).filter((t): t is TicketForPr => t !== null);
+    const match = ticketMatcher(tickets);
     return {
       lists: shown.map(({ setting, search, url, problem, entry }) => ({
         name: setting.name,
@@ -96,7 +105,7 @@ export class PrLists {
         search,
         url,
         limit: setting.limit,
-        rows: entry?.rows ?? [],
+        rows: (entry?.nodes ?? []).map((node) => prRow(node, match)).filter((row): row is PrRow => row !== null),
         total: entry?.total ?? 0,
         fetchedAt: entry?.fetchedAt ?? null,
         error: problem ?? entry?.error ?? null,
@@ -104,12 +113,12 @@ export class PrLists {
     };
   }
 
-  /** One fetch of one list. A failure keeps the rows it had and is tried again on the next read. */
+  /** One fetch of one list. A failure keeps the results it had and is tried again on the next read. */
   private async fetch(entry: Entry, search: string, limit: number): Promise<void> {
     try {
       const result = await this.deps.search(search, limit);
       if (result.ok) {
-        entry.rows = result.nodes.map(prRow).filter((row): row is PrRow => row !== null);
+        entry.nodes = result.nodes;
         entry.total = result.total;
         entry.fetchedAt = new Date(this.now()).toISOString();
         entry.error = null;

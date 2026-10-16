@@ -22,6 +22,9 @@ export function checksLabel(c: CheckCounts): string | null {
   return skipped ? `${skipped} skipped` : null;
 }
 
+/** How long a burst of Ticket changes is gathered before one re-read. */
+const GATHER_MS = 100;
+
 /**
  * The Pull Requests page: each PR List from config.yaml, stacked in config order. Read on each visit and again when
  * config changes, so an edit to pr_lists shows without a restart.
@@ -41,6 +44,15 @@ export function PrsPage({ visit }: { visit: number }) {
   }, []);
   useEffect(() => void read(), [read, visit]);
   useEvents(["config"], () => void read());
+  // A Ticket that changes may change which rows it links, its Stage or its Flag; a burst of changes reads once.
+  const owed = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEvents(["ticket"], () => {
+    owed.current ??= setTimeout(() => {
+      owed.current = null;
+      void read();
+    }, GATHER_MS);
+  });
+  useEffect(() => () => clearTimeout(owed.current ?? undefined), []);
 
   return (
     <div className="prs">
@@ -145,17 +157,31 @@ function Picture({ src, initials }: { src: string; initials: string }) {
   return failed ? <>{initials}</> : <img src={src} alt="" onError={() => setFailed(true)} />;
 }
 
-/** One PR: its verdict, its title over the verdict's reason, its reviewers, its checks, then where it is on GitHub, who opened it and when it last moved. */
+/**
+ * One PR: its verdict, its title over the verdict's reason, its reviewers, its checks, where it is on GitHub, who
+ * opened it and when it last moved, then its Ticket and Stage. The title is the row's link, stretched over the whole
+ * row: to the Ticket page, or to the PR on GitHub in a new tab when Lasso has no Ticket for it. The reviewers and the
+ * "repo #n" link sit above it, so their clicks stay theirs.
+ */
 function Row({ row }: { row: PrRow }) {
   useClock();
   const name = row.repo.split("/")[1] ?? row.repo;
+  const t = row.ticket;
   return (
     <div className="pr-row" data-role="pr-row">
       <span className={`pr-verdict ${row.verdict.tone}`} data-role="pr-verdict">
         {row.verdict.word}
       </span>
       <span className="main">
-        <span className="title">{row.title}</span>
+        {t ? (
+          <a className="title" href={`#${t.id}`} data-role="pr-open" title={`Open ${t.ref}`}>
+            {row.title}
+          </a>
+        ) : (
+          <a className="title" href={row.url} target="_blank" rel="noreferrer" data-role="pr-open" title={`Open ${row.repo}#${row.number} on GitHub`}>
+            {row.title}
+          </a>
+        )}
         <span className="sub">{row.verdict.reason}</span>
       </span>
       <Reviewers reviewers={row.reviewers} />
@@ -168,6 +194,14 @@ function Row({ row }: { row: PrRow }) {
           {row.author}
           {row.updatedAt && <span title={row.updatedAt}> · {age(row.updatedAt)} ago</span>}
         </span>
+      </span>
+      <span className="ticket" data-role="pr-ticket">
+        {t && (
+          <>
+            <b title="Lasso Ticket">{t.ref}</b>
+            <span className="sub">{t.stage}</span>
+          </>
+        )}
       </span>
     </div>
   );

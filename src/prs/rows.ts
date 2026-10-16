@@ -1,3 +1,6 @@
+import { ticketLabel, type TicketRow } from "../store/tickets.ts";
+import type { GitHubRepo } from "./query.ts";
+
 /** How a verdict pill is coloured, by the dashboard's tone tokens. */
 export type VerdictTone = "crit" | "amber" | "run" | "good" | "muted";
 
@@ -51,7 +54,79 @@ export interface PrRow {
   checks: CheckCounts;
   /** Worst state first. */
   reviewers: Reviewer[];
+  /** The Lasso Ticket for this PR, or null when Lasso has none. */
+  ticket: PrTicket | null;
 }
+
+/** The Lasso Ticket a PR row links to, read as the Ledger reads it. */
+export interface PrTicket {
+  id: string;
+  /** The Ticket's label: its name, else its reference, else its short id. */
+  ref: string;
+  /** The current Stage's name, or "done" for a finished Ticket. */
+  stage: string;
+  /** Why the Ticket is Flagged, or null when it is not. */
+  flag: string | null;
+}
+
+/** A Ticket as PR matching sees it: what a row shows, and the PR URL, GitHub repo and branch it can match on. */
+export interface TicketForPr extends PrTicket {
+  pr: string | null;
+  /** The GitHub owner/name of the Ticket's repo origin; null when it is not on github.com. */
+  github: GitHubRepo | null;
+  branch: string;
+  active: boolean;
+}
+
+/** Finds the Ticket for a PR by its URL, or by its repo and head branch; null when there is none. */
+export type TicketMatch = (pr: { url: string; repo: string; branch: string | null }) => PrTicket | null;
+
+/**
+ * A Ticket as PR matching sees it, or null for an Abandoned Ticket, which never claims a PR. A done Ticket still
+ * does, so a merged PR on a list of closed PRs keeps its link.
+ */
+export function ticketForPr(ticket: Pick<TicketRow, "id" | "name" | "reference" | "stage" | "state" | "flagged_at" | "flag_reason" | "pr" | "branch">, github: GitHubRepo | null): TicketForPr | null {
+  if (ticket.state === "abandoned") return null;
+  return {
+    id: ticket.id,
+    ref: ticketLabel(ticket),
+    stage: ticket.state === "done" ? "done" : ticket.stage,
+    flag: ticket.flagged_at ? ticket.flag_reason || "flagged" : null,
+    pr: ticket.pr,
+    github,
+    branch: ticket.branch,
+    active: ticket.state === "active",
+  };
+}
+
+/** A PR URL compared without case or trailing slashes. */
+const urlKey = (url: string) => url.trim().replace(/\/+$/, "").toLowerCase();
+/** A GitHub repo and branch compared without case, as GitHub compares repo names. */
+const branchKey = (repo: string, branch: string) => `${repo.toLowerCase()}\n${branch}`;
+
+/**
+ * Matches PRs to these Tickets: by PR URL first, then by GitHub repo and head branch. When more than one Ticket
+ * matches the same way, an active one wins over a done one, then the first given.
+ */
+export function ticketMatcher(tickets: TicketForPr[]): TicketMatch {
+  const byUrl = new Map<string, TicketForPr>();
+  const byBranch = new Map<string, TicketForPr>();
+  const keep = (map: Map<string, TicketForPr>, key: string, t: TicketForPr) => {
+    const had = map.get(key);
+    if (!had || (t.active && !had.active)) map.set(key, t);
+  };
+  for (const t of tickets) {
+    if (t.pr) keep(byUrl, urlKey(t.pr), t);
+    if (t.github && t.branch) keep(byBranch, branchKey(`${t.github.owner}/${t.github.name}`, t.branch), t);
+  }
+  return ({ url, repo, branch }) => {
+    const t = byUrl.get(urlKey(url)) ?? (branch ? byBranch.get(branchKey(repo, branch)) : undefined);
+    return t ? { id: t.id, ref: t.ref, stage: t.stage, flag: t.flag } : null;
+  };
+}
+
+/** Matches nothing, for rows with no Tickets to link. */
+const NO_TICKETS: TicketMatch = () => null;
 
 /** A state and how many checks are in it, as GitHub counts them for a commit's status check rollup. */
 interface StateCount {
@@ -73,6 +148,7 @@ export interface PrNode {
   updatedAt?: unknown;
   repository?: { nameWithOwner?: unknown } | null;
   author?: { login?: unknown } | null;
+  headRefName?: unknown;
   isDraft?: unknown;
   mergeable?: unknown;
   reviewDecision?: unknown;
@@ -95,13 +171,18 @@ const GROUP: Record<string, keyof CheckCounts> = {
   SKIPPED: "skipped", STALE: "skipped",
 };
 
-/** A search node as a row, or null when it is not a pull request (an empty node GitHub sends for a non-PR match). */
-export function prRow(node: PrNode): PrRow | null {
+/**
+ * A search node as a row, or null when it is not a pull request (an empty node GitHub sends for a non-PR match).
+ * `match` finds the PR's Ticket; a Flag on it is added to the verdict's reason.
+ */
+export function prRow(node: PrNode, match: TicketMatch = NO_TICKETS): PrRow | null {
   const repo = node.repository?.nameWithOwner;
   if (typeof node.number !== "number" || typeof node.url !== "string" || typeof repo !== "string") return null;
   const checks = checkCounts(node.commits?.nodes?.at(-1)?.commit?.statusCheckRollup);
   const author = typeof node.author?.login === "string" ? node.author.login : "ghost";
   const people = reviewers(node, author);
+  const ticket = match({ url: node.url, repo, branch: typeof node.headRefName === "string" ? node.headRefName : null });
+  const next = verdict(node, checks, people);
   return {
     title: typeof node.title === "string" ? node.title : "",
     repo,
@@ -109,9 +190,10 @@ export function prRow(node: PrNode): PrRow | null {
     url: node.url,
     author,
     updatedAt: typeof node.updatedAt === "string" ? node.updatedAt : "",
-    verdict: verdict(node, checks, people),
+    verdict: ticket?.flag ? { ...next, reason: `${next.reason} · Flagged: ${ticket.flag}` } : next,
     checks,
     reviewers: people,
+    ticket,
   };
 }
 

@@ -12,17 +12,19 @@ export function parseGitHubRemote(url: string): GitHubRepo | null {
 }
 
 /**
- * The GitHub owner/name of each configured repo, read from its checkout's
- * `git remote get-url origin`, in config order. A repo whose origin is on
- * another host, or that has no origin to read, is left out.
+ * The GitHub owner/name of each configured repo, by its name in config.yaml,
+ * read from its checkout's `git remote get-url origin`, in config order. A
+ * repo whose origin is on another host, or that has no origin to read, is
+ * left out.
  */
-export async function githubRepos(repos: Record<string, Pick<RepoConfig, "path">>, run: (command: string, args: string[], opts: { cwd?: string }) => Promise<ToolResult> = runTool): Promise<GitHubRepo[]> {
+export async function githubRepos(repos: Record<string, Pick<RepoConfig, "path">>, run: (command: string, args: string[], opts: { cwd?: string }) => Promise<ToolResult> = runTool): Promise<Record<string, GitHubRepo>> {
   const found = await Promise.all(
-    Object.values(repos).map(async (repo) => {
+    Object.entries(repos).map(async ([name, repo]) => {
       if (!repo.path) return null;
       const r = await run("git", ["remote", "get-url", "origin"], { cwd: expandHome(repo.path) });
-      return r.code === 0 ? parseGitHubRemote(r.stdout) : null;
+      const github = r.code === 0 ? parseGitHubRemote(r.stdout) : null;
+      return github ? ([name, github] as const) : null;
     }),
   );
-  return found.filter((r): r is GitHubRepo => r !== null);
+  return Object.fromEntries(found.filter((r) => r !== null));
 }

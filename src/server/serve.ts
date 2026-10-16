@@ -148,6 +148,7 @@ export async function serve(opts: ServeOptions): Promise<number> {
   const prLists = new PrLists({
     lists: () => Object.entries(config.pr_lists).map(([name, list]) => ({ name, ...list })),
     repos: () => githubRepos(config.repos),
+    tickets: () => tickets.list({ all: true }),
     search: ghSearch(),
   });
   const app = createApp({ config, home, tick, tickets, versions, sessions, feedback, runs, progress, terminal, exits, overrides, budgets, queue, changes, prLists, dashboard, version: pkg.version, missingTools, versionNotice: () => versionCheck.current() });

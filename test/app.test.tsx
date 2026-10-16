@@ -68,7 +68,7 @@ const REVIEWERS: Reviewer[] = [
 /** Two PR Lists: Mine cut short at its limit of one, Review requested whole. */
 const PR_LISTS: PrListsView = {
   lists: [
-    { name: "Mine", query: "is:open author:@me", search: "is:pr is:open author:@me repo:rbitco/lasso sort:updated-desc", url: "https://github.com/pulls?q=mine", limit: 1, total: 4, fetchedAt: ago(30), error: null, rows: [{ title: "Tick grace when the laptop sleeps", repo: "rbitco/lasso", number: 101, url: "https://github.com/rbitco/lasso/pull/101", author: "matt", updatedAt: ago(45 * 60), verdict: { word: "Checks failing", reason: "a required check failed", tone: "crit" }, checks: { passed: 7, failing: 2 }, reviewers: REVIEWERS }] },
+    { name: "Mine", query: "is:open author:@me", search: "is:pr is:open author:@me repo:rbitco/lasso sort:updated-desc", url: "https://github.com/pulls?q=mine", limit: 1, total: 4, fetchedAt: ago(30), error: null, rows: [{ title: "Tick grace when the laptop sleeps", repo: "rbitco/lasso", number: 101, url: "https://github.com/rbitco/lasso/pull/101", author: "matt", updatedAt: ago(45 * 60), verdict: { word: "Checks failing", reason: "a required check failed", tone: "crit" }, checks: { passed: 7, failing: 2 }, reviewers: REVIEWERS, ticket: null }] },
     { name: "Review requested", query: "is:open review-requested:@me", search: "is:pr is:open review-requested:@me repo:rbitco/lasso sort:updated-desc", url: "https://github.com/pulls?q=review", limit: 25, total: 0, fetchedAt: ago(30), error: null, rows: [] },
   ],
 };
@@ -93,6 +93,7 @@ function fakeLasso() {
     intakeHeld: null as Promise<void> | null,
     version: { version: "1.2.0", notice: { kind: "none" }, text: null } as VersionView,
     build: "1.2.3",
+    prLists: PR_LISTS,
   };
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
   vi.stubGlobal("fetch", async (url: string, init: RequestInit = {}) => {
@@ -120,7 +121,7 @@ function fakeLasso() {
     if (url === "/api/pipelines/default/versions/2") return json(VERSION);
     if (url === "/api/config") return json({ file: "/c/config.yaml", text: "", config: DEFAULT_CONFIG, restart: [] } satisfies ConfigFile);
     if (url === "/api/actions") return json([]);
-    if (url === "/api/pr-lists") return json(PR_LISTS);
+    if (url === "/api/pr-lists") return json(state.prLists);
     return json({ error: `not found: ${url}` }, 404);
   });
   return { sent, state, gets: (route: string) => sent.filter((s) => s.method === "GET" && s.route === route).length };
@@ -639,6 +640,32 @@ describe("the Pull Requests page", () => {
     await userEvent.setup().click(avatars[0]!);
     document.removeEventListener("click", reached);
     expect(reached).not.toHaveBeenCalled();
+  });
+
+  it("shows a PR's Ticket and Stage and links the row to it, and links a row with no Ticket to GitHub", async () => {
+    const lasso = fakeLasso();
+    const [mine] = PR_LISTS.lists;
+    const plain = mine!.rows[0]!;
+    const linked = { ...plain, title: "Sleep-proof Tick", number: 102, url: "https://github.com/rbitco/lasso/pull/102", ticket: { id: "A", ref: "APP-A", stage: "review", flag: null } };
+    lasso.state.prLists = { lists: [{ ...mine!, total: 2, rows: [linked, plain] }] };
+    location.hash = "#prs";
+    await new Promise((r) => setTimeout(r, 10));
+    render(<App />);
+    await screen.findByText("2 of 2");
+    const [withTicket, without] = [...document.querySelectorAll<HTMLElement>('[data-role="pr-row"]')];
+    // The last column: the Ticket's ref over its Stage, or nothing.
+    const cell = withTicket!.querySelector<HTMLElement>('[data-role="pr-ticket"]')!;
+    expect([withTicket!.lastElementChild === cell, cell.querySelector("b")!.textContent, cell.querySelector(".sub")!.textContent]).toEqual([true, "APP-A", "review"]);
+    expect(without!.querySelector<HTMLElement>('[data-role="pr-ticket"]')!.textContent).toBe("");
+    // The row's link is its title: to the Ticket page in this tab, else to the PR on GitHub in a new tab.
+    const open = (row: HTMLElement) => row.querySelector<HTMLAnchorElement>('[data-role="pr-open"]')!;
+    expect([open(withTicket!).textContent, open(withTicket!).getAttribute("href"), open(withTicket!).getAttribute("target")]).toEqual(["Sleep-proof Tick", "#A", null]);
+    expect([open(without!).getAttribute("href"), open(without!).getAttribute("target")]).toEqual(["https://github.com/rbitco/lasso/pull/101", "_blank"]);
+    // "repo #n" always goes to GitHub, even on a row with a Ticket.
+    const pr = within(withTicket!).getByRole("link", { name: /^lasso #102/ });
+    expect([pr.getAttribute("href"), pr.getAttribute("target")]).toEqual(["https://github.com/rbitco/lasso/pull/102", "_blank"]);
+    await userEvent.setup().click(open(withTicket!));
+    expect(location.hash).toBe("#A");
   });
 });
 
