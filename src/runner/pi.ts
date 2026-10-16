@@ -72,12 +72,14 @@ export const piAdapter: RunnerAdapter = {
     };
   },
 
-  /** The directory Pi keeps this worktree's sessions in; the file is named by the run's own timestamp. */
-  // Read from LASSO-155; until then a Session of this Runner keeps no Latest Message.
-  message(): string | null {
-    return null;
+  // An assistant message once it ends; the many message_update lines that stream it are passed over before any JSON is parsed.
+  message(line: string): string | null {
+    if (!line.startsWith('{"type":"message_end"')) return null;
+    const message = obj(jsonLines(line)[0]?.message);
+    return message?.role === "assistant" ? text(message.content) : null;
   },
 
+  /** The directory Pi keeps this worktree's sessions in; the file is named by the run's own timestamp. */
   transcriptPath(request): string {
     return sessionsDir(request.cwd);
   },

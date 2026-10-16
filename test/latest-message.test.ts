@@ -1,17 +1,21 @@
 import { describe, it, expect } from "vitest";
 import { claudeAdapter } from "../src/runner/claude.ts";
+import { codexAdapter } from "../src/runner/codex.ts";
+import { piAdapter } from "../src/runner/pi.ts";
+import type { RunnerAdapter } from "../src/runner/adapter.ts";
 import { LatestMessageTracker } from "../src/session/latest-message.ts";
 import { runnerFixture } from "./harness.ts";
 
-// The Latest Message as stdout streams (LASSO-153): the tracker splits chunks into lines, and each adapter says which
-// lines hold the agent's words. The Claude fixture is shaped on stream-json from claude 2.1.283, with a subagent turn,
-// thinking, tool calls, and a result record whose text is not a message.
+// The Latest Message as stdout streams (LASSO-153, LASSO-155): the tracker splits chunks into lines, and each adapter
+// says which lines hold the agent's words. The Claude fixture is shaped on stream-json from claude 2.1.283, with a
+// subagent turn, thinking, tool calls, and a result record whose text is not a message. Codex and Pi are read from
+// their recorded fixtures, and from longer runs built on the same shapes.
 const CLAUDE = runnerFixture("claude", "messages.jsonl");
 const LAST = "Dark mode is in: the toggle saves to settings, and tests pass. 日本語も大丈夫。";
 
 /** Feeds `stdout` in chunks of the given byte sizes, cycling, and collects every change the tracker reports. */
-function stream(stdout: string, sizes: number[]): { changes: string[]; tracker: LatestMessageTracker } {
-  const tracker = new LatestMessageTracker((line) => claudeAdapter.message(line));
+function stream(stdout: string, sizes: number[], adapter: RunnerAdapter = claudeAdapter): { changes: string[]; tracker: LatestMessageTracker } {
+  const tracker = new LatestMessageTracker((line) => adapter.message(line));
   const bytes = Buffer.from(stdout, "utf8");
   const changes: string[] = [];
   for (let at = 0, i = 0; at < bytes.length; i++) {
@@ -43,6 +47,50 @@ describe("the Claude Code message rule", () => {
     expect(claudeAdapter.message('{"type":"result","subtype":"success","result":"done"}')).toBeNull();
     expect(claudeAdapter.message('{"type":"assistant", not json')).toBeNull();
     expect(claudeAdapter.message("plain text")).toBeNull();
+  });
+});
+
+const line = (record: unknown) => JSON.stringify(record);
+
+describe("the Codex message rule", () => {
+  it("reads a completed agent_message from the recorded run, and not an error item", () => {
+    expect(stream(runnerFixture("codex", "success.jsonl"), [7], codexAdapter).changes).toEqual(["OK"]);
+  });
+
+  it("follows each agent message of a longer run, skipping reasoning, commands and items still in progress", () => {
+    const run = [
+      line({ type: "thread.started", thread_id: "01a0e18c-51ac-7eb2-a6c9-cea33285e2d4" }),
+      line({ type: "turn.started" }),
+      line({ type: "item.completed", item: { id: "item_0", type: "reasoning", text: "Thinking about the theme." } }),
+      line({ type: "item.completed", item: { id: "item_1", type: "agent_message", text: "Looking for the theme code." } }),
+      line({ type: "item.started", item: { id: "item_2", type: "command_execution", command: "rg theme", status: "in_progress" } }),
+      line({ type: "item.completed", item: { id: "item_2", type: "command_execution", command: "rg theme", aggregated_output: "src/theme.ts", exit_code: 0, status: "completed" } }),
+      line({ type: "item.completed", item: { id: "item_3", type: "agent_message", text: "Dark mode is in — tests pass." } }),
+      line({ type: "turn.completed", usage: { input_tokens: 10, output_tokens: 5 } }),
+    ].join("\n");
+    expect(stream(run, [1], codexAdapter).changes).toEqual(["Looking for the theme code.", "Dark mode is in — tests pass."]);
+    expect(codexAdapter.message(line({ type: "item.completed", item: { type: "agent_message", text: "  " } }))).toBeNull();
+  });
+});
+
+describe("the Pi message rule", () => {
+  it("reads the assistant's message_end from the recorded run, without its thinking or the user's prompt", () => {
+    expect(stream(runnerFixture("pi", "success.jsonl"), [64], piAdapter).changes).toEqual(["OK"]);
+  });
+
+  it("follows each assistant message of a longer run, passing over message_update lines", () => {
+    const assistant = (content: unknown[], stopReason: string) => ({ role: "assistant", content, stopReason });
+    const run = [
+      line({ type: "session", version: 3, id: "7d3f2c10-5b1e-4a8c-9e2f-1234567890ab", timestamp: "2026-09-27T06:10:00.000Z" }),
+      line({ type: "message_end", message: { role: "user", content: [{ type: "text", text: "Add dark mode" }] } }),
+      line({ type: "message_update", message: assistant([{ type: "text", text: "Looking" }], "stop") }),
+      line({ type: "message_end", message: assistant([{ type: "thinking", thinking: "hm" }, { type: "text", text: "Looking for the theme." }, { type: "toolCall", name: "bash" }], "toolUse") }),
+      line({ type: "message_end", message: { role: "toolResult", content: [{ type: "text", text: "src/theme.ts" }] } }),
+      line({ type: "message_end", message: assistant([{ type: "text", text: "Dark mode is in." }], "stop") }),
+      line({ type: "agent_end", messages: [] }),
+    ].join("\n");
+    expect(stream(run, [3, 11], piAdapter).changes).toEqual(["Looking for the theme.", "Dark mode is in."]);
+    expect(piAdapter.message(line({ type: "message_update", message: assistant([{ type: "text", text: "Look" }], "stop") }))).toBeNull();
   });
 });
 

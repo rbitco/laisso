@@ -77,12 +77,14 @@ export const codexAdapter: RunnerAdapter = {
     };
   },
 
-  /** The rollout file is named by Codex at thread creation; nothing to promise before then. */
-  // Read from LASSO-155; until then a Session of this Runner keeps no Latest Message.
-  message(): string | null {
-    return null;
+  // Each agent_message item once completed: the items the final message is chosen from.
+  message(line: string): string | null {
+    if (!line.startsWith('{"type":"item.completed"')) return null;
+    const item = obj(jsonLines(line)[0]?.item);
+    return item?.type === "agent_message" ? str(item.text)?.trim() || null : null;
   },
 
+  /** The rollout file is named by Codex at thread creation; nothing to promise before then. */
   transcriptPath(): null {
     return null;
   },
