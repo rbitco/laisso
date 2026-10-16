@@ -24,6 +24,9 @@ Unknown top-level keys are ignored.
 | `port` | `7433` | whole number, 1 or more: dashboard and API port |
 | `terminal` | `auto` | `auto`, `herdr`, `tmux` or `terminal-app`: where a human Stage's terminal opens; see [Terminals](#terminals) |
 | `notifications.enabled` / `.flagged` / `.human` / `.gate` | all `true` | `true` or `false` |
+| `pr_lists` | `Mine`, `Review requested` | see [PR Lists](#pr-lists); leaving the key out entirely brings back these two |
+| `pr_list_refresh` | `5m` | duration, at least `tick`: how often the PR Lists refresh while the Pull Requests page is open |
+| `pr_page_layout` | `stacked` | `stacked` or `side-by-side`: the Pull Requests page's layout until a browser picks its own with the page's switch |
 
 A duration is hours, minutes and seconds in that order, each optional:
 `30m`, `90s`, `2h`, `1h30m`. Names (profiles, Actions) are lowercase
@@ -167,6 +170,31 @@ On a machine with only GitHub repos, put the GitHub command in the global
 `tracker.transition` instead: Lasso then adds nothing, and `acli` is not
 needed (doctor lists a tool as needed when any Action's `run` names it).
 
+## PR Lists
+
+The dashboard's Pull Requests page shows one PR List per entry under
+`pr_lists`, in the order written. Each is keyed by the name the page shows.
+
+| Field | Rule |
+| --- | --- |
+| `query` | GitHub search syntax. `is:pr` is added; a query with `is:issue` is an error. It is scoped to the configured repos' GitHub origins unless it names `repo:`, `org:` or `user:`. |
+| `limit` | PRs shown, 1 to 100. Default `25`. |
+
+Writing `pr_lists` replaces the two defaults whole; `pr_lists: {}` shows no
+lists. While any list is configured, `gh` is a needed tool, logged in, even
+on a JIRA-only machine (`lasso doctor` lists it).
+
+```yaml lasso-config
+pr_lists:
+  Mine:
+    query: is:open author:@me
+  Team reviews:
+    query: is:open team-review-requested:acme/web-platform org:acme
+    limit: 50
+pr_list_refresh: 10m
+pr_page_layout: side-by-side
+```
+
 ## Terminals
 
 Open terminal on a human Stage runs the Runner in a new terminal, in the
@@ -193,7 +221,7 @@ where human Stages open, as Lasso started from that shell would choose.
 | `actions`, `profiles`, `default_profile` (global or a repo's), `terminal` | at the next Session or action Stage that starts; no restart |
 | `concurrency` | at the next Tick |
 | Pipeline files | at the next Intake; Tickets already under way keep their Version |
-| `repos` (added, removed, or changed `tracker`/`project`/`path`/`pipeline`), `budget`, `retention`, `branch_prefix`, `notifications` | after a restart, or after the next save from the dashboard's Config page, which rereads the whole file |
+| `repos` (added, removed, or changed `tracker`/`project`/`path`/`pipeline`), `budget`, `retention`, `branch_prefix`, `notifications`, `pr_lists`, `pr_list_refresh`, `pr_page_layout` | after a restart, or after the next save from the dashboard's Config page, which rereads the whole file |
 | `port`, `tick` | after a restart only |
 
 Restart means stopping the foreground `lasso` process (Ctrl-C) and starting

@@ -6,6 +6,7 @@ import type { PrSearchClient, SearchResult } from "../src/prs/search.ts";
 import { prRow, teamInitials, ticketForPr, ticketMatcher, type PrNode, type TicketForPr, type Verdict } from "../src/prs/rows.ts";
 import { checksLabel } from "../src/dashboard/app/prs/PrsPage.tsx";
 import type { TicketRow } from "../src/store/tickets.ts";
+import type { PrPageLayout } from "../src/server/config.ts";
 
 // PR Lists (LASSO-138): the search each list's query becomes, the repos it is scoped to, and the cache the page reads.
 // PR rows (LASSO-132): each row's verdict and check counts, and the checks cell's words.
@@ -69,7 +70,7 @@ describe("the PR List cache", () => {
    * A cache over a fake clock and a fake GitHub. Searches answer at once unless `hold` is set, when they wait for
    * `release`. `calls` is every search sent; `changes` counts change callbacks.
    */
-  function setup(opts: { lists?: PrListSetting[]; repos?: Record<string, GitHubRepo>; answer?: (search: string) => SearchResult } = {}) {
+  function setup(opts: { lists?: PrListSetting[]; repos?: Record<string, GitHubRepo>; answer?: (search: string) => SearchResult; layout?: () => PrPageLayout } = {}) {
     let now = START;
     let lists = opts.lists ?? [MINE, REVIEW];
     let answer = opts.answer ?? ((s: string) => (s.includes("review-requested") ? ok(31, 1, 2) : ok(1, 3)));
@@ -101,7 +102,7 @@ describe("the PR List cache", () => {
         }
       },
     };
-    t.cache = new PrLists({ lists: () => lists, repos: async () => opts.repos ?? { lasso: LASSO }, search, tickMs: () => TICK, refreshMs: () => REFRESH, changed: () => t.changes++, example: "pr_lists: ...", now: () => now });
+    t.cache = new PrLists({ lists: () => lists, repos: async () => opts.repos ?? { lasso: LASSO }, search, tickMs: () => TICK, refreshMs: () => REFRESH, changed: () => t.changes++, example: "pr_lists: ...", layout: opts.layout, now: () => now });
     return t;
   }
 
@@ -299,6 +300,15 @@ describe("the PR List cache", () => {
     expect(t.cache.status()).toEqual({ failing: false });
   });
 
+  it("gives pr_page_layout as config has it at each read, stacked when not given one", async () => {
+    expect((await setup().cache.read()).layout).toBe("stacked");
+    let layout: PrPageLayout = "side-by-side";
+    const t = setup({ layout: () => layout });
+    expect((await t.cache.read()).layout).toBe("side-by-side");
+    layout = "stacked";
+    expect((await t.cache.read()).layout).toBe("stacked");
+  });
+
   it("answers its status without opening the page or fetching", async () => {
     const t = setup();
     expect(t.cache.status()).toEqual({ failing: false });
@@ -312,7 +322,7 @@ describe("the PR List cache", () => {
     await t.cache.settle();
     expect(t.cache.status()).toEqual({ failing: true });
     t.setLists([]);
-    expect(await t.cache.read()).toEqual({ lists: [], pausedUntil: null, ghProblem: null, example: "pr_lists: ..." });
+    expect(await t.cache.read()).toEqual({ layout: "stacked", lists: [], pausedUntil: null, ghProblem: null, example: "pr_lists: ..." });
     expect(t.cache.status()).toEqual({ failing: false });
   });
 
@@ -389,7 +399,7 @@ describe("a PR row", () => {
       url: "https://github.com/rbitco/lasso/pull/7",
       author: "matt",
       updatedAt: "2026-10-15T12:00:00Z",
-      verdict: { word: "Ready to merge", reason: "checks green, approved", tone: "good" },
+      verdict: { word: "Ready to merge", reason: "approved", tone: "good" },
       checks: {},
       reviewers: [],
       ticket: null,
@@ -407,6 +417,10 @@ describe("a PR row", () => {
       [pr({}, [["IN_PROGRESS", 1]]), { word: "Checks running", reason: "waiting on CI", tone: "run" }],
       [pr({ reviewDecision: "REVIEW_REQUIRED" }), { word: "Needs review", reason: "no reviewer yet", tone: "amber" }],
       [pr({}, [["SUCCESS", 3]]), { word: "Ready to merge", reason: "checks green, approved", tone: "good" }],
+      [pr({ reviewDecision: null }, [["SUCCESS", 3]]), { word: "Ready to merge", reason: "checks green", tone: "good" }],
+      [pr({ reviewDecision: null }), { word: "Ready to merge", reason: "no checks or reviews required", tone: "good" }],
+      [pr({ state: "MERGED" }), { word: "Merged", reason: "merged into the base branch", tone: "muted" }],
+      [pr({ state: "CLOSED" }), { word: "Closed", reason: "closed without merging", tone: "muted" }],
     ];
     for (const [node, verdict] of cases) expect(prRow(node)!.verdict).toEqual(verdict);
   });
@@ -414,6 +428,7 @@ describe("a PR row", () => {
   it("takes the first verdict that matches, worst first", () => {
     const failing: Counts = [["FAILURE", 1]];
     const running: Counts = [["QUEUED", 1]];
+    expect(word(pr({ state: "MERGED", isDraft: true, mergeable: "CONFLICTING" }, failing))).toBe("Merged");
     expect(word(pr({ isDraft: true, mergeable: "CONFLICTING", reviewDecision: "CHANGES_REQUESTED" }, [...failing, ...running]))).toBe("Draft");
     expect(word(pr({ mergeable: "CONFLICTING", reviewDecision: "CHANGES_REQUESTED" }, [...failing, ...running]))).toBe("Conflicts");
     expect(word(pr({ reviewDecision: "CHANGES_REQUESTED" }, [...failing, ...running]))).toBe("Checks failing");

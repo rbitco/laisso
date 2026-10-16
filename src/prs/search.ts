@@ -17,7 +17,7 @@ const QUERY = `query($q:String!,$n:Int!){
       number title url updatedAt
       repository{ nameWithOwner }
       author{ login }
-      isDraft mergeable reviewDecision headRefOid headRefName
+      state isDraft mergeable reviewDecision headRefOid headRefName
       commits(last:1){ nodes{ commit{ statusCheckRollup{ state
         contexts(first:0){
           checkRunCountsByState{ state count }

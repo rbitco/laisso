@@ -131,8 +131,8 @@ export async function serve(opts: ServeOptions): Promise<number> {
     stdoutWritten: (ticket, session) => changes.emit({ kind: "stdout", ticket, session }),
     ended: () => tick.kick("session-end"),
   });
-  // The PR Lists read config live, so a pr_lists, pr_list_refresh or repos edit applies at once. tick is a
-  // restart key, so config.tick is the running Tick's.
+  // The PR Lists read config live, so a pr_lists, pr_list_refresh, pr_page_layout or repos edit applies at once.
+  // tick is a restart key, so config.tick is the running Tick's.
   const prLists = new PrLists({
     lists: () => Object.entries(config.pr_lists).map(([name, list]) => ({ name, ...list })),
     repos: () => githubRepos(config.repos),
@@ -141,6 +141,7 @@ export async function serve(opts: ServeOptions): Promise<number> {
     tickMs: () => config.tick * 1000,
     refreshMs: () => parseDuration(config.pr_list_refresh),
     changed: () => changes.emit({ kind: "prlists" }),
+    layout: () => config.pr_page_layout,
     example: `pr_lists:\n${prListsBlock("").trimEnd().replace(/^/gm, "  ")}\n`,
   });
   // One tick: the PR Lists, which only start their fetches (a Tick never waits on a PR search), then owed mirror

@@ -109,7 +109,13 @@ export interface Config {
   pr_lists: Record<string, PrListConfig>;
   /** How often an open Pull Requests page refreshes its lists, as a duration; never shorter than the tick. */
   pr_list_refresh: string;
+  /** How the Pull Requests page lays its lists out until a browser picks for itself. */
+  pr_page_layout: PrPageLayout;
 }
+
+/** The values pr_page_layout: takes: lists one under another in full rows, or side by side as wrapping columns. */
+export const PR_PAGE_LAYOUTS = ["stacked", "side-by-side"] as const;
+export type PrPageLayout = (typeof PR_PAGE_LAYOUTS)[number];
 
 /** The values terminal: takes: auto, or a terminal named outright. */
 export const TERMINALS = ["auto", "herdr", "tmux", "terminal-app"] as const;
@@ -137,6 +143,7 @@ export const DEFAULT_CONFIG: Config = {
     "Review requested": { query: "is:open review-requested:@me", limit: 25 },
   },
   pr_list_refresh: "5m",
+  pr_page_layout: "stacked",
 };
 
 export const DEFAULT_CONFIG_YAML = `# Lasso configuration. Every key is optional; the values shown are the defaults.
@@ -230,6 +237,11 @@ pr_lists:
 # How often the PR Lists refresh while the Pull Requests page is open; at
 # least the tick above. Lists refresh only while some tab has the page open.
 pr_list_refresh: 5m
+
+# How the Pull Requests page lays out its lists: stacked (one under another,
+# full rows) or side-by-side (wrapping columns of cards). The page's switch
+# overrides this in each browser once used.
+pr_page_layout: stacked
 `;
 
 export class ConfigError extends Error {}
@@ -321,6 +333,7 @@ export function parseConfig(text: string, file: string, overrides: { port?: numb
     terminal: raw.terminal === undefined || raw.terminal === null ? D.terminal : oneOf(TERMINALS, raw.terminal, at("terminal")),
     pr_lists: raw.pr_lists === undefined ? structuredClone(D.pr_lists) : parsePrLists(mapping(raw.pr_lists, at("pr_lists"), fail), at("pr_lists")),
     pr_list_refresh: D.pr_list_refresh,
+    pr_page_layout: raw.pr_page_layout === undefined || raw.pr_page_layout === null ? D.pr_page_layout : oneOf(PR_PAGE_LAYOUTS, raw.pr_page_layout, at("pr_page_layout")),
   };
   config.pr_list_refresh = prListRefresh(raw.pr_list_refresh, config.tick, at("pr_list_refresh"));
   if (overrides.port !== undefined) config.port = overrides.port;
@@ -531,6 +544,7 @@ export function applyLive(live: Config, fresh: Config): void {
   for (const key of Object.keys(live.pr_lists)) delete live.pr_lists[key];
   Object.assign(live.pr_lists, fresh.pr_lists);
   live.pr_list_refresh = fresh.pr_list_refresh;
+  live.pr_page_layout = fresh.pr_page_layout;
 }
 
 function normaliseRepos(value: Record<string, unknown>, where: string): Record<string, RepoConfig> {

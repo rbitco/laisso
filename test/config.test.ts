@@ -185,6 +185,23 @@ describe("loadConfig", () => {
     applyLive(live, loadConfig(homeWith("pr_list_refresh: 10m\n")));
     expect(live.pr_list_refresh).toBe("10m");
   });
+
+  it("reads pr_page_layout as stacked or side-by-side, defaulting to stacked", () => {
+    expect(loadConfig(homeWith("")).pr_page_layout).toBe("stacked");
+    expect(loadConfig(homeWith("pr_page_layout:\n")).pr_page_layout).toBe("stacked");
+    expect(loadConfig(homeWith("pr_page_layout: side-by-side\n")).pr_page_layout).toBe("side-by-side");
+    expect(() => loadConfig(homeWith("pr_page_layout: columns\n"))).toThrow(/pr_page_layout must be one of stacked, side-by-side, not columns/);
+    expect(() => loadConfig(homeWith("pr_page_layout: Stacked\n"))).toThrow(ConfigError);
+    expect(() => loadConfig(homeWith("pr_page_layout: true\n"))).toThrow(/pr_page_layout/);
+  });
+
+  it("carries an edited pr_page_layout into the running config", () => {
+    const live = loadConfig(homeWith(""));
+    applyLive(live, loadConfig(homeWith("pr_page_layout: side-by-side\n")));
+    expect(live.pr_page_layout).toBe("side-by-side");
+    applyLive(live, loadConfig(homeWith("")));
+    expect(live.pr_page_layout).toBe("stacked");
+  });
 });
 
 describe("resolveProfile", () => {

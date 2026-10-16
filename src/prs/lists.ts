@@ -2,6 +2,7 @@ import { buildSearch, type GitHubRepo } from "./query.ts";
 import type { TicketRow } from "../store/tickets.ts";
 import { prRow, ticketForPr, ticketMatcher, type PrNode, type PrRow, type TicketForPr } from "./rows.ts";
 import type { PrSearchClient, SearchProblem } from "./search.ts";
+import type { PrPageLayout } from "../server/config.ts";
 
 /** One PR List as config.yaml names it, in page order. */
 export interface PrListSetting {
@@ -49,6 +50,8 @@ export interface GhProblem {
 /** GET /api/pr-lists: every PR List in config order. */
 export interface PrListsView {
   lists: PrListView[];
+  /** pr_page_layout: the layout a browser that hasn't picked one for itself shows. */
+  layout: PrPageLayout;
   /** While GitHub points are low, no list refreshes until this time; null when lists refresh as usual. */
   pausedUntil: string | null;
   /** gh is missing or logged out, so no list can fetch; the page shows this in place of the lists. Cleared by the next fetch gh answers. */
@@ -79,6 +82,8 @@ export interface PrListsDeps {
   changed?: () => void;
   /** The default pr_lists: block as YAML, shown when config has no lists. */
   example?: string;
+  /** pr_page_layout as config has it now; stacked when left out. */
+  layout?: () => PrPageLayout;
   now?: () => number;
 }
 
@@ -153,6 +158,7 @@ export class PrLists {
     const tickets = (this.deps.tickets?.() ?? []).map((t) => ticketForPr(t, repos[t.repo] ?? null)).filter((t): t is TicketForPr => t !== null);
     const match = ticketMatcher(tickets);
     return {
+      layout: this.deps.layout?.() ?? "stacked",
       lists: current.map(({ setting, url, problem, entry }) => ({
         name: setting.name,
         query: setting.query,

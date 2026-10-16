@@ -71,6 +71,7 @@ const PR_LISTS: PrListsView = {
     { name: "Mine", query: "is:open author:@me", search: "is:pr is:open author:@me repo:rbitco/lasso sort:updated-desc", url: "https://github.com/pulls?q=mine", limit: 1, total: 4, fetchedAt: ago(30), fetching: false, error: null, rows: [{ title: "Tick grace when the laptop sleeps", repo: "rbitco/lasso", number: 101, url: "https://github.com/rbitco/lasso/pull/101", author: "matt", updatedAt: ago(45 * 60), verdict: { word: "Checks failing", reason: "a required check failed", tone: "crit" }, checks: { passed: 7, failing: 2 }, reviewers: REVIEWERS, ticket: null }] },
     { name: "Review requested", query: "is:open review-requested:@me", search: "is:pr is:open review-requested:@me repo:rbitco/lasso sort:updated-desc", url: "https://github.com/pulls?q=review", limit: 25, total: 0, fetchedAt: ago(30), fetching: false, error: null, rows: [] },
   ],
+  layout: "stacked",
   pausedUntil: null,
   ghProblem: null,
   example: null,
@@ -634,7 +635,7 @@ describe("the Pull Requests page", () => {
   it("holds placeholder rows before a list's first fetch, shows its age and a spinner, and re-reads on each change and Tick", async () => {
     const lasso = fakeLasso();
     const [mine, review] = PR_LISTS.lists;
-    lasso.state.prLists = { lists: [{ ...mine!, limit: 25, rows: [], total: 0, fetchedAt: null, fetching: true }, { ...review!, fetchedAt: ago(5 * 60) }], pausedUntil: null, ghProblem: null, example: null };
+    lasso.state.prLists = { lists: [{ ...mine!, limit: 25, rows: [], total: 0, fetchedAt: null, fetching: true }, { ...review!, fetchedAt: ago(5 * 60) }], layout: "stacked", pausedUntil: null, ghProblem: null, example: null };
     location.hash = "#prs";
     await new Promise((r) => setTimeout(r, 10));
     render(<App />);
@@ -645,7 +646,7 @@ describe("the Pull Requests page", () => {
     expect([first!.querySelector('[data-role="pr-age"] .spin') !== null, first!.querySelector('[data-role="pr-age"]')!.textContent]).toEqual([true, ""]);
     expect([second!.querySelector('[data-role="pr-age"]')!.textContent, second!.querySelector(".spin")]).toEqual(["updated 5m ago", null]);
     // The fetch finishes: a "prlists" event re-reads, and the rows and age take the placeholders' place.
-    lasso.state.prLists = { lists: [{ ...mine!, fetchedAt: ago(10) }, { ...review!, fetchedAt: ago(5 * 60) }], pausedUntil: null, ghProblem: null, example: null };
+    lasso.state.prLists = { lists: [{ ...mine!, fetchedAt: ago(10) }, { ...review!, fetchedAt: ago(5 * 60) }], layout: "stacked", pausedUntil: null, ghProblem: null, example: null };
     send("prlists");
     await screen.findByText("1 of 4");
     expect(document.querySelector('[data-role="pr-placeholders"]')).toBeNull();
@@ -708,7 +709,7 @@ describe("the Pull Requests page", () => {
     const [mine] = PR_LISTS.lists;
     const plain = mine!.rows[0]!;
     const linked = { ...plain, title: "Sleep-proof Tick", number: 102, url: "https://github.com/rbitco/lasso/pull/102", ticket: { id: "A", ref: "APP-A", stage: "review", flag: null } };
-    lasso.state.prLists = { lists: [{ ...mine!, total: 2, rows: [linked, plain] }], pausedUntil: null, ghProblem: null, example: null };
+    lasso.state.prLists = { lists: [{ ...mine!, total: 2, rows: [linked, plain] }], layout: "stacked", pausedUntil: null, ghProblem: null, example: null };
     location.hash = "#prs";
     await new Promise((r) => setTimeout(r, 10));
     render(<App />);
@@ -799,10 +800,103 @@ describe("the Pull Requests page", () => {
 
   it("says there are no PR Lists with pr_lists: {}, with the defaults as an example, and keeps the nav entry", async () => {
     const example = "pr_lists:\n  Mine:\n    query: is:open author:@me\n    limit: 25\n";
-    await prsPage({ lists: [], pausedUntil: null, ghProblem: null, example });
+    await prsPage({ lists: [], layout: "stacked", pausedUntil: null, ghProblem: null, example });
     const none = section("pr-none");
     expect([none.querySelector(".note")!.textContent, none.querySelector("pre")!.textContent]).toEqual(["No PR Lists. Add them under pr_lists in config.yaml", example]);
     expect(navOn()).toEqual(["Pull Requests"]);
+  });
+});
+
+describe("the Pull Requests page's layout", () => {
+  // As for the theme button: these tests bring a store of their own in place of Node's.
+  let kept: Map<string, string>;
+  beforeEach(() => {
+    kept = new Map();
+    vi.stubGlobal("localStorage", {
+      getItem: (k: string) => kept.get(k) ?? null,
+      setItem: (k: string, v: string) => void kept.set(k, String(v)),
+      removeItem: (k: string) => void kept.delete(k),
+    });
+  });
+
+  /** Renders the Pull Requests page over `view` and waits for its lists. */
+  async function prsPage(view: PrListsView) {
+    const lasso = fakeLasso();
+    lasso.state.prLists = view;
+    location.hash = "#prs";
+    await new Promise((r) => setTimeout(r, 10));
+    render(<App />);
+    await waitFor(() => expect(document.querySelector('[data-role="pr-lists"]')).not.toBeNull());
+    return lasso;
+  }
+  const shown = () => section("pr-lists").dataset.layout;
+  const option = (name: string) => within(section("pr-layout")).getByRole("radio", { name });
+  const checked = () => within(section("pr-layout")).getAllByRole("radio").find((r) => r.getAttribute("aria-checked") === "true")?.textContent;
+
+  it("starts from pr_page_layout until this browser picks one", async () => {
+    await prsPage(PR_LISTS);
+    expect([shown(), checked()]).toEqual(["stacked", "Stacked"]);
+    cleanup();
+    await prsPage({ ...PR_LISTS, layout: "side-by-side" });
+    expect([shown(), checked()]).toEqual(["side-by-side", "Side by side"]);
+    expect(kept.size).toBe(0);
+  });
+
+  it("switches layouts, and keeps this browser's pick over config through a remount", async () => {
+    await prsPage(PR_LISTS);
+    const user = userEvent.setup();
+    await user.click(option("Side by side"));
+    expect([shown(), checked(), kept.get("lasso.prLayout")]).toEqual(["side-by-side", "Side by side", "side-by-side"]);
+    cleanup();
+    await prsPage(PR_LISTS);
+    expect(shown()).toBe("side-by-side");
+    await user.click(option("Stacked"));
+    expect(kept.get("lasso.prLayout")).toBe("stacked");
+    cleanup();
+    await prsPage({ ...PR_LISTS, layout: "side-by-side" });
+    expect(shown()).toBe("stacked");
+  });
+
+  it("still switches when this browser's storage can't be used", async () => {
+    vi.stubGlobal("localStorage", {
+      getItem: () => {
+        throw new Error("blocked");
+      },
+      setItem: () => {
+        throw new Error("blocked");
+      },
+    });
+    await prsPage({ ...PR_LISTS, layout: "side-by-side" });
+    expect(shown()).toBe("side-by-side");
+    await userEvent.setup().click(option("Stacked"));
+    expect(shown()).toBe("stacked");
+  });
+
+  it("shows jump chips in Stacked with three or more lists, each naming its list and count and scrolling to it", async () => {
+    const [mine, review] = PR_LISTS.lists;
+    const drafts = { ...review!, name: "Drafts", fetchedAt: null, fetching: true };
+    await prsPage({ ...PR_LISTS, lists: [mine!, review!, drafts] });
+    const chips = () => document.querySelector<HTMLElement>('[data-role="pr-chips"]');
+    const buttons = within(chips()!).getAllByRole("button");
+    // A list not yet fetched has no count to give.
+    expect(buttons.map((b) => b.textContent)).toEqual(["Mine1", "Review requested0", "Drafts"]);
+    const scrolled = vi.fn();
+    Element.prototype.scrollIntoView = scrolled;
+    try {
+      await userEvent.setup().click(buttons[1]!);
+      expect(scrolled.mock.contexts).toEqual([document.querySelectorAll('[data-role="pr-list"]')[1]]);
+    } finally {
+      delete (Element.prototype as Partial<Element>).scrollIntoView;
+    }
+    // Side by side shows every list at once, so it has no chips.
+    await userEvent.setup().click(option("Side by side"));
+    expect(chips()).toBeNull();
+    // Two lists need none either.
+    cleanup();
+    kept.clear();
+    await prsPage(PR_LISTS);
+    expect(chips()).toBeNull();
+    expect(section("pr-layout")).not.toBeNull();
   });
 });
 

@@ -149,6 +149,8 @@ export interface PrNode {
   repository?: { nameWithOwner?: unknown } | null;
   author?: { login?: unknown } | null;
   headRefName?: unknown;
+  /** OPEN, CLOSED or MERGED: a PR List's query may ask for closed ones. */
+  state?: unknown;
   isDraft?: unknown;
   mergeable?: unknown;
   reviewDecision?: unknown;
@@ -210,13 +212,21 @@ function checkCounts(rollup: Rollup | undefined): CheckCounts {
 
 /** The first rule that matches, worst first. */
 function verdict(node: PrNode, checks: CheckCounts, people: Reviewer[]): Verdict {
+  if (node.state === "MERGED") return { word: "Merged", reason: "merged into the base branch", tone: "muted" };
+  if (node.state === "CLOSED") return { word: "Closed", reason: "closed without merging", tone: "muted" };
   if (node.isDraft === true) return { word: "Draft", reason: "not ready for review", tone: "muted" };
   if (node.mergeable === "CONFLICTING") return { word: "Conflicts", reason: "needs a rebase onto the base branch", tone: "crit" };
   if (checks.failing) return { word: "Checks failing", reason: "a required check failed", tone: "crit" };
   if (node.reviewDecision === "CHANGES_REQUESTED") return { word: "Changes requested", reason: "a reviewer asked for changes", tone: "amber" };
   if (checks.running) return { word: "Checks running", reason: "waiting on CI", tone: "run" };
   if (node.reviewDecision === "REVIEW_REQUIRED") return { word: "Needs review", reason: waitingOn(people), tone: "amber" };
-  return { word: "Ready to merge", reason: "checks green, approved", tone: "good" };
+  return { word: "Ready to merge", reason: readyReason(node, checks), tone: "good" };
+}
+
+/** Why nothing stands in the way, naming only what the PR has: passed checks, an approval, or neither. */
+function readyReason(node: PrNode, checks: CheckCounts): string {
+  const parts = [...(checks.passed ? ["checks green"] : []), ...(node.reviewDecision === "APPROVED" ? ["approved"] : [])];
+  return parts.length ? parts.join(", ") : "no checks or reviews required";
 }
 
 /** Worst first: what blocks the merge, then who still has to look, then who has only commented or already approved. */

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { Columns2, Rows3, type LucideIcon } from "lucide-react";
 import type { CheckCounts, GhProblem, PrListError, PrListsView, PrListView, PrRow, Reviewer, ReviewerState } from "../../../api/views.ts";
 import { api } from "../api.ts";
 import { useClock } from "../clock.ts";
@@ -39,13 +40,48 @@ const GATHER_MS = 100;
 /** Grey rows held in a list's place before its first fetch, at most this many. */
 const PLACEHOLDER_ROWS = 3;
 
+/** The page's two layouts: lists one under another in full rows, or side by side as wrapping columns. */
+export type PrPageLayout = PrListsView["layout"];
+
+/** Where this browser keeps the layout it picked; absent until the switch is first used. */
+export const LAYOUT_KEY = "lasso.prLayout";
+
+/** The layout this browser picked, or null when it hasn't (or its storage can't be read). */
+function savedLayout(): PrPageLayout | null {
+  try {
+    const saved = localStorage.getItem(LAYOUT_KEY);
+    return saved === "stacked" || saved === "side-by-side" ? saved : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Keep this browser's pick; a browser that can't store it keeps it for this visit only. */
+function saveLayout(layout: PrPageLayout) {
+  try {
+    localStorage.setItem(LAYOUT_KEY, layout);
+  } catch {
+    /* private window or storage blocked: not remembered */
+  }
+}
+
+/** Stacked shows a bar of jump chips with more than this many lists. */
+const CHIPS_OVER = 2;
+
 /**
- * The Pull Requests page: each PR List from config.yaml, stacked in config order. Read on each visit, when config
- * changes, and when a list starts or finishes fetching. It also reads on every Tick: Lasso refreshes the lists only
- * while some tab keeps reading them.
+ * The Pull Requests page: each PR List from config.yaml, in config order, stacked or side by side. Read on each visit,
+ * when config changes, and when a list starts or finishes fetching. It also reads on every Tick: Lasso refreshes the
+ * lists only while some tab keeps reading them. The layout is this browser's own pick once it has made one, else
+ * pr_page_layout from config.
  */
 export function PrsPage({ visit }: { visit: number }) {
   const [view, setView] = useState<PrListsView | null>(null);
+  const [picked, setPicked] = useState<PrPageLayout | null>(savedLayout);
+  const layout = picked ?? view?.layout ?? "stacked";
+  const pick = (next: PrPageLayout) => {
+    setPicked(next);
+    saveLayout(next);
+  };
   const reads = useRef(0);
   const read = useCallback(async () => {
     const mine = ++reads.current;
@@ -69,6 +105,7 @@ export function PrsPage({ visit }: { visit: number }) {
     }, GATHER_MS);
   });
   useEffect(() => () => clearTimeout(owed.current ?? undefined), []);
+  const chips = layout === "stacked" && (view?.lists.length ?? 0) > CHIPS_OVER;
 
   return (
     <div className="prs">
@@ -82,9 +119,52 @@ export function PrsPage({ visit }: { visit: number }) {
       ) : view.ghProblem ? (
         <GhNotice problem={view.ghProblem} />
       ) : (
-        view.lists.map((list) => <PrListBlock key={list.name} list={list} pausedUntil={view.pausedUntil} />)
+        <>
+          <div className={"pr-top" + (chips ? " has-chips" : "")} data-role="pr-top">
+            {chips ? <JumpChips lists={view.lists} /> : <span />}
+            <LayoutSwitch layout={layout} onPick={pick} />
+          </div>
+          <div className={`pr-lists ${layout}`} data-role="pr-lists" data-layout={layout}>
+            {view.lists.map((list, i) => (
+              <PrListBlock key={list.name} list={list} anchor={listAnchor(i)} pausedUntil={view.pausedUntil} />
+            ))}
+          </div>
+        </>
       )}
     </div>
+  );
+}
+
+/** The element id a list's jump chip scrolls to; by position, as a list's name may hold anything. */
+const listAnchor = (i: number) => `pr-list-${i}`;
+
+/** Stacked or Side by side, as a two-option segmented control; hidden on phones, where both are one stack of cards. */
+function LayoutSwitch({ layout, onPick }: { layout: PrPageLayout; onPick: (layout: PrPageLayout) => void }) {
+  const option = (value: PrPageLayout, label: string, title: string, Icon: LucideIcon) => (
+    <button type="button" role="radio" aria-checked={layout === value} title={title} onClick={() => onPick(value)}>
+      <Icon aria-hidden="true" />
+      {label}
+    </button>
+  );
+  return (
+    <div className="pr-seg" role="radiogroup" aria-label="Layout" data-role="pr-layout">
+      {option("stacked", "Stacked", "Lists one under another, full rows", Rows3)}
+      {option("side-by-side", "Side by side", "Lists side by side as columns of cards", Columns2)}
+    </div>
+  );
+}
+
+/** A chip per list, naming it with the count of rows it shows, that scrolls the page to that list. */
+function JumpChips({ lists }: { lists: PrListView[] }) {
+  return (
+    <nav className="pr-chips" aria-label="PR Lists" data-role="pr-chips">
+      {lists.map((list, i) => (
+        <button key={list.name} type="button" onClick={() => document.getElementById(listAnchor(i))?.scrollIntoView?.({ block: "start" })}>
+          {list.name}
+          {list.fetchedAt !== null && <span className="n">{list.rows.length}</span>}
+        </button>
+      ))}
+    </nav>
   );
 }
 
@@ -125,13 +205,13 @@ const sentence = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
  * or that has failed before any good fetch shows why in place of rows; a failure after a good fetch keeps the rows and
  * says so in the heading. A list with no PRs says so, linking the same search on GitHub.
  */
-function PrListBlock({ list, pausedUntil }: { list: PrListView; pausedUntil: string | null }) {
+function PrListBlock({ list, anchor, pausedUntil }: { list: PrListView; anchor: string; pausedUntil: string | null }) {
   const cut = list.total > list.rows.length;
   const blocked = list.error !== null && list.fetchedAt === null;
   const waiting = list.fetchedAt === null && list.search !== null && !list.error;
   const empty = list.fetchedAt !== null && list.error?.kind !== "rejected" && list.rows.length === 0;
   return (
-    <section className="pr-list" data-role="pr-list" aria-label={list.name}>
+    <section className="pr-list" id={anchor} data-role="pr-list" aria-label={list.name}>
       <h2>
         <span className="name">{list.name}</span>
         {!blocked && (
