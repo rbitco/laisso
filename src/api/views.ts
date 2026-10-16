@@ -253,7 +253,7 @@ export interface PrListsYaml {
 }
 
 export type { PrListsView, PrListView } from "../prs/lists.ts";
-export type { PrRow } from "../prs/rows.ts";
+export type { CheckCounts, PrRow } from "../prs/rows.ts";
 
 /** The running version and what Lasso has to say about it; `text` is the line to show, null when there is nothing to say. */
 export interface VersionView {

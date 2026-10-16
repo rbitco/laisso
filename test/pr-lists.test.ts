@@ -3,8 +3,11 @@ import { buildSearch, searchUrl, NO_GITHUB_REPOS, type GitHubRepo } from "../src
 import { parseGitHubRemote } from "../src/prs/origins.ts";
 import { PrLists, type PrListSetting } from "../src/prs/lists.ts";
 import type { PrSearchClient, SearchResult } from "../src/prs/search.ts";
+import { prRow, type PrNode, type Verdict } from "../src/prs/rows.ts";
+import { checksLabel } from "../src/dashboard/app/prs/PrsPage.tsx";
 
 // PR Lists (LASSO-138): the search each list's query becomes, the repos it is scoped to, and the cache the page reads.
+// PR rows (LASSO-132): each row's verdict and check counts, and the checks cell's words.
 
 const LASSO: GitHubRepo = { owner: "rbitco", name: "lasso" };
 const SITE: GitHubRepo = { owner: "rbitco", name: "site" };
@@ -94,5 +97,83 @@ describe("the PR List cache", () => {
     const second = await cache.read();
     expect(second.lists.map((l) => [l.error, l.rows.length])).toEqual([[NO_GITHUB_REPOS, 0], [null, 1]]);
     expect(calls).toEqual(["is:pr org:example sort:updated-desc", "is:pr org:example sort:updated-desc"]);
+  });
+});
+
+describe("a PR row", () => {
+  type Counts = [state: string, count: number][];
+  const pr = (fields: Partial<PrNode> = {}, runs: Counts = [], statuses: Counts = []): PrNode => ({
+    number: 7,
+    title: "Add the PR page",
+    url: "https://github.com/rbitco/lasso/pull/7",
+    updatedAt: "2026-10-15T12:00:00Z",
+    repository: { nameWithOwner: "rbitco/lasso" },
+    author: { login: "matt" },
+    isDraft: false,
+    mergeable: "MERGEABLE",
+    reviewDecision: "APPROVED",
+    commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { checkRunCountsByState: runs.map(([state, count]) => ({ state, count })), statusContextCountsByState: statuses.map(([state, count]) => ({ state, count })) } } } }] },
+    ...fields,
+  });
+  const word = (node: PrNode) => prRow(node)!.verdict.word;
+
+  it("reads a node's fields, and skips a node that is not a PR", () => {
+    expect(prRow(pr())).toEqual({
+      title: "Add the PR page",
+      repo: "rbitco/lasso",
+      number: 7,
+      url: "https://github.com/rbitco/lasso/pull/7",
+      author: "matt",
+      updatedAt: "2026-10-15T12:00:00Z",
+      verdict: { word: "Ready to merge", reason: "checks green, approved", tone: "good" },
+      checks: {},
+    });
+    expect(prRow({})).toBeNull();
+    expect(prRow(pr({ author: null }))!.author).toBe("ghost");
+  });
+
+  it("gives each verdict its reason and tone", () => {
+    const cases: [PrNode, Verdict][] = [
+      [pr({ isDraft: true }), { word: "Draft", reason: "not ready for review", tone: "muted" }],
+      [pr({ mergeable: "CONFLICTING" }), { word: "Conflicts", reason: "needs a rebase onto the base branch", tone: "crit" }],
+      [pr({}, [["FAILURE", 1]]), { word: "Checks failing", reason: "a required check failed", tone: "crit" }],
+      [pr({ reviewDecision: "CHANGES_REQUESTED" }), { word: "Changes requested", reason: "a reviewer asked for changes", tone: "amber" }],
+      [pr({}, [["IN_PROGRESS", 1]]), { word: "Checks running", reason: "waiting on CI", tone: "run" }],
+      [pr({ reviewDecision: "REVIEW_REQUIRED" }), { word: "Needs review", reason: "no reviewer yet", tone: "amber" }],
+      [pr({}, [["SUCCESS", 3]]), { word: "Ready to merge", reason: "checks green, approved", tone: "good" }],
+    ];
+    for (const [node, verdict] of cases) expect(prRow(node)!.verdict).toEqual(verdict);
+  });
+
+  it("takes the first verdict that matches, worst first", () => {
+    const failing: Counts = [["FAILURE", 1]];
+    const running: Counts = [["QUEUED", 1]];
+    expect(word(pr({ isDraft: true, mergeable: "CONFLICTING", reviewDecision: "CHANGES_REQUESTED" }, [...failing, ...running]))).toBe("Draft");
+    expect(word(pr({ mergeable: "CONFLICTING", reviewDecision: "CHANGES_REQUESTED" }, [...failing, ...running]))).toBe("Conflicts");
+    expect(word(pr({ reviewDecision: "CHANGES_REQUESTED" }, [...failing, ...running]))).toBe("Checks failing");
+    expect(word(pr({ reviewDecision: "CHANGES_REQUESTED" }, running))).toBe("Changes requested");
+    expect(word(pr({ reviewDecision: "REVIEW_REQUIRED" }, running))).toBe("Checks running");
+    expect(word(pr({ reviewDecision: "REVIEW_REQUIRED" }, [["SUCCESS", 2], ["SKIPPED", 1]]))).toBe("Needs review");
+    // No review required, no checks, and mergeable not worked out yet: nothing stands in the way.
+    expect(word(pr({ reviewDecision: null, mergeable: "UNKNOWN", commits: { nodes: [{ commit: { statusCheckRollup: null } }] } }))).toBe("Ready to merge");
+  });
+
+  it("groups check runs and commit statuses together, dropping zero counts", () => {
+    const runs: Counts = [["SUCCESS", 4], ["NEUTRAL", 1], ["COMPLETED", 1], ["FAILURE", 1], ["TIMED_OUT", 1], ["CANCELLED", 1], ["ACTION_REQUIRED", 1], ["STARTUP_FAILURE", 1], ["QUEUED", 1], ["IN_PROGRESS", 1], ["PENDING", 1], ["WAITING", 1], ["SKIPPED", 2], ["STALE", 1]];
+    const statuses: Counts = [["SUCCESS", 2], ["FAILURE", 1], ["ERROR", 1], ["PENDING", 1], ["EXPECTED", 1]];
+    expect(prRow(pr({}, runs, statuses))!.checks).toEqual({ passed: 8, failing: 7, running: 6, skipped: 3 });
+    expect(prRow(pr({}, [["SUCCESS", 9], ["FAILURE", 0], ["IN_PROGRESS", 0], ["SKIPPED", 0]]))!.checks).toEqual({ passed: 9 });
+    expect(prRow(pr({}, [], [["PENDING", 2], ["SUCCESS", 0]]))!.checks).toEqual({ running: 2 });
+    expect(prRow(pr({ commits: null }))!.checks).toEqual({});
+  });
+
+  it("labels the checks cell, and leaves it empty with no checks", () => {
+    expect(checksLabel({ passed: 9 })).toBe("9/9 passed");
+    expect(checksLabel({ passed: 7, skipped: 2 })).toBe("7/7 passed");
+    expect(checksLabel({ passed: 7, failing: 2 })).toBe("2 failing");
+    expect(checksLabel({ passed: 5, running: 4 })).toBe("4 running");
+    expect(checksLabel({ failing: 2, running: 4 })).toBe("2 failing · 4 running");
+    expect(checksLabel({ skipped: 3 })).toBe("3 skipped");
+    expect(checksLabel({})).toBeNull();
   });
 });

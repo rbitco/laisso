@@ -3,8 +3,10 @@ import type { PrNode } from "./rows.ts";
 
 /**
  * One page of a PR search: search(type: ISSUE) with the fields a row uses,
- * plus issueCount and rateLimit. Never mergeStateStatus: it is what makes
- * GitHub time out a page (docs/research/pr-check-counts.md).
+ * plus issueCount and rateLimit. contexts(first:0) asks for the check counts
+ * by state and no checks, which keeps a page at its usual cost. Never
+ * mergeStateStatus: it is what makes GitHub time out a page
+ * (docs/research/pr-check-counts.md).
  */
 const QUERY = `query($q:String!,$n:Int!){
   rateLimit{ cost remaining resetAt }
@@ -14,6 +16,11 @@ const QUERY = `query($q:String!,$n:Int!){
       number title url updatedAt
       repository{ nameWithOwner }
       author{ login }
+      isDraft mergeable reviewDecision
+      commits(last:1){ nodes{ commit{ statusCheckRollup{ state
+        contexts(first:0){
+          checkRunCountsByState{ state count }
+          statusContextCountsByState{ state count } } } } } }
     } }
   }
 }`;

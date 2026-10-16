@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { PrListsView, PrListView, PrRow } from "../../../api/views.ts";
+import type { CheckCounts, PrListsView, PrListView, PrRow } from "../../../api/views.ts";
 import { api } from "../api.ts";
 import { useClock } from "../clock.ts";
 import { useEvents } from "../events.ts";
@@ -11,6 +11,15 @@ export function age(iso: string, now: number = Date.now()): string {
   if (m < 60) return `${m}m`;
   const h = Math.round(m / 60);
   return h < 24 ? `${h}h` : `${Math.round(h / 24)}d`;
+}
+
+/** The checks cell's words: what is failing or running, else how many passed; null when the PR has no checks. */
+export function checksLabel(c: CheckCounts): string | null {
+  const { passed = 0, failing = 0, running = 0, skipped = 0 } = c;
+  const busy = [failing && `${failing} failing`, running && `${running} running`].filter(Boolean);
+  if (busy.length) return busy.join(" · ");
+  if (passed) return `${passed}/${passed} passed`;
+  return skipped ? `${skipped} skipped` : null;
 }
 
 /**
@@ -76,13 +85,20 @@ function PrListBlock({ list }: { list: PrListView }) {
   );
 }
 
-/** One PR: its title, then where it is on GitHub, then who opened it and when it last moved. */
+/** One PR: its verdict, its title over the verdict's reason, its checks, then where it is on GitHub, who opened it and when it last moved. */
 function Row({ row }: { row: PrRow }) {
   useClock();
   const name = row.repo.split("/")[1] ?? row.repo;
   return (
     <div className="pr-row" data-role="pr-row">
-      <span className="title">{row.title}</span>
+      <span className={`pr-verdict ${row.verdict.tone}`} data-role="pr-verdict">
+        {row.verdict.word}
+      </span>
+      <span className="main">
+        <span className="title">{row.title}</span>
+        <span className="sub">{row.verdict.reason}</span>
+      </span>
+      <Checks checks={row.checks} />
       <span className="where">
         <a href={row.url} target="_blank" rel="noreferrer" title={`Open ${row.repo}#${row.number} on GitHub`}>
           {name} #{row.number} <span className="ext">↗</span>
@@ -93,5 +109,21 @@ function Row({ row }: { row: PrRow }) {
         </span>
       </span>
     </div>
+  );
+}
+
+/** The worst group's icon, then the counts; an empty cell when the PR has no checks. */
+function Checks({ checks }: { checks: CheckCounts }) {
+  const label = checksLabel(checks);
+  if (!label) return <span className="checks" />;
+  const [icon, tone] = checks.failing ? ["✗", "crit"] : checks.running ? ["●", "run"] : checks.passed ? ["✓", "good"] : ["–", "muted"];
+  const all = (["passed", "failing", "running", "skipped"] as const).filter((g) => checks[g]).map((g) => `${checks[g]} ${g}`);
+  return (
+    <span className="checks" data-role="pr-checks" title={all.join(", ")}>
+      <span className={`icon ${tone}`} aria-hidden="true">
+        {icon}
+      </span>
+      {label}
+    </span>
   );
 }

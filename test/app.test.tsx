@@ -60,7 +60,7 @@ const DETECTED: Detection = {
 /** Two PR Lists: Mine cut short at its limit of one, Review requested whole. */
 const PR_LISTS: PrListsView = {
   lists: [
-    { name: "Mine", query: "is:open author:@me", search: "is:pr is:open author:@me repo:rbitco/lasso sort:updated-desc", url: "https://github.com/pulls?q=mine", limit: 1, total: 4, fetchedAt: ago(30), error: null, rows: [{ title: "Tick grace when the laptop sleeps", repo: "rbitco/lasso", number: 101, url: "https://github.com/rbitco/lasso/pull/101", author: "matt", updatedAt: ago(45 * 60) }] },
+    { name: "Mine", query: "is:open author:@me", search: "is:pr is:open author:@me repo:rbitco/lasso sort:updated-desc", url: "https://github.com/pulls?q=mine", limit: 1, total: 4, fetchedAt: ago(30), error: null, rows: [{ title: "Tick grace when the laptop sleeps", repo: "rbitco/lasso", number: 101, url: "https://github.com/rbitco/lasso/pull/101", author: "matt", updatedAt: ago(45 * 60), verdict: { word: "Checks failing", reason: "a required check failed", tone: "crit" }, checks: { passed: 7, failing: 2 } }] },
     { name: "Review requested", query: "is:open review-requested:@me", search: "is:pr is:open review-requested:@me repo:rbitco/lasso sort:updated-desc", url: "https://github.com/pulls?q=review", limit: 25, total: 0, fetchedAt: ago(30), error: null, rows: [] },
   ],
 };
@@ -590,6 +590,12 @@ describe("the Pull Requests page", () => {
     const pr = within(row).getByRole("link", { name: /^lasso #101/ });
     expect([pr.getAttribute("href"), pr.getAttribute("target")]).toEqual(["https://github.com/rbitco/lasso/pull/101", "_blank"]);
     expect(within(row).getByText(/^matt/).textContent).toBe("matt · 45m ago");
+    // The verdict leads the row, its reason sits under the title, and the checks cell says what is failing.
+    const pill = row.querySelector<HTMLElement>('[data-role="pr-verdict"]')!;
+    expect([pill.textContent, pill.className, row.firstElementChild === pill]).toEqual(["Checks failing", "pr-verdict crit", true]);
+    expect(within(row).getByText("a required check failed")).toBeTruthy();
+    const checks = row.querySelector<HTMLElement>('[data-role="pr-checks"]')!;
+    expect([checks.textContent, checks.title]).toEqual(["✗2 failing", "7 passed, 2 failing"]);
   });
 });
 
