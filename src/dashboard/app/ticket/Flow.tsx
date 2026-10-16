@@ -6,7 +6,7 @@ import { sessionLabel } from "./SessionPane.tsx";
 const LEGEND =
   "Filled stations are done, the ringed station is current, a stop sign is Flagged, ticks are action Stages. The orbit above a repeating Stage is PR feedback with Rounds used of Budget on its badge; a small orbit counts attempts. Click a station to filter Sessions.";
 
-/** The Metro flow diagram in its panel; a station click narrows the timeline to it, and a second click widens it again. */
+/** The Metro flow diagram in its panel; a station click selects that Stage, and a second click clears it. */
 export function Flow({ ticket, focus, onFocus }: { ticket: TicketDetail; focus: string | null; onFocus: (stage: string | null) => void }) {
   const click = (ev: MouseEvent) => {
     const station = (ev.target as Element).closest<SVGElement>("[data-stage]");
@@ -34,8 +34,11 @@ export function Flow({ ticket, focus, onFocus }: { ticket: TicketDetail; focus: 
 
 const OUTCOME_COLOUR: Record<string, string> = { succeeded: "var(--good)", failed: "var(--crit)", exhausted: "var(--crit)", interrupted: "var(--amber)" };
 
-/** The Sessions timeline, newest first, action Stages included, narrowed to the focused Stage when there is one. */
-export function Timeline({ ticket: t, focus, onFocus }: { ticket: TicketDetail; focus: string | null; onFocus: (stage: string | null) => void }) {
+/**
+ * The Sessions timeline, newest first, action Stages included, narrowed to the focused Stage when there is one. A row
+ * click points the Session pane at that Session; the one it shows is marked.
+ */
+export function Timeline({ ticket: t, focus, onFocus, selected, onSelect }: { ticket: TicketDetail; focus: string | null; onFocus: (stage: string | null) => void; selected: string | null; onSelect: (session: string) => void }) {
   const sessions = sessionsForStage(t.sessions, focus);
   return (
     <div className="panel" data-role="timeline">
@@ -50,7 +53,14 @@ export function Timeline({ ticket: t, focus, onFocus }: { ticket: TicketDetail; 
       {sessions.length ? (
         <ul className="timeline">
           {sessions.map((s) => (
-            <li key={s.id} style={{ "--c": s.running ? "var(--run)" : (s.outcome && OUTCOME_COLOUR[s.outcome]) || "var(--muted)" } as CSSProperties}>
+            <li
+              key={s.id}
+              data-session={s.id}
+              className={s.id === selected ? "sel" : undefined}
+              aria-current={s.id === selected ? "true" : undefined}
+              onClick={() => onSelect(s.id)}
+              style={{ "--c": s.running ? "var(--run)" : (s.outcome && OUTCOME_COLOUR[s.outcome]) || "var(--muted)" } as CSSProperties}
+            >
               <span className="when">{relative(s.startedAt)}</span>
               <span className={"pill " + (s.running ? "running" : s.outcome || "")}>{s.running ? "running" : s.outcome || "?"}</span>
               <span>{sessionLabel(s)}</span>

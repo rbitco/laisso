@@ -8,7 +8,7 @@ import type { ConfigFile, PrListsStatus, PrListsView, Reviewer, IntakeResult, Pi
 import type { Detection } from "../src/intake/detect.ts";
 import type { TickResult, TickStatus } from "../src/server/tick.ts";
 import { App } from "../src/dashboard/app/App.tsx";
-import { parseRoute } from "../src/dashboard/app/route.ts";
+import { parseRoute, ticketHref } from "../src/dashboard/app/route.ts";
 import { closeProfileDrawer } from "../src/dashboard/app/profiles/drawer.tsx";
 import { showNotice } from "../src/dashboard/app/notice.tsx";
 import { events } from "../src/dashboard/app/events.ts";
@@ -903,14 +903,25 @@ describe("the Pull Requests page's layout", () => {
 describe("the page's hash", () => {
   it("names the Ledger, a Ticket, Pull Requests, Pipelines with a Pipeline or one of its Versions, or Config", () => {
     expect(parseRoute("")).toEqual({ view: "ledger" });
-    expect(parseRoute("#01J9ZX")).toEqual({ view: "detail", id: "01J9ZX" });
-    expect(parseRoute("#APP%2D7")).toEqual({ view: "detail", id: "APP-7" });
+    expect(parseRoute("#01J9ZX")).toEqual({ view: "detail", id: "01J9ZX", select: null });
+    expect(parseRoute("#APP%2D7")).toEqual({ view: "detail", id: "APP-7", select: null });
     expect(parseRoute("#pipelines")).toEqual({ view: "pipelines", name: null, version: null });
     expect(parseRoute("#pipelines/my%20flow")).toEqual({ view: "pipelines", name: "my flow", version: null });
     expect(parseRoute("#pipelines/default/v12")).toEqual({ view: "pipelines", name: "default", version: 12 });
     expect(parseRoute("#config")).toEqual({ view: "config" });
     expect(parseRoute("#prs")).toEqual({ view: "prs" });
     // A malformed escape is taken as written.
-    expect(parseRoute("#%E0")).toEqual({ view: "detail", id: "%E0" });
+    expect(parseRoute("#%E0")).toEqual({ view: "detail", id: "%E0", select: null });
+  });
+
+  it("points a Ticket's Session pane at a Session or a Stage, and writes those hashes back", () => {
+    expect(parseRoute("#01J9ZX/sessions/S-1")).toEqual({ view: "detail", id: "01J9ZX", select: { session: "S-1" } });
+    expect(parseRoute("#APP-7/stages/code%20review")).toEqual({ view: "detail", id: "APP-7", select: { stage: "code review" } });
+    // Anything else after the Ticket is part of its key, as before.
+    expect(parseRoute("#01J9ZX/other/x")).toEqual({ view: "detail", id: "01J9ZX/other/x", select: null });
+    expect(ticketHref("01J9ZX")).toBe("#01J9ZX");
+    expect(ticketHref("01J9ZX", { session: "S-1" })).toBe("#01J9ZX/sessions/S-1");
+    expect(ticketHref("APP-7", { stage: "code review" })).toBe("#APP-7/stages/code%20review");
+    for (const select of [null, { session: "S/1" }, { stage: "a/b c" }]) expect(parseRoute(ticketHref("APP-7", select))).toEqual({ view: "detail", id: "APP-7", select });
   });
 });

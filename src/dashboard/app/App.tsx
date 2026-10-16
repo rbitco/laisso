@@ -84,7 +84,7 @@ export function App() {
                 {view === "ledger" && <Ledger all={all} visit={shown.visit} />}
               </section>
               <section data-role="detail" className="detail" hidden={view !== "detail"}>
-                {route.view === "detail" && <TicketPage id={route.id} visit={place.visit} all={all} side={side} onShown={() => setTicketShown(true)} />}
+                {route.view === "detail" && <TicketPage id={route.id} select={route.select} visit={place.visit} all={all} side={side} onShown={() => setTicketShown(true)} />}
               </section>
               <section data-role="prs" aria-label="Pull Requests" hidden={view !== "prs"}>
                 {view === "prs" && <PrsPage visit={shown.visit} />}

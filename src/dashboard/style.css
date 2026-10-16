@@ -367,6 +367,10 @@ dialog.modal.stdout-modal { width: min(1280px, calc(100vw - 32px)); height: calc
 .timeline { list-style: none; margin: 4px 0 0 6px; padding: 0 0 0 16px; border-left: 2px solid var(--line); display: grid; gap: 6px; font-size: 12px; }
 .timeline li { position: relative; padding: 2px 6px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
 .timeline li::before { content: ""; position: absolute; left: -23px; top: 7px; width: 10px; height: 10px; border-radius: 50%; background: var(--c, var(--muted)); box-shadow: 0 0 0 2px var(--surface); }
+.timeline li { cursor: pointer; border-radius: 6px; }
+.timeline li:hover { background: var(--surface2); }
+.timeline li.sel { background: var(--accent-soft); outline: 1px solid var(--accent); }
+.viewing { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 10px; background: var(--surface2); border: 1px solid var(--line); font-size: 13px; }
 .timeline .when { color: var(--muted); font-variant-numeric: tabular-nums; }
 .timeline .pill { font-size: 11px; padding: 1px 6px; }
 .timeline .pill.succeeded { background: var(--good-bg); color: var(--good); }

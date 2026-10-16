@@ -83,10 +83,10 @@ function Duration({ session: s }: { session: SessionView }) {
 }
 
 /**
- * The latest Session: its header, Stop, Take over or Open terminal while it runs, the agent's words, its stdout behind a button, and the paths to
- * copy. `refresh` follows a Stop or Open terminal that went through.
+ * A Session: its header, Stop, Take over or Open terminal while it runs, the agent's words, its stdout behind a button, and the paths to
+ * copy. A past Session is shown read-only, without those controls. `refresh` follows a Stop or Open terminal that went through.
  */
-export function SessionPane({ ticket: t, session: s, refresh }: { ticket: TicketDetail; session: SessionView; refresh: () => Promise<void> }) {
+export function SessionPane({ ticket: t, session: s, past = false, refresh }: { ticket: TicketDetail; session: SessionView; past?: boolean; refresh: () => Promise<void> }) {
   const [busy, setBusy] = useState(false);
   const [stdout, setStdout] = useState(false);
   const outcome = s.running ? "running" : s.outcome || "unknown";
@@ -103,6 +103,8 @@ export function SessionPane({ ticket: t, session: s, refresh }: { ticket: Ticket
     }
   };
   const sessionRoute = ticketRoute(t.id) + "/sessions/" + s.id;
+  // Only the live Session can be stopped, taken over, opened or handed back.
+  const live = s.running && !past;
 
   const head = (
     <div className="head">
@@ -119,22 +121,22 @@ export function SessionPane({ ticket: t, session: s, refresh }: { ticket: Ticket
         <span />
       )}
       <span className="meta">{"started " + relative(s.startedAt)}</span>
-      {s.running && s.mode === "headless" && (
+      {live && s.mode === "headless" && (
         <button className="stop" type="button" disabled={busy} onClick={() => void post(sessionRoute + "/stop")}>
           Stop
         </button>
       )}
-      {s.running && s.mode === "headless" && t.triggers.some((x) => x.action === "takeover" && !x.unavailable) && (
+      {live && s.mode === "headless" && t.triggers.some((x) => x.action === "takeover" && !x.unavailable) && (
         <button className="stop" type="button" disabled={busy} title="Stop this run and continue its session in a terminal" onClick={() => void post(ticketRoute(t.id) + "/takeover", "{}")}>
           Take over
         </button>
       )}
-      {s.mode === "terminal" && s.running && t.triggers.some((x) => x.action === "terminal") && (
+      {s.mode === "terminal" && live && t.triggers.some((x) => x.action === "terminal") && (
         <button className="stop" type="button" disabled={busy} onClick={() => void post(ticketRoute(t.id) + "/terminal", "{}")}>
           Open terminal
         </button>
       )}
-      {s.mode === "terminal" && s.running && t.triggers.some((x) => x.action === "handback") && (
+      {s.mode === "terminal" && live && t.triggers.some((x) => x.action === "handback") && (
         <button className="stop" type="button" disabled={busy} title="End this terminal Session and let Lasso run the Stage again" onClick={() => void post(ticketRoute(t.id) + "/handback", "{}")}>
           Hand back
         </button>

@@ -8,6 +8,7 @@ import type { ConfigFile, PipelineListing, SessionView, StageProfileView, Ticket
 import { TicketPage } from "../src/dashboard/app/ticket/TicketPage.tsx";
 import { closeProfileDrawer, ProfileDrawerHost } from "../src/dashboard/app/profiles/drawer.tsx";
 import { events } from "../src/dashboard/app/events.ts";
+import { usePlace } from "../src/dashboard/app/route.ts";
 import { Notice, showNotice } from "../src/dashboard/app/notice.tsx";
 
 // A Ticket's page as a person uses it (ADR 0012): what it shows, what each lever sends, and how it keeps up with Lasso.
@@ -130,7 +131,22 @@ function fakeLasso(tickets: TicketDetail[]) {
 
 let visit = 0;
 let side: HTMLElement;
-const page = (id: string, all = false) => <TicketPage id={id} visit={++visit} all={all} side={side} onShown={() => {}} />;
+const page = (id: string, all = false) => <TicketPage id={id} select={null} visit={++visit} all={all} side={side} onShown={() => {}} />;
+
+/** The page as the app shows it, following the hash, so a Stage or Session chosen on it moves the selection. */
+function Routed() {
+  const { place } = usePlace();
+  const route = place.route;
+  if (route.view !== "detail") return null;
+  return <TicketPage id={route.id} select={route.select} visit={place.visit} all={false} side={side} onShown={() => {}} />;
+}
+
+async function showRouted(hash: string) {
+  location.hash = hash;
+  const view = render(<Routed />);
+  await screen.findByRole("heading", { level: 2 });
+  return view;
+}
 const title = () => screen.queryByRole("heading", { level: 2 })?.textContent ?? null;
 const notice = () => document.querySelector('[data-role="notice"]')!;
 const triggers = () => document.querySelector<HTMLElement>('[data-role="triggers"]')!;
@@ -214,15 +230,84 @@ describe("a Ticket's page", () => {
 
   it("narrows the timeline to a station clicked in the flow, and widens it again with All Stages", async () => {
     fakeLasso([ticket("A")]);
-    await showPage("A");
+    await showRouted("#A");
     const user = userEvent.setup();
     const timeline = () => document.querySelector<HTMLElement>('[data-role="timeline"]')!;
     await user.click(document.querySelector('[data-role="flow"] [data-stage="plan"]')!);
-    expect(within(timeline()).getByRole("heading").textContent).toBe("Sessions · plan");
+    await waitFor(() => expect(within(timeline()).getByRole("heading").textContent).toBe("Sessions · plan"));
+    expect(location.hash).toBe("#A/stages/plan");
     expect(within(timeline()).getAllByRole("listitem").map((li) => li.textContent)).toEqual([expect.stringContaining("plan #1")]);
     expect(document.querySelector('[data-stage="plan"]')!.getAttribute("class")).toContain("focus");
     await user.click(within(timeline()).getByRole("button", { name: "All Stages" }));
-    expect(within(timeline()).getAllByRole("listitem")).toHaveLength(2);
+    await waitFor(() => expect(within(timeline()).getAllByRole("listitem")).toHaveLength(2));
+    expect(location.hash).toBe("#A");
+  });
+});
+
+describe("choosing the Session shown", () => {
+  // implement #1 runs now; plan #1 and plan #2 are past.
+  const live = session({ ticket: "A", id: "S3", stage: "implement", running: true, outcome: null, finalMessage: null, latestMessage: "Adding the toggle." });
+  const plan2 = session({ ticket: "A", id: "S2", stage: "plan", ordinal: 2, finalMessage: "Planned again." });
+  const plan1 = session({ ticket: "A", id: "S1", stage: "plan", ordinal: 1, outcome: "failed", finalMessage: "No plan." });
+  const three = () => ticket("A", { session: live, sessions: [live, plan2, plan1] });
+  const pane = () => document.querySelector<HTMLElement>('[data-role="session"]')!;
+  const viewing = () => document.querySelector<HTMLElement>('[data-role="viewing"]');
+  const rows = () => [...document.querySelectorAll<HTMLElement>('[data-role="timeline"] li')];
+
+  it("shows a Stage's newest Session when its station is clicked, read-only under a banner, and goes back to the live one", async () => {
+    fakeLasso([three()]);
+    await showRouted("#A");
+    expect(viewing()).toBeNull();
+    expect(within(pane()).getByRole("button", { name: "Stop" })).toBeTruthy();
+    const user = userEvent.setup();
+    await user.click(document.querySelector('[data-role="flow"] [data-stage="plan"]')!);
+    await waitFor(() => expect(within(pane()).getByText("plan #2")).toBeTruthy());
+    expect(document.querySelector('[data-role="final"]')!.textContent).toBe("Planned again.");
+    expect(viewing()!.textContent).toBe("Viewing plan #2 · the current Session, implement #1, is running" + "Back to current");
+    expect(within(pane()).queryByRole("button", { name: "Stop" })).toBeNull();
+    expect(within(pane()).getByRole("button", { name: "View stdout" })).toBeTruthy();
+    expect(rows().map((li) => li.className)).toEqual(["sel", ""]);
+
+    await user.click(within(viewing()!).getByRole("button", { name: "Back to current" }));
+    await waitFor(() => expect(viewing()).toBeNull());
+    expect(location.hash).toBe("#A");
+    expect(within(pane()).getByText("implement #1")).toBeTruthy();
+    expect(within(pane()).getByRole("button", { name: "Stop" })).toBeTruthy();
+  });
+
+  it("shows a Session clicked in the timeline, marks its row, and keeps it in the hash", async () => {
+    fakeLasso([three()]);
+    await showRouted("#A");
+    expect(rows().map((li) => li.getAttribute("aria-current"))).toEqual(["true", null, null]);
+    await userEvent.setup().click(rows()[2]!);
+    await waitFor(() => expect(within(pane()).getByText("plan #1")).toBeTruthy());
+    expect(location.hash).toBe("#A/sessions/S1");
+    expect(viewing()!.textContent).toContain("Viewing plan #1");
+    // A Session's Stage narrows the timeline, with its row marked.
+    expect(rows().map((li) => [li.dataset.session, li.className])).toEqual([["S2", ""], ["S1", "sel"]]);
+  });
+
+  it("opens on a linked Session or Stage, and on the live Session for one the Ticket lacks", async () => {
+    fakeLasso([three()]);
+    const view = await showRouted("#A/sessions/S1");
+    expect(within(pane()).getByText("plan #1")).toBeTruthy();
+    view.unmount();
+
+    await showRouted("#A/sessions/nope");
+    expect(within(pane()).getByText("implement #1")).toBeTruthy();
+    expect(viewing()).toBeNull();
+    cleanup();
+
+    await showRouted("#A/stages/deploy");
+    expect(within(pane()).getByText("implement #1")).toBeTruthy();
+    expect(within(document.querySelector<HTMLElement>('[data-role="timeline"]')!).getByRole("heading").textContent).toBe("Sessions");
+  });
+
+  it("names no running Session in the banner when the live one has ended", async () => {
+    const ended = { ...live, running: false, outcome: "succeeded" as const, finalMessage: "Done." };
+    fakeLasso([ticket("A", { session: ended, sessions: [ended, plan2, plan1] })]);
+    await showRouted("#A/stages/plan");
+    expect(viewing()!.textContent).toBe("Viewing plan #2" + "Back to current");
   });
 });
 

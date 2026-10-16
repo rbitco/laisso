@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import type { TicketDetail, TicketView } from "../../../api/views.ts";
+import type { SessionView, TicketDetail, TicketView } from "../../../api/views.ts";
 import type { Drift } from "../../../store/versions.ts";
 import type { ArtifactCheck } from "../../../store/tickets.ts";
 import { relative } from "../../metro.ts";
@@ -8,9 +8,11 @@ import { api } from "../api.ts";
 import { useEvents } from "../events.ts";
 import { showNotice } from "../notice.tsx";
 import { pipelineHref } from "../pipelines/href.ts";
+import { ticketHref, type Selection } from "../route.ts";
 import { BudgetEditor, Gauges } from "./Budget.tsx";
 import { Flow, Timeline } from "./Flow.tsx";
-import { SessionPane, worktreeGone } from "./SessionPane.tsx";
+import { SessionPane, sessionLabel, worktreeGone } from "./SessionPane.tsx";
+import { shownSession } from "./selection.ts";
 import { StageProfiles } from "./StageProfiles.tsx";
 import { listTickets, message, readTicket } from "./ticket.ts";
 import { Triggers } from "./Triggers.tsx";
@@ -18,6 +20,8 @@ import { Triggers } from "./Triggers.tsx";
 export interface TicketPageProps {
   /** The Ticket asked for: its id, or any key the API finds it by. */
   id: string;
+  /** The Session or Stage the Session pane is pointed at, from the hash; null for the live Session. */
+  select: Selection;
   /** Bumped each time the page is shown, so it reads everything afresh. */
   visit: number;
   /** Whether the sidebar lists done and Abandoned Tickets too. */
@@ -31,16 +35,13 @@ export interface TicketPageProps {
 /** How long changes the server names are gathered before acting on them, so a burst re-reads once. */
 const GATHER_MS = 100;
 
-// Which Stage the timeline is narrowed to, per Ticket, so it stays narrowed when the page is shown again.
-const focusByTicket = new Map<string, string | null>();
-
 /**
  * A Ticket's page, with the Ledger collapsed to a sidebar beside it. The Ticket and the sidebar arrive together, so
  * the page changes once; until the asked-for Ticket arrives the page keeps what it showed. A read that a newer one
  * has overtaken is dropped, so a slow answer for an earlier Ticket never draws over a later one. A "ticket" event
  * for the Ticket shown re-reads both; for any other, the sidebar alone.
  */
-export function TicketPage({ id, visit, all, side, onShown }: TicketPageProps) {
+export function TicketPage({ id, select, visit, all, side, onShown }: TicketPageProps) {
   const [shown, setShown] = useState<{ detail: TicketDetail; list: TicketView[]; visit: number } | null>(null);
   // Every read asks for the latest Ticket, so a refresh from a page being left reads the one replacing it.
   const latest = useRef({ id, visit, all, onShown });
@@ -105,7 +106,7 @@ export function TicketPage({ id, visit, all, side, onShown }: TicketPageProps) {
   if (!shown) return null;
   return (
     <>
-      <TicketBody key={shown.detail.id} ticket={shown.detail} refresh={read} />
+      <TicketBody key={shown.detail.id} ticket={shown.detail} select={select} refresh={read} />
       {side && createPortal(<Sidebar list={shown.list} current={shown.detail.id} />, side)}
     </>
   );
@@ -169,16 +170,16 @@ function NameEditor({ ticket: t, done, refresh }: { ticket: TicketDetail; done: 
   );
 }
 
-/** One Ticket's page; it is drawn afresh for each Ticket, so nothing typed or armed on one carries to another. */
-function TicketBody({ ticket: t, refresh }: { ticket: TicketDetail; refresh: () => Promise<void> }) {
+/**
+ * One Ticket's page; it is drawn afresh for each Ticket, so nothing typed or armed on one carries to another. The
+ * selection lives in the hash, so a reload keeps it and a Session can be linked; choosing a Stage or a Session moves it.
+ */
+function TicketBody({ ticket: t, select, refresh }: { ticket: TicketDetail; select: Selection; refresh: () => Promise<void> }) {
   const [editing, setEditing] = useState(false);
-  const [focus, setFocusState] = useState(() => focusByTicket.get(t.id) ?? null);
-  const setFocus = (stage: string | null) => {
-    focusByTicket.set(t.id, stage);
-    setFocusState(stage);
-  };
-  // A Stage the Pipeline no longer has narrows nothing.
-  const narrowed = focus && t.stages.some((s) => s.name === focus) ? focus : null;
+  const shown = shownSession(t, select);
+  const narrowed = shown.stage;
+  const go = (to: Selection) => void (location.hash = ticketHref(t.id, to));
+  const setFocus = (stage: string | null) => go(stage ? { stage } : null);
   const triggers = <Triggers ticket={t} onExtend={() => setEditing(true)} refresh={refresh} />;
   return (
     <>
@@ -189,7 +190,8 @@ function TicketBody({ ticket: t, refresh }: { ticket: TicketDetail; refresh: () 
       {t.flag && <FlagBox ticket={t}>{triggers}</FlagBox>}
       <div className="dgrid">
         <div className="stack">
-          {t.session ? <SessionPane key={t.session.id} ticket={t} session={t.session} refresh={refresh} /> : <div className="panel muted">No Session yet.</div>}
+          {shown.past && shown.session && <Viewing ticket={t} session={shown.session} back={() => go(null)} />}
+          {shown.session ? <SessionPane key={shown.session.id} ticket={t} session={shown.session} past={shown.past} refresh={refresh} /> : <div className="panel muted">No Session yet.</div>}
           <dl>
             <dt>worktree</dt>
             <dd>{worktreeGone(t) ? t.worktree + " (removed)" : t.worktree}</dd>
@@ -205,11 +207,26 @@ function TicketBody({ ticket: t, refresh }: { ticket: TicketDetail; refresh: () 
             <Gauges budget={t.budget} onOpen={() => setEditing(true)} />
             {editing && <BudgetEditor ticket={t} onClose={() => setEditing(false)} onSaved={refresh} />}
           </div>
-          <Timeline ticket={t} focus={narrowed} onFocus={setFocus} />
+          <Timeline ticket={t} focus={narrowed} onFocus={setFocus} selected={shown.session?.id ?? null} onSelect={(session) => go({ session })} />
           <StageProfiles ticket={t} refresh={refresh} />
         </div>
       </div>
     </>
+  );
+}
+
+/** Over a past Session's pane: which Session it is, whether the live one is running, and the way back to it. */
+function Viewing({ ticket: t, session: s, back }: { ticket: TicketDetail; session: SessionView; back: () => void }) {
+  return (
+    <div className="viewing" data-role="viewing">
+      <span>
+        {"Viewing " + sessionLabel(s)}
+        {t.session?.running && <span className="muted">{" · the current Session, " + sessionLabel(t.session) + ", is running"}</span>}
+      </span>
+      <button type="button" className="sm" onClick={back}>
+        Back to current
+      </button>
+    </div>
   );
 }
 
