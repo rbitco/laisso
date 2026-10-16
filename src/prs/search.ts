@@ -6,7 +6,8 @@ import type { PrNode } from "./rows.ts";
  * plus issueCount and rateLimit. contexts(first:0) asks for the check counts
  * by state and no checks, which keeps a page at its usual cost. Never
  * mergeStateStatus: it is what makes GitHub time out a page
- * (docs/research/pr-check-counts.md).
+ * (docs/research/pr-check-counts.md). The three review lists are what the row
+ * mapper merges into reviewers; first:20 has been enough on every PR seen.
  */
 const QUERY = `query($q:String!,$n:Int!){
   rateLimit{ cost remaining resetAt }
@@ -16,11 +17,15 @@ const QUERY = `query($q:String!,$n:Int!){
       number title url updatedAt
       repository{ nameWithOwner }
       author{ login }
-      isDraft mergeable reviewDecision
+      isDraft mergeable reviewDecision headRefOid
       commits(last:1){ nodes{ commit{ statusCheckRollup{ state
         contexts(first:0){
           checkRunCountsByState{ state count }
           statusContextCountsByState{ state count } } } } } }
+      latestReviews(first:20){ nodes{ author{ __typename login avatarUrl } state commit{ oid } } }
+      latestOpinionatedReviews(first:20){ nodes{ author{ login avatarUrl } state commit{ oid } } }
+      reviewRequests(first:20){ nodes{ asCodeOwner requestedReviewer{ __typename
+        ... on User{ login avatarUrl } ... on Team{ name slug combinedSlug } ... on Bot{ login } } } }
     } }
   }
 }`;

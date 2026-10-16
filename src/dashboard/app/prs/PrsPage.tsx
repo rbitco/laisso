@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { CheckCounts, PrListsView, PrListView, PrRow } from "../../../api/views.ts";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
+import type { CheckCounts, PrListsView, PrListView, PrRow, Reviewer, ReviewerState } from "../../../api/views.ts";
 import { api } from "../api.ts";
 import { useClock } from "../clock.ts";
 import { useEvents } from "../events.ts";
@@ -85,7 +85,67 @@ function PrListBlock({ list }: { list: PrListView }) {
   );
 }
 
-/** One PR: its verdict, its title over the verdict's reason, its checks, then where it is on GitHub, who opened it and when it last moved. */
+/** Each reviewer state's badge: its icon, tone and words. */
+const BADGE: Record<ReviewerState, { icon: string; tone: string; label: string }> = {
+  approved: { icon: "✓", tone: "good", label: "approved" },
+  changes: { icon: "±", tone: "crit", label: "requested changes" },
+  requested: { icon: "•", tone: "amber", label: "review requested" },
+  rereview: { icon: "↻", tone: "amber", label: "needs re-review (dismissed or new commits)" },
+  commented: { icon: "…", tone: "muted", label: "commented" },
+};
+
+/** A steady colour per name, behind initials. */
+const hue = (s: string) => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
+
+/** A reviewer as the hover list names them. */
+const reviewerName = (r: Reviewer) => (r.kind === "hidden-team" ? "a team you can't see on GitHub" : r.kind === "team" ? `@${r.name}` : r.name);
+
+/**
+ * Overlapping avatars, worst state first, each badged with its state; hovering or focusing them lists every reviewer.
+ * A click stops here, so it never reaches the row.
+ */
+function Reviewers({ reviewers }: { reviewers: Reviewer[] }) {
+  const pop = useId();
+  if (!reviewers.length) return <span className="reviewers" />;
+  return (
+    <span className="reviewers" data-role="pr-reviewers" tabIndex={0} aria-label="Reviewers" aria-describedby={pop} onClick={(e) => e.stopPropagation()}>
+      {reviewers.map((r, i) => {
+        const b = BADGE[r.state];
+        return (
+          <span key={`${r.name ?? "?"}-${i}`} className={`rv-av ${r.kind}${r.required ? " req" : ""}`} style={{ zIndex: reviewers.length - i, ...(r.kind !== "hidden-team" && { background: `hsl(${hue(r.name ?? "")} 35% 32%)` }) }} data-role="pr-reviewer">
+            {r.avatarUrl ? <Picture src={r.avatarUrl} initials={r.initials} /> : r.initials}
+            <span className={`rv-badge ${b.tone}`} aria-hidden="true">
+              {b.icon}
+            </span>
+          </span>
+        );
+      })}
+      <span className="rv-pop" id={pop} role="tooltip">
+        {reviewers.map((r, i) => {
+          const b = BADGE[r.state];
+          return (
+            <span key={`${r.name ?? "?"}-${i}`} className="rv-line">
+              <span className={`rv-badge ${b.tone}`} aria-hidden="true">
+                {b.icon}
+              </span>
+              <b>{reviewerName(r)}</b> {b.label}
+              {r.required && <span className="rv-req">required</span>}
+            </span>
+          );
+        })}
+        {reviewers.some((r) => r.required) && <span className="rv-note">Required reviewers must approve before merging.</span>}
+      </span>
+    </span>
+  );
+}
+
+/** A person's GitHub picture, falling back to their initials when it won't load. */
+function Picture({ src, initials }: { src: string; initials: string }) {
+  const [failed, setFailed] = useState(false);
+  return failed ? <>{initials}</> : <img src={src} alt="" onError={() => setFailed(true)} />;
+}
+
+/** One PR: its verdict, its title over the verdict's reason, its reviewers, its checks, then where it is on GitHub, who opened it and when it last moved. */
 function Row({ row }: { row: PrRow }) {
   useClock();
   const name = row.repo.split("/")[1] ?? row.repo;
@@ -98,6 +158,7 @@ function Row({ row }: { row: PrRow }) {
         <span className="title">{row.title}</span>
         <span className="sub">{row.verdict.reason}</span>
       </span>
+      <Reviewers reviewers={row.reviewers} />
       <Checks checks={row.checks} />
       <span className="where">
         <a href={row.url} target="_blank" rel="noreferrer" title={`Open ${row.repo}#${row.number} on GitHub`}>

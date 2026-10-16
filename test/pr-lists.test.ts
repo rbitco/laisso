@@ -3,11 +3,12 @@ import { buildSearch, searchUrl, NO_GITHUB_REPOS, type GitHubRepo } from "../src
 import { parseGitHubRemote } from "../src/prs/origins.ts";
 import { PrLists, type PrListSetting } from "../src/prs/lists.ts";
 import type { PrSearchClient, SearchResult } from "../src/prs/search.ts";
-import { prRow, type PrNode, type Verdict } from "../src/prs/rows.ts";
+import { prRow, teamInitials, type PrNode, type Verdict } from "../src/prs/rows.ts";
 import { checksLabel } from "../src/dashboard/app/prs/PrsPage.tsx";
 
 // PR Lists (LASSO-138): the search each list's query becomes, the repos it is scoped to, and the cache the page reads.
 // PR rows (LASSO-132): each row's verdict and check counts, and the checks cell's words.
+// Reviewers (LASSO-133): who reviews a PR, in what state, worst first, and who "Needs review" waits on.
 
 const LASSO: GitHubRepo = { owner: "rbitco", name: "lasso" };
 const SITE: GitHubRepo = { owner: "rbitco", name: "site" };
@@ -127,6 +128,7 @@ describe("a PR row", () => {
       updatedAt: "2026-10-15T12:00:00Z",
       verdict: { word: "Ready to merge", reason: "checks green, approved", tone: "good" },
       checks: {},
+      reviewers: [],
     });
     expect(prRow({})).toBeNull();
     expect(prRow(pr({ author: null }))!.author).toBe("ghost");
@@ -175,5 +177,109 @@ describe("a PR row", () => {
     expect(checksLabel({ failing: 2, running: 4 })).toBe("2 failing · 4 running");
     expect(checksLabel({ skipped: 3 })).toBe("3 skipped");
     expect(checksLabel({})).toBeNull();
+  });
+});
+
+describe("a PR's reviewers", () => {
+  const HEAD = "c0ffee";
+  const OLD = "dec0de";
+  type Rv = { login: string; state: string; oid?: string; bot?: boolean };
+  type Rq = { login?: string; team?: string; hidden?: true; bot?: true; owner?: true };
+  const avatar = (login: string) => `https://avatars.githubusercontent.com/${login}`;
+  const review = ({ login, state, oid = HEAD, bot }: Rv) => ({ author: { __typename: bot ? "Bot" : "User", login, avatarUrl: avatar(login) }, state, commit: { oid } });
+  /** A PR by matt from its three review lists, as GitHub sends them. */
+  const pr = ({ latest = [], opinionated = [], requests = [], decision = "REVIEW_REQUIRED" }: { latest?: Rv[]; opinionated?: Rv[]; requests?: Rq[]; decision?: string }): PrNode => ({
+    number: 7,
+    url: "https://github.com/rbitco/lasso/pull/7",
+    repository: { nameWithOwner: "rbitco/lasso" },
+    author: { login: "matt" },
+    reviewDecision: decision,
+    headRefOid: HEAD,
+    latestReviews: { nodes: latest.map(review) },
+    latestOpinionatedReviews: { nodes: opinionated.map(review) },
+    reviewRequests: {
+      nodes: requests.map((r) => ({
+        asCodeOwner: r.owner === true,
+        requestedReviewer: r.hidden ? null : r.team ? { __typename: "Team", name: r.team, slug: r.team.split("/")[1], combinedSlug: r.team } : r.bot ? { __typename: "Bot", login: r.login } : { __typename: "User", login: r.login, avatarUrl: avatar(r.login!) },
+      })),
+    },
+  });
+  const states = (node: PrNode) => prRow(node)!.reviewers.map((r) => [r.name, r.state]);
+
+  it("reads a person's state from their latest opinionated review, with their picture and initials", () => {
+    const row = prRow(pr({ latest: [{ login: "jo", state: "APPROVED" }], opinionated: [{ login: "jo", state: "APPROVED" }] }))!;
+    expect(row.reviewers).toEqual([{ name: "jo", kind: "person", state: "approved", required: false, initials: "JO", avatarUrl: avatar("jo") }]);
+  });
+
+  it("asks for a re-review when commits came after the review", () => {
+    expect(states(pr({ latest: [{ login: "jo", state: "APPROVED", oid: OLD }], opinionated: [{ login: "jo", state: "APPROVED", oid: OLD }] }))).toEqual([["jo", "rereview"]]);
+  });
+
+  it("asks for a re-review when the latest review was dismissed (node #66651)", () => {
+    expect(states(pr({ latest: [{ login: "lpinca", state: "DISMISSED" }] }))).toEqual([["lpinca", "rereview"]]);
+  });
+
+  it("asks for a re-review when someone is asked again after reviewing (vscode #337719)", () => {
+    // GitHub drops a re-requested reviewer from latestReviews but keeps their opinionated review.
+    expect(states(pr({ opinionated: [{ login: "alexdima", state: "CHANGES_REQUESTED" }], requests: [{ login: "alexdima" }] }))).toEqual([["alexdima", "rereview"]]);
+  });
+
+  it("keeps changes requested when the reviewer comments afterwards (vscode #338231)", () => {
+    expect(states(pr({ latest: [{ login: "sam", state: "COMMENTED" }], opinionated: [{ login: "sam", state: "CHANGES_REQUESTED" }] }))).toEqual([["sam", "changes"]]);
+    // A comment alone, even on an older commit, never asks for a re-review.
+    expect(states(pr({ latest: [{ login: "priya", state: "COMMENTED", oid: OLD }] }))).toEqual([["priya", "commented"]]);
+  });
+
+  it("never asks a bot to re-review", () => {
+    const bot = "copilot-pull-request-reviewer";
+    expect(states(pr({ latest: [{ login: bot, state: "COMMENTED", oid: OLD, bot: true }] }))).toEqual([[bot, "commented"]]);
+    expect(states(pr({ latest: [{ login: "renovate", state: "APPROVED", oid: OLD, bot: true }], opinionated: [{ login: "renovate", state: "APPROVED", oid: OLD }] }))).toEqual([["renovate", "approved"]]);
+    expect(states(pr({ opinionated: [{ login: "renovate", state: "APPROVED" }], latest: [{ login: "renovate", state: "APPROVED", bot: true }], requests: [{ login: "renovate", bot: true }] }))).toEqual([["renovate", "requested"]]);
+  });
+
+  it("leaves out the PR's author, whose replies to a review are COMMENTED reviews", () => {
+    expect(states(pr({ latest: [{ login: "matt", state: "COMMENTED" }] }))).toEqual([]);
+  });
+
+  it("shows a requested team as a square of initials", () => {
+    expect(prRow(pr({ requests: [{ team: "rbitco/web-platform" }] }))!.reviewers).toEqual([{ name: "rbitco/web-platform", kind: "team", state: "requested", required: false, initials: "WP" }]);
+  });
+
+  it("takes team initials from the name after the slash", () => {
+    expect(teamInitials("example/web-platform")).toBe("WP");
+    expect(teamInitials("example/payments")).toBe("PA");
+    expect(teamInitials("a_b_c")).toBe("ABC");
+    expect(teamInitials("example/payments-core_eu")).toBe("PCE");
+  });
+
+  it("shows a team the user can't see as a hidden team, still requested (elastic/kibana)", () => {
+    expect(prRow(pr({ requests: [{ hidden: true, owner: true }, { hidden: true, owner: true }] }))!.reviewers).toEqual([
+      { name: null, kind: "hidden-team", state: "requested", required: true, initials: "?" },
+      { name: null, kind: "hidden-team", state: "requested", required: true, initials: "?" },
+    ]);
+  });
+
+  it("marks code owner requests as required", () => {
+    const row = prRow(pr({ requests: [{ login: "jo", owner: true }, { login: "sam" }, { team: "rbitco/payments", owner: true }] }))!;
+    expect(row.reviewers.map((r) => [r.name, r.required])).toEqual([["jo", true], ["sam", false], ["rbitco/payments", true]]);
+  });
+
+  it("orders reviewers worst state first, people before teams within a state", () => {
+    const node = pr({
+      latest: [{ login: "ken", state: "APPROVED" }, { login: "priya", state: "COMMENTED" }, { login: "sam", state: "CHANGES_REQUESTED" }, { login: "lpinca", state: "DISMISSED" }],
+      opinionated: [{ login: "ken", state: "APPROVED" }, { login: "sam", state: "CHANGES_REQUESTED" }],
+      requests: [{ team: "rbitco/payments" }, { login: "jo" }],
+    });
+    expect(states(node)).toEqual([["sam", "changes"], ["lpinca", "rereview"], ["jo", "requested"], ["rbitco/payments", "requested"], ["priya", "commented"], ["ken", "approved"]]);
+  });
+
+  it("names who Needs review waits on, or says there is no reviewer yet", () => {
+    const reason = (node: PrNode) => prRow(node)!.verdict.reason;
+    expect(reason(pr({}))).toBe("no reviewer yet");
+    // Someone who only commented is not waited on.
+    expect(reason(pr({ latest: [{ login: "priya", state: "COMMENTED" }] }))).toBe("no reviewer yet");
+    expect(reason(pr({ latest: [{ login: "lpinca", state: "DISMISSED" }], requests: [{ login: "jo" }, { team: "rbitco/web-platform" }] }))).toBe("waiting on lpinca, jo, @rbitco/web-platform");
+    expect(reason(pr({ requests: [{ hidden: true }] }))).toBe("waiting on a team you can't see");
+    expect(reason(pr({ requests: [{ login: "a" }, { login: "b" }, { login: "c" }, { login: "d" }, { login: "e" }] }))).toBe("waiting on a, b, c and 2 more");
   });
 });

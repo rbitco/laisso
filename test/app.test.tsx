@@ -4,7 +4,7 @@ import { render, screen, cleanup, act, waitFor, within } from "@testing-library/
 import { userEvent } from "@testing-library/user-event";
 import { DEFAULT_CONFIG } from "../src/server/config.ts";
 import type { BudgetView } from "../src/budget/budget.ts";
-import type { ConfigFile, PrListsView, IntakeResult, PipelineListing, PipelineVersionView, TicketDetail, VersionView, Health } from "../src/api/views.ts";
+import type { ConfigFile, PrListsView, Reviewer, IntakeResult, PipelineListing, PipelineVersionView, TicketDetail, VersionView, Health } from "../src/api/views.ts";
 import type { Detection } from "../src/intake/detect.ts";
 import type { TickResult, TickStatus } from "../src/server/tick.ts";
 import { App } from "../src/dashboard/app/App.tsx";
@@ -57,10 +57,18 @@ const DETECTED: Detection = {
   title: "Fix the login page", branch: null, notes: ["pick a repo to see the branch"],
 };
 
+/** One of each kind of reviewer, worst first: a person with a picture, a required team, a required hidden team, and a person without one. */
+const REVIEWERS: Reviewer[] = [
+  { name: "sam", kind: "person", state: "changes", required: false, initials: "SA", avatarUrl: "https://avatars.githubusercontent.com/u/1?v=4" },
+  { name: "rbitco/web-platform", kind: "team", state: "requested", required: true, initials: "WP" },
+  { name: null, kind: "hidden-team", state: "requested", required: true, initials: "?" },
+  { name: "jo", kind: "person", state: "approved", required: false, initials: "JO" },
+];
+
 /** Two PR Lists: Mine cut short at its limit of one, Review requested whole. */
 const PR_LISTS: PrListsView = {
   lists: [
-    { name: "Mine", query: "is:open author:@me", search: "is:pr is:open author:@me repo:rbitco/lasso sort:updated-desc", url: "https://github.com/pulls?q=mine", limit: 1, total: 4, fetchedAt: ago(30), error: null, rows: [{ title: "Tick grace when the laptop sleeps", repo: "rbitco/lasso", number: 101, url: "https://github.com/rbitco/lasso/pull/101", author: "matt", updatedAt: ago(45 * 60), verdict: { word: "Checks failing", reason: "a required check failed", tone: "crit" }, checks: { passed: 7, failing: 2 } }] },
+    { name: "Mine", query: "is:open author:@me", search: "is:pr is:open author:@me repo:rbitco/lasso sort:updated-desc", url: "https://github.com/pulls?q=mine", limit: 1, total: 4, fetchedAt: ago(30), error: null, rows: [{ title: "Tick grace when the laptop sleeps", repo: "rbitco/lasso", number: 101, url: "https://github.com/rbitco/lasso/pull/101", author: "matt", updatedAt: ago(45 * 60), verdict: { word: "Checks failing", reason: "a required check failed", tone: "crit" }, checks: { passed: 7, failing: 2 }, reviewers: REVIEWERS }] },
     { name: "Review requested", query: "is:open review-requested:@me", search: "is:pr is:open review-requested:@me repo:rbitco/lasso sort:updated-desc", url: "https://github.com/pulls?q=review", limit: 25, total: 0, fetchedAt: ago(30), error: null, rows: [] },
   ],
 };
@@ -596,6 +604,41 @@ describe("the Pull Requests page", () => {
     expect(within(row).getByText("a required check failed")).toBeTruthy();
     const checks = row.querySelector<HTMLElement>('[data-role="pr-checks"]')!;
     expect([checks.textContent, checks.title]).toEqual(["✗2 failing", "7 passed, 2 failing"]);
+  });
+
+  it("shows reviewer avatars with badges, rings and a hover list, and keeps their clicks from the row", async () => {
+    fakeLasso();
+    location.hash = "#prs";
+    await new Promise((r) => setTimeout(r, 10));
+    render(<App />);
+    await screen.findByText("1 of 4");
+    const row = section("pr-row");
+    const cell = row.querySelector<HTMLElement>('[data-role="pr-reviewers"]')!;
+    const avatars = [...cell.querySelectorAll<HTMLElement>('[data-role="pr-reviewer"]')];
+    // A picture when GitHub has one, else initials; teams are squares, hidden ones grey with "?"; required ones ringed.
+    expect(avatars.map((a) => [a.className, a.querySelector("img")?.getAttribute("src") ?? a.firstChild?.textContent])).toEqual([
+      ["rv-av person", "https://avatars.githubusercontent.com/u/1?v=4"],
+      ["rv-av team req", "WP"],
+      ["rv-av hidden-team req", "?"],
+      ["rv-av person", "JO"],
+    ]);
+    expect(avatars.map((a) => a.querySelector(".rv-badge")!.className)).toEqual(["rv-badge crit", "rv-badge amber", "rv-badge amber", "rv-badge good"]);
+    // The list opens on hover or focus, so the cell takes focus and names the list as its description.
+    const pop = document.getElementById(cell.getAttribute("aria-describedby")!)!;
+    expect([cell.tabIndex, pop.getAttribute("role")]).toEqual([0, "tooltip"]);
+    expect([...pop.querySelectorAll(".rv-line")].map((l) => l.textContent)).toEqual([
+      "±sam requested changes",
+      "•@rbitco/web-platform review requestedrequired",
+      "•a team you can't see on GitHub review requestedrequired",
+      "✓jo approved",
+    ]);
+    expect(pop.querySelector(".rv-note")!.textContent).toBe("Required reviewers must approve before merging.");
+    // React handles clicks at its root, so a click stopped in the cell never gets past it.
+    const reached = vi.fn();
+    document.addEventListener("click", reached);
+    await userEvent.setup().click(avatars[0]!);
+    document.removeEventListener("click", reached);
+    expect(reached).not.toHaveBeenCalled();
   });
 });
 
