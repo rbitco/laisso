@@ -34,6 +34,7 @@ import { ActionChecks } from "../artifact/action-check.ts";
 import { PrLists } from "../prs/lists.ts";
 import { githubRepos } from "../prs/origins.ts";
 import { ghSearch } from "../prs/search.ts";
+import { parseDuration } from "../duration.ts";
 
 export interface ServeOptions {
   portFlag?: number;
@@ -130,8 +131,30 @@ export async function serve(opts: ServeOptions): Promise<number> {
     stdoutWritten: (ticket, session) => changes.emit({ kind: "stdout", ticket, session }),
     ended: () => tick.kick("session-end"),
   });
-  // One tick: owed mirror pushes, then action Stages, then the PR poll (a Round it makes due starts below), then headless starts, then the retention sweep.
-  const tick = new Tick(config.tick, log, async () => [...(await mirror.retryPending()), ...(await actions.runDue()), ...(await review.poll()), ...(await runs.startRunnable()), ...(await teardown.sweep())], () => changes.emit({ kind: "tick" }));
+  // The PR Lists read config live, so a pr_lists, pr_list_refresh or repos edit applies at once. tick is a
+  // restart key, so config.tick is the running Tick's.
+  const prLists = new PrLists({
+    lists: () => Object.entries(config.pr_lists).map(([name, list]) => ({ name, ...list })),
+    repos: () => githubRepos(config.repos),
+    tickets: () => tickets.list({ all: true }),
+    search: ghSearch(),
+    tickMs: () => config.tick * 1000,
+    refreshMs: () => parseDuration(config.pr_list_refresh),
+    changed: () => changes.emit({ kind: "prlists" }),
+  });
+  // One tick: the PR Lists, which only start their fetches (a Tick never waits on a PR search), then owed mirror
+  // pushes, then action Stages, then the PR poll (a Round it makes due starts below), then headless starts, then the
+  // retention sweep.
+  const tick = new Tick(
+    config.tick,
+    log,
+    async () => {
+      // A PR List problem must never cost the Tick the rest of its work.
+      await prLists.onTick().catch((error: unknown) => log.error("prlists.tick", { error: error instanceof Error ? error.message : String(error) }));
+      return [...(await mirror.retryPending()), ...(await actions.runDue()), ...(await review.poll()), ...(await runs.startRunnable()), ...(await teardown.sweep())];
+    },
+    () => changes.emit({ kind: "tick" }),
+  );
   const overrides = new Overrides({ config, home, tickets, progress, log });
   const exits = new Exits({ tickets, sessions, log, progress, runs, terminal, budgets, tick, teardown, overrides });
   const missingTools = startupToolCheck(config, home, tickets, log);
@@ -144,13 +167,6 @@ export async function serve(opts: ServeOptions): Promise<number> {
     }
   };
   const versionCheck = new VersionCheck({ running: pkg.version, onDisk, latest: npmLatest, log, changed: () => changes.emit({ kind: "version" }) });
-  // The Pull Requests page reads config live, so a pr_lists or repos edit applies at its next read.
-  const prLists = new PrLists({
-    lists: () => Object.entries(config.pr_lists).map(([name, list]) => ({ name, ...list })),
-    repos: () => githubRepos(config.repos),
-    tickets: () => tickets.list({ all: true }),
-    search: ghSearch(),
-  });
   const app = createApp({ config, home, tick, tickets, versions, sessions, feedback, runs, progress, terminal, exits, overrides, budgets, queue, changes, prLists, dashboard, version: pkg.version, missingTools, versionNotice: () => versionCheck.current() });
 
   if (defaults.wroteConfig) log.info("config.written", { file: home.configFile });

@@ -22,12 +22,27 @@ export function checksLabel(c: CheckCounts): string | null {
   return skipped ? `${skipped} skipped` : null;
 }
 
-/** How long a burst of Ticket changes is gathered before one re-read. */
+/** A list heading's freshness: "updated 4m ago", or "updated just now" inside the first minute. */
+export function updatedLabel(fetchedAt: string, now: number = Date.now()): string {
+  return now - new Date(fetchedAt).getTime() < 60_000 ? "updated just now" : `updated ${age(fetchedAt, now)} ago`;
+}
+
+/** A time of day in this browser's zone, as a clock face shows it: "3:40". */
+export function clockTime(iso: string): string {
+  const d = new Date(iso);
+  return `${d.getHours() % 12 || 12}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+/** How long a burst of changes is gathered before one re-read. */
 const GATHER_MS = 100;
 
+/** Grey rows held in a list's place before its first fetch, at most this many. */
+const PLACEHOLDER_ROWS = 3;
+
 /**
- * The Pull Requests page: each PR List from config.yaml, stacked in config order. Read on each visit and again when
- * config changes, so an edit to pr_lists shows without a restart.
+ * The Pull Requests page: each PR List from config.yaml, stacked in config order. Read on each visit, when config
+ * changes, and when a list starts or finishes fetching. It also reads on every Tick: Lasso refreshes the lists only
+ * while some tab keeps reading them.
  */
 export function PrsPage({ visit }: { visit: number }) {
   const [view, setView] = useState<PrListsView | null>(null);
@@ -44,9 +59,10 @@ export function PrsPage({ visit }: { visit: number }) {
   }, []);
   useEffect(() => void read(), [read, visit]);
   useEvents(["config"], () => void read());
-  // A Ticket that changes may change which rows it links, its Stage or its Flag; a burst of changes reads once.
+  // A Ticket that changes may change which rows it links, its Stage or its Flag; a burst of changes, or a Tick's
+  // start and end, reads once. After a reconnect ("hello") anything may have changed.
   const owed = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEvents(["ticket"], () => {
+  useEvents(["ticket", "prlists", "tick", "hello"], () => {
     owed.current ??= setTimeout(() => {
       owed.current = null;
       void read();
@@ -60,9 +76,9 @@ export function PrsPage({ visit }: { visit: number }) {
         <h2>Pull Requests</h2>
       </div>
       {!view ? (
-        <p className="note">Reading PR Lists from GitHub…</p>
+        <p className="note">Reading PR Lists…</p>
       ) : view.lists.length ? (
-        view.lists.map((list) => <PrListBlock key={list.name} list={list} />)
+        view.lists.map((list) => <PrListBlock key={list.name} list={list} pausedUntil={view.pausedUntil} />)
       ) : (
         <p className="note">No PR Lists. Add some under pr_lists: in config.yaml, or on the Config page.</p>
       )}
@@ -70,8 +86,13 @@ export function PrsPage({ visit }: { visit: number }) {
   );
 }
 
-function PrListBlock({ list }: { list: PrListView }) {
+/**
+ * One PR List: its heading (name, "N of total", the link to the rest on GitHub, and how fresh it is), then its rows.
+ * Before its first fetch, grey placeholder rows hold its place.
+ */
+function PrListBlock({ list, pausedUntil }: { list: PrListView; pausedUntil: string | null }) {
   const cut = list.total > list.rows.length;
+  const waiting = list.fetchedAt === null && list.search !== null && !list.error;
   return (
     <section className="pr-list" data-role="pr-list" aria-label={list.name}>
       <h2>
@@ -84,8 +105,16 @@ function PrListBlock({ list }: { list: PrListView }) {
             All {list.total} on GitHub ↗
           </a>
         )}
+        <Freshness list={list} pausedUntil={pausedUntil} />
       </h2>
       {list.error && <p className="pr-error">{list.error}</p>}
+      {waiting && (
+        <div className="pr-rows" data-role="pr-placeholders" aria-hidden="true">
+          {Array.from({ length: Math.min(list.limit, PLACEHOLDER_ROWS) }, (_, i) => (
+            <div key={i} className="pr-row placeholder" />
+          ))}
+        </div>
+      )}
       {list.rows.length > 0 && (
         <div className="pr-rows">
           {list.rows.map((row) => (
@@ -94,6 +123,22 @@ function PrListBlock({ list }: { list: PrListView }) {
         </div>
       )}
     </section>
+  );
+}
+
+/**
+ * How fresh a list is, at the heading's right: a spinner while it fetches, then "paused until 3:40, GitHub rate limit"
+ * while GitHub points are low, else "updated 4m ago", moving as time passes.
+ */
+function Freshness({ list, pausedUntil }: { list: PrListView; pausedUntil: string | null }) {
+  useClock();
+  const words = pausedUntil ? `paused until ${clockTime(pausedUntil)}, GitHub rate limit` : list.fetchedAt ? updatedLabel(list.fetchedAt) : null;
+  if (!words && !list.fetching) return null;
+  return (
+    <span className="age" data-role="pr-age" title={list.fetchedAt ?? undefined}>
+      {list.fetching && <span className="spin" role="status" aria-label="refreshing" />}
+      {words}
+    </span>
   );
 }
 

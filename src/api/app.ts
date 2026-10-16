@@ -107,7 +107,7 @@ export function createApp(deps: AppDeps): Hono {
 
   // The dashboard's push channel (Server-Sent Events). Each event names what changed, never the data:
   // "ticket" {ticket}, "stdout" {ticket, session}, "tick" {the tick status}, "config" {} and "pipeline" {pipeline} after an edit through /api,
-  // "version" {} when the version notice changes. The page re-reads what it shows through the ordinary routes, and
+  // "version" {} when the version notice changes, "prlists" {} when a PR List starts or finishes fetching. The page re-reads what it shows through the ordinary routes, and
   // after a reconnect re-reads everything, as it may have missed some.
   app.get("/api/events", (c) =>
     streamSSE(c, async (stream) => {
@@ -119,14 +119,14 @@ export function createApp(deps: AppDeps): Hono {
         gathered.clear();
         for (const change of batch) {
           if (stream.aborted || stream.closed) return;
-          const data = change.kind === "tick" ? deps.tick.status() : change.kind === "config" || change.kind === "version" ? {} : change.kind === "pipeline" ? { pipeline: change.pipeline } : change.kind === "stdout" ? { ticket: change.ticket, session: change.session } : { ticket: change.ticket };
+          const data = change.kind === "tick" ? deps.tick.status() : change.kind === "config" || change.kind === "version" || change.kind === "prlists" ? {} : change.kind === "pipeline" ? { pipeline: change.pipeline } : change.kind === "stdout" ? { ticket: change.ticket, session: change.session } : { ticket: change.ticket };
           await stream.writeSSE({ event: change.kind, data: JSON.stringify(data) });
         }
       };
       let finish!: () => void;
       const finished = new Promise<void>((resolve) => (finish = resolve));
       const unsubscribe = deps.changes.subscribe((change) => {
-        gathered.set(change.kind === "tick" || change.kind === "config" || change.kind === "version" ? change.kind : change.kind === "pipeline" ? `pipeline:${change.pipeline}` : change.kind === "stdout" ? `stdout:${change.session}` : `ticket:${change.ticket}`, change);
+        gathered.set(change.kind === "tick" || change.kind === "config" || change.kind === "version" || change.kind === "prlists" ? change.kind : change.kind === "pipeline" ? `pipeline:${change.pipeline}` : change.kind === "stdout" ? `stdout:${change.session}` : `ticket:${change.ticket}`, change);
         timer ??= setTimeout(() => void flush().catch(finish), EVENT_GATHER_MS);
       }, () => finish());
       stream.onAbort(() => finish());
@@ -138,7 +138,11 @@ export function createApp(deps: AppDeps): Hono {
       if (timer) clearTimeout(timer);
     }),
   );
-  app.post("/api/check-now", async (c) => c.json(await deps.tick.run("check-now")));
+  // Check now also refreshes every PR List, whether or not a Tick is already running to join.
+  app.post("/api/check-now", async (c) => {
+    await deps.prLists.checkNow();
+    return c.json(await deps.tick.run("check-now"));
+  });
 
   app.post("/api/intake/detect", async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as { input?: string; repo?: string };

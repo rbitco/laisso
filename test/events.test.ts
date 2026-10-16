@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { startLassoWithRepos, waitFor, type Lasso } from "./harness.ts";
-import type { IntakeResult, TicketDetail } from "../src/api/views.ts";
+import type { IntakeResult, PrListsView, TicketDetail } from "../src/api/views.ts";
 
 // The dashboard's push channel: /api/events names what changed so the page can re-read it instead of polling.
 const running: Lasso[] = [];
@@ -118,6 +118,23 @@ describe("the event stream", () => {
     before = stream.events.length;
     await lasso.api("/api/pipelines/two", { method: "DELETE" });
     await stream.seen("pipeline after a delete", (e) => after(before)(e) && e.event === "pipeline" && e.data.pipeline === "two");
+    stream.close();
+  });
+
+  it("names prlists as a PR List starts and finishes fetching, and a read does not wait for the fetch", async () => {
+    const { lasso } = await startLassoWithRepos({}, { pr_lists: { Example: { query: "is:open org:example", limit: 5 } } });
+    running.push(lasso);
+    const body = { data: { rateLimit: { cost: 1, remaining: 4900, resetAt: "2026-10-15T13:00:00Z" }, search: { issueCount: 0, nodes: [] } } };
+    await lasso.tracker.reply({ tool: "gh", match: ["api graphql", "org:example"], stdout: JSON.stringify(body), sleepMs: 300 });
+    const stream = listen(lasso);
+    await stream.seen("hello", (e) => e.event === "hello");
+    const first = await lasso.api<PrListsView>("/api/pr-lists");
+    expect(first.lists.map((l) => [l.name, l.fetching, l.fetchedAt])).toEqual([["Example", true, null]]);
+    // The search takes longer than the stream gathers changes, so its start and end go out as two events.
+    const started = await stream.seen("prlists as the fetch starts", (e) => e.event === "prlists");
+    await stream.seen("prlists as it finishes", (e) => e.event === "prlists" && e !== started);
+    const after = await lasso.api<PrListsView>("/api/pr-lists");
+    expect(after.lists.map((l) => [l.fetching, l.fetchedAt !== null, l.error])).toEqual([[false, true, null]]);
     stream.close();
   });
 });

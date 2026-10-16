@@ -11,6 +11,7 @@ import type { TicketRow } from "../src/store/tickets.ts";
 // PR rows (LASSO-132): each row's verdict and check counts, and the checks cell's words.
 // Reviewers (LASSO-133): who reviews a PR, in what state, worst first, and who "Needs review" waits on.
 // Tickets on rows (LASSO-137): the Lasso Ticket each PR matches, by PR URL or by repo and branch, and its Flag.
+// Refresh on the Tick (LASSO-134): when the cache fetches, over a fake clock and a fake GitHub.
 
 const LASSO: GitHubRepo = { owner: "rbitco", name: "lasso" };
 const SITE: GitHubRepo = { owner: "rbitco", name: "site" };
@@ -56,50 +57,233 @@ describe("a repo's GitHub origin", () => {
 });
 
 describe("the PR List cache", () => {
+  const TICK = 60_000;
+  const REFRESH = 5 * TICK;
+  const START = Date.parse("2026-10-15T12:00:00Z");
   const node = (n: number) => ({ number: n, title: `PR ${n}`, url: `https://github.com/rbitco/lasso/pull/${n}`, updatedAt: "2026-10-15T12:00:00Z", repository: { nameWithOwner: "rbitco/lasso" }, author: { login: "matt" } });
-  const fake = (answer: (search: string) => SearchResult) => {
+  const ok = (total: number, ...ns: number[]): SearchResult => ({ ok: true, total, nodes: ns.map(node), rateLimit: { remaining: 4990, resetAt: "2026-10-15T13:00:00Z" } });
+  const MINE: PrListSetting = { name: "Mine", query: "is:open author:@me", limit: 25 };
+  const REVIEW: PrListSetting = { name: "Review requested", query: "is:open review-requested:@me", limit: 2 };
+
+  /**
+   * A cache over a fake clock and a fake GitHub. Searches answer at once unless `hold` is set, when they wait for
+   * `release`. `calls` is every search sent; `changes` counts change callbacks.
+   */
+  function setup(opts: { lists?: PrListSetting[]; repos?: Record<string, GitHubRepo>; answer?: (search: string) => SearchResult } = {}) {
+    let now = START;
+    let lists = opts.lists ?? [MINE, REVIEW];
+    let answer = opts.answer ?? ((s: string) => (s.includes("review-requested") ? ok(31, 1, 2) : ok(1, 3)));
     const calls: string[] = [];
+    let held: Promise<void> | null = null;
+    let release = () => undefined as void;
     const search: PrSearchClient = async (s) => {
       calls.push(s);
+      if (held) await held;
       return answer(s);
     };
-    return { calls, search };
-  };
-  const ok = (total: number, ...ns: number[]): SearchResult => ({ ok: true, total, nodes: ns.map(node), rateLimit: { remaining: 4990, resetAt: "2026-10-15T13:00:00Z" } });
+    const t = {
+      calls,
+      changes: 0,
+      cache: null as unknown as PrLists,
+      advance: (ms: number) => void (now += ms),
+      now: () => now,
+      setLists: (next: PrListSetting[]) => void (lists = next),
+      setAnswer: (next: (search: string) => SearchResult) => void (answer = next),
+      hold: () => void (held = new Promise<void>((r) => (release = () => ((held = null), r())))),
+      release: () => release(),
+      /** Reads once a Tick for `ticks` Ticks, as an open page does, running each Tick's step after the read. */
+      async openFor(ticks: number) {
+        for (let i = 0; i < ticks; i++) {
+          t.advance(TICK);
+          await t.cache.read();
+          await t.cache.onTick();
+          await t.cache.settle();
+        }
+      },
+    };
+    t.cache = new PrLists({ lists: () => lists, repos: async () => opts.repos ?? { lasso: LASSO }, search, tickMs: () => TICK, refreshMs: () => REFRESH, changed: () => t.changes++, now: () => now });
+    return t;
+  }
 
-  it("fetches each list once, in config order, with its total and the GitHub link", async () => {
-    let lists: PrListSetting[] = [
-      { name: "Review requested", query: "is:open review-requested:@me", limit: 2 },
-      { name: "Mine", query: "is:open author:@me", limit: 25 },
-    ];
-    const { calls, search } = fake((s) => (s.includes("review-requested") ? ok(31, 1, 2) : ok(1, 3)));
-    const cache = new PrLists({ lists: () => lists, repos: async () => ({ lasso: LASSO }), search, now: () => Date.parse("2026-10-15T12:05:00Z") });
-    const [a, b] = await Promise.all([cache.read(), cache.read()]);
-    expect(a).toEqual(b);
-    expect(a.lists.map((l) => [l.name, l.rows.map((r) => r.number), l.total, l.fetchedAt])).toEqual([
-      ["Review requested", [1, 2], 31, "2026-10-15T12:05:00.000Z"],
-      ["Mine", [3], 1, "2026-10-15T12:05:00.000Z"],
+  it("answers a read at once, fetching in the background, and shows the rows once fetched, in config order", async () => {
+    const t = setup({ lists: [REVIEW, MINE] });
+    t.hold();
+    const first = await t.cache.read();
+    // Before the first fetch: no rows, no age, fetching.
+    expect(first.lists.map((l) => [l.name, l.rows, l.fetchedAt, l.fetching])).toEqual([
+      ["Review requested", [], null, true],
+      ["Mine", [], null, true],
     ]);
-    expect(a.lists[0]!.url).toBe(searchUrl("is:pr is:open review-requested:@me repo:rbitco/lasso sort:updated-desc"));
-    await cache.read();
-    expect(calls).toHaveLength(2);
-    // An edited list is fetched afresh; a removed one is gone.
-    lists = [{ name: "Mine", query: "is:open author:@me draft:false", limit: 25 }];
-    const edited = await cache.read();
-    expect(edited.lists.map((l) => l.name)).toEqual(["Mine"]);
-    expect(calls).toHaveLength(3);
+    expect(first.pausedUntil).toBeNull();
+    expect(t.changes).toBe(1);
+    t.release();
+    await t.cache.settle();
+    expect(t.changes).toBe(3);
+    const fetched = await t.cache.read();
+    expect(fetched.lists.map((l) => [l.name, l.rows.map((r) => r.number), l.total, l.fetchedAt, l.fetching])).toEqual([
+      ["Review requested", [1, 2], 31, "2026-10-15T12:00:00.000Z", false],
+      ["Mine", [3], 1, "2026-10-15T12:00:00.000Z", false],
+    ]);
+    expect(fetched.lists[0]!.url).toBe(searchUrl("is:pr is:open review-requested:@me repo:rbitco/lasso sort:updated-desc"));
+    expect(t.calls).toHaveLength(2);
   });
 
-  it("reports a list it cannot search or fetch, and tries a failed fetch again on the next read", async () => {
-    let fail = true;
-    const { calls, search } = fake(() => (fail ? { ok: false, problem: "failed", message: "timed out" } : ok(1, 1)));
-    const cache = new PrLists({ lists: () => [{ name: "Mine", query: "is:open", limit: 25 }, { name: "Elsewhere", query: "org:example", limit: 25 }], repos: async () => ({}), search });
-    const first = await cache.read();
-    expect(first.lists.map((l) => l.error)).toEqual([NO_GITHUB_REPOS, "timed out"]);
-    fail = false;
-    const second = await cache.read();
-    expect(second.lists.map((l) => [l.error, l.rows.length])).toEqual([[NO_GITHUB_REPOS, 0], [null, 1]]);
-    expect(calls).toEqual(["is:pr org:example sort:updated-desc", "is:pr org:example sort:updated-desc"]);
+  it("shares one fetch per list between reads, Ticks and Check now that overlap", async () => {
+    const t = setup();
+    t.hold();
+    await Promise.all([t.cache.read(), t.cache.read()]);
+    t.advance(REFRESH + TICK);
+    await t.cache.read();
+    await t.cache.onTick();
+    await t.cache.checkNow();
+    expect(t.calls).toHaveLength(2);
+    t.release();
+    await t.cache.settle();
+    expect((await t.cache.read()).lists.every((l) => l.rows.length > 0)).toBe(true);
+  });
+
+  it("refreshes on the Tick only lists older than pr_list_refresh, and only while the page is open", async () => {
+    const t = setup();
+    // Nobody has opened the page: a Tick searches nothing.
+    await t.cache.onTick();
+    expect(t.calls).toHaveLength(0);
+    await t.cache.read();
+    await t.cache.settle();
+    expect(t.calls).toHaveLength(2);
+    // Read each Tick, the page stays open; the lists are younger than pr_list_refresh for four Ticks.
+    await t.openFor(4);
+    expect(t.calls).toHaveLength(2);
+    await t.openFor(1);
+    expect(t.calls).toHaveLength(4);
+    expect((await t.cache.read()).lists[0]!.fetchedAt).toBe(new Date(START + REFRESH).toISOString());
+    // Unread for more than two Ticks, the page is closed: stale lists stay as they are.
+    t.advance(2 * TICK + 1);
+    t.advance(REFRESH);
+    await t.cache.onTick();
+    await t.cache.settle();
+    expect(t.calls).toHaveLength(4);
+  });
+
+  it("refreshes lists older than one Tick when the page opens again", async () => {
+    const t = setup();
+    await t.cache.read();
+    await t.cache.settle();
+    // Closed for three Ticks: opening it again refreshes both lists.
+    t.advance(3 * TICK);
+    await t.cache.read();
+    await t.cache.settle();
+    expect(t.calls).toHaveLength(4);
+    // The page now open, a read refreshes nothing more.
+    t.advance(TICK);
+    await t.cache.read();
+    expect(t.calls).toHaveLength(4);
+  });
+
+  it("does not refresh a list fetched under a Tick ago when the page opens", async () => {
+    const t = setup();
+    await t.cache.read();
+    await t.cache.settle();
+    await t.openFor(3);
+    // Last read at 3T. At 5T the page is open (read 2T ago) and the Tick refreshes the 5T-old lists.
+    t.advance(2 * TICK);
+    await t.cache.onTick();
+    await t.cache.settle();
+    expect(t.calls).toHaveLength(4);
+    // Half a Tick on, the page counts as closed; opening it finds lists half a Tick old, fresh enough.
+    t.advance(TICK / 2);
+    await t.cache.read();
+    expect(t.calls).toHaveLength(4);
+  });
+
+  it("refreshes every list on Check now, however fresh, while the page is open", async () => {
+    const t = setup();
+    await t.cache.read();
+    await t.cache.settle();
+    t.advance(1000);
+    await t.cache.checkNow();
+    await t.cache.settle();
+    expect(t.calls).toHaveLength(4);
+    // A Check now with the page closed spends nothing.
+    t.advance(3 * TICK);
+    await t.cache.checkNow();
+    expect(t.calls).toHaveLength(4);
+  });
+
+  it("keeps a list's rows when a refresh fails, retries when next due, and clears the error when it succeeds", async () => {
+    const t = setup({ lists: [MINE] });
+    await t.cache.read();
+    await t.cache.settle();
+    const good = (await t.cache.read()).lists[0]!;
+    t.setAnswer(() => ({ ok: false, problem: "failed", message: "timed out" }));
+    await t.cache.checkNow();
+    await t.cache.settle();
+    const failed = (await t.cache.read()).lists[0]!;
+    expect([failed.error, failed.rows, failed.fetchedAt]).toEqual(["timed out", good.rows, good.fetchedAt]);
+    // Reads while the page is open don't retry it; the next due Tick does.
+    await t.openFor(4);
+    expect(t.calls).toHaveLength(2);
+    t.setAnswer(() => ok(2, 4, 5));
+    await t.openFor(1);
+    const recovered = (await t.cache.read()).lists[0]!;
+    expect([recovered.error, recovered.rows.map((r) => r.number), t.calls.length]).toEqual([null, [4, 5], 3]);
+  });
+
+  it("reports a list it cannot search without fetching it", async () => {
+    const t = setup({ lists: [MINE, { name: "Elsewhere", query: "org:example", limit: 25 }], repos: {} });
+    const view = await t.cache.read();
+    await t.cache.settle();
+    expect(view.lists.map((l) => [l.error, l.fetching])).toEqual([
+      [NO_GITHUB_REPOS, false],
+      [null, true],
+    ]);
+    expect(t.calls).toEqual(["is:pr org:example sort:updated-desc"]);
+  });
+
+  it("pauses every list below 500 GitHub points until the reset, keeping the rows, and resumes on the first Tick after it", async () => {
+    const reset = START + 30 * 60_000;
+    const t = setup({ answer: () => ({ ...ok(1, 3), rateLimit: { remaining: 499, resetAt: new Date(reset).toISOString() } }) });
+    await t.cache.read();
+    await t.cache.settle();
+    const paused = await t.cache.read();
+    expect([paused.pausedUntil, paused.lists.map((l) => l.rows.length)]).toEqual([new Date(reset).toISOString(), [1, 1]]);
+    // Nothing refreshes while paused: not Check now, not a stale Tick, not opening the page.
+    await t.cache.checkNow();
+    await t.openFor(10);
+    t.advance(3 * TICK);
+    await t.cache.read();
+    expect(t.calls).toHaveLength(2);
+    // Past the reset, the pause holds until a Tick, which resumes and refreshes the stale lists.
+    t.advance(reset - t.now() + 1);
+    expect((await t.cache.read()).pausedUntil).toBe(new Date(reset).toISOString());
+    expect(t.calls).toHaveLength(2);
+    t.setAnswer(() => ok(1, 3));
+    const before = t.changes;
+    await t.cache.onTick();
+    await t.cache.settle();
+    expect(t.changes).toBeGreaterThan(before);
+    expect([(await t.cache.read()).pausedUntil, t.calls.length]).toEqual([null, 4]);
+  });
+
+  it("fetches a list added or edited in config afresh, drops a removed one, and leaves the rest", async () => {
+    const t = setup();
+    await t.cache.read();
+    await t.cache.settle();
+    const drafts: PrListSetting = { name: "Drafts", query: "is:open draft:true author:@me", limit: 5 };
+    t.setLists([{ ...MINE, query: "is:open author:@me draft:false" }, drafts]);
+    t.hold();
+    const edited = await t.cache.read();
+    // The edited list starts again with no rows; the removed one is gone.
+    expect(edited.lists.map((l) => [l.name, l.rows.length, l.fetchedAt, l.fetching])).toEqual([
+      ["Mine", 0, null, true],
+      ["Drafts", 0, null, true],
+    ]);
+    t.release();
+    await t.cache.settle();
+    expect(t.calls.slice(2)).toEqual(["is:pr is:open author:@me draft:false repo:rbitco/lasso sort:updated-desc", "is:pr is:open draft:true author:@me repo:rbitco/lasso sort:updated-desc"]);
+    // Once fetched, the edited list is not fetched again by a read.
+    t.setLists([{ ...MINE, query: "is:open author:@me draft:false" }]);
+    await t.cache.read();
+    expect(t.calls).toHaveLength(4);
   });
 });
 
@@ -353,7 +537,11 @@ describe("a PR row's Ticket", () => {
         fetches++;
         return { ok: true, total: 1, nodes: [node()], rateLimit: null };
       },
+      tickMs: () => 60_000,
+      refreshMs: () => 300_000,
     });
+    await cache.read();
+    await cache.settle();
     expect((await cache.read()).lists[0]!.rows[0]!.ticket).toBeNull();
     // A Ticket in a repo with no GitHub origin can't match by branch.
     tickets = [{ ...row({ id: "ELSEWHERE" }), repo: "elsewhere" } as TicketRow, { ...row({ stage: "implement" }), repo: "lasso" } as TicketRow];

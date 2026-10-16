@@ -68,9 +68,10 @@ const REVIEWERS: Reviewer[] = [
 /** Two PR Lists: Mine cut short at its limit of one, Review requested whole. */
 const PR_LISTS: PrListsView = {
   lists: [
-    { name: "Mine", query: "is:open author:@me", search: "is:pr is:open author:@me repo:rbitco/lasso sort:updated-desc", url: "https://github.com/pulls?q=mine", limit: 1, total: 4, fetchedAt: ago(30), error: null, rows: [{ title: "Tick grace when the laptop sleeps", repo: "rbitco/lasso", number: 101, url: "https://github.com/rbitco/lasso/pull/101", author: "matt", updatedAt: ago(45 * 60), verdict: { word: "Checks failing", reason: "a required check failed", tone: "crit" }, checks: { passed: 7, failing: 2 }, reviewers: REVIEWERS, ticket: null }] },
-    { name: "Review requested", query: "is:open review-requested:@me", search: "is:pr is:open review-requested:@me repo:rbitco/lasso sort:updated-desc", url: "https://github.com/pulls?q=review", limit: 25, total: 0, fetchedAt: ago(30), error: null, rows: [] },
+    { name: "Mine", query: "is:open author:@me", search: "is:pr is:open author:@me repo:rbitco/lasso sort:updated-desc", url: "https://github.com/pulls?q=mine", limit: 1, total: 4, fetchedAt: ago(30), fetching: false, error: null, rows: [{ title: "Tick grace when the laptop sleeps", repo: "rbitco/lasso", number: 101, url: "https://github.com/rbitco/lasso/pull/101", author: "matt", updatedAt: ago(45 * 60), verdict: { word: "Checks failing", reason: "a required check failed", tone: "crit" }, checks: { passed: 7, failing: 2 }, reviewers: REVIEWERS, ticket: null }] },
+    { name: "Review requested", query: "is:open review-requested:@me", search: "is:pr is:open review-requested:@me repo:rbitco/lasso sort:updated-desc", url: "https://github.com/pulls?q=review", limit: 25, total: 0, fetchedAt: ago(30), fetching: false, error: null, rows: [] },
   ],
+  pausedUntil: null,
 };
 
 const VERSION: PipelineVersionView = { name: "default", version: 2, createdAt: ago(180), live: 1, deleted: false, pipeline: { profile: null, budget: {}, stages: [] } };
@@ -607,6 +608,43 @@ describe("the Pull Requests page", () => {
     expect([checks.textContent, checks.title]).toEqual(["✗2 failing", "7 passed, 2 failing"]);
   });
 
+  it("holds placeholder rows before a list's first fetch, shows its age and a spinner, and re-reads on each change and Tick", async () => {
+    const lasso = fakeLasso();
+    const [mine, review] = PR_LISTS.lists;
+    lasso.state.prLists = { lists: [{ ...mine!, limit: 25, rows: [], total: 0, fetchedAt: null, fetching: true }, { ...review!, fetchedAt: ago(5 * 60) }], pausedUntil: null };
+    location.hash = "#prs";
+    await new Promise((r) => setTimeout(r, 10));
+    render(<App />);
+    await screen.findByText("0 of 0", { selector: '[aria-label="Mine"] *' });
+    const [first, second] = [...document.querySelectorAll<HTMLElement>('[data-role="pr-list"]')];
+    // Three grey rows hold the first list's place, and its heading spins without an age.
+    expect(first!.querySelectorAll('[data-role="pr-placeholders"] .placeholder')).toHaveLength(3);
+    expect([first!.querySelector('[data-role="pr-age"] .spin') !== null, first!.querySelector('[data-role="pr-age"]')!.textContent]).toEqual([true, ""]);
+    expect([second!.querySelector('[data-role="pr-age"]')!.textContent, second!.querySelector(".spin")]).toEqual(["updated 5m ago", null]);
+    // The fetch finishes: a "prlists" event re-reads, and the rows and age take the placeholders' place.
+    lasso.state.prLists = { lists: [{ ...mine!, fetchedAt: ago(10) }, { ...review!, fetchedAt: ago(5 * 60) }], pausedUntil: null };
+    send("prlists");
+    await screen.findByText("1 of 4");
+    expect(document.querySelector('[data-role="pr-placeholders"]')).toBeNull();
+    expect(section("pr-list").querySelector('[data-role="pr-age"]')!.textContent).toBe("updated just now");
+    // Each Tick re-reads too, which is what keeps Lasso refreshing the lists while the page is open.
+    const before = lasso.gets("/api/pr-lists");
+    send("tick", freshTick());
+    await waitFor(() => expect(lasso.gets("/api/pr-lists")).toBe(before + 1));
+  });
+
+  it("says a rate-limit pause in each heading, in local time, and keeps the rows", async () => {
+    const lasso = fakeLasso();
+    const until = new Date(2026, 9, 15, 15, 40).toISOString();
+    lasso.state.prLists = { ...PR_LISTS, pausedUntil: until };
+    location.hash = "#prs";
+    await new Promise((r) => setTimeout(r, 10));
+    render(<App />);
+    await screen.findByText("1 of 4");
+    expect([...document.querySelectorAll('[data-role="pr-age"]')].map((a) => a.textContent)).toEqual(["paused until 3:40, GitHub rate limit", "paused until 3:40, GitHub rate limit"]);
+    expect(document.querySelectorAll('[data-role="pr-row"]')).toHaveLength(1);
+  });
+
   it("shows reviewer avatars with badges, rings and a hover list, and keeps their clicks from the row", async () => {
     fakeLasso();
     location.hash = "#prs";
@@ -647,7 +685,7 @@ describe("the Pull Requests page", () => {
     const [mine] = PR_LISTS.lists;
     const plain = mine!.rows[0]!;
     const linked = { ...plain, title: "Sleep-proof Tick", number: 102, url: "https://github.com/rbitco/lasso/pull/102", ticket: { id: "A", ref: "APP-A", stage: "review", flag: null } };
-    lasso.state.prLists = { lists: [{ ...mine!, total: 2, rows: [linked, plain] }] };
+    lasso.state.prLists = { lists: [{ ...mine!, total: 2, rows: [linked, plain] }], pausedUntil: null };
     location.hash = "#prs";
     await new Promise((r) => setTimeout(r, 10));
     render(<App />);

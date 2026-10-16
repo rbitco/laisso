@@ -3,6 +3,7 @@ import { Document, isMap, isScalar, isSeq, parse, parseDocument, stringify } fro
 import { applyPatch, writeLike } from "../yaml-edit.ts";
 import type { LassoHome } from "./home.ts";
 import { count, duration, flag, isPlainObject, mapping, money, positive, text, type Fail } from "../fields.ts";
+import { parseDuration } from "../duration.ts";
 import { RUNNERS, type Pipeline, type RunnerName, type RunnerStage } from "../pipeline/load.ts";
 import { asksForIssues } from "../prs/query.ts";
 
@@ -106,6 +107,8 @@ export interface Config {
   terminal: TerminalSetting;
   /** The Pull Requests page's lists, by name, in the order config.yaml writes them. */
   pr_lists: Record<string, PrListConfig>;
+  /** How often an open Pull Requests page refreshes its lists, as a duration; never shorter than the tick. */
+  pr_list_refresh: string;
 }
 
 /** The values terminal: takes: auto, or a terminal named outright. */
@@ -133,6 +136,7 @@ export const DEFAULT_CONFIG: Config = {
     Mine: { query: "is:open author:@me", limit: 25 },
     "Review requested": { query: "is:open review-requested:@me", limit: 25 },
   },
+  pr_list_refresh: "5m",
 };
 
 export const DEFAULT_CONFIG_YAML = `# Lasso configuration. Every key is optional; the values shown are the defaults.
@@ -222,6 +226,10 @@ pr_lists:
   Review requested:
     query: is:open review-requested:@me
     limit: 25
+
+# How often the PR Lists refresh while the Pull Requests page is open; at
+# least the tick above. Lists refresh only while some tab has the page open.
+pr_list_refresh: 5m
 `;
 
 export class ConfigError extends Error {}
@@ -312,12 +320,25 @@ export function parseConfig(text: string, file: string, overrides: { port?: numb
     },
     terminal: raw.terminal === undefined || raw.terminal === null ? D.terminal : oneOf(TERMINALS, raw.terminal, at("terminal")),
     pr_lists: raw.pr_lists === undefined ? structuredClone(D.pr_lists) : parsePrLists(mapping(raw.pr_lists, at("pr_lists"), fail), at("pr_lists")),
+    pr_list_refresh: D.pr_list_refresh,
   };
+  config.pr_list_refresh = prListRefresh(raw.pr_list_refresh, config.tick, at("pr_list_refresh"));
   if (overrides.port !== undefined) config.port = overrides.port;
   return config;
 }
 
 const fail: Fail = (message) => new ConfigError(message);
+
+/**
+ * pr_list_refresh, at least the tick: lists refresh on the Tick, so a shorter one could not be kept. Left out, it is
+ * the default, or the tick when that is longer, so a long tick alone is never an error.
+ */
+function prListRefresh(value: unknown, tick: number, where: string): string {
+  if (value === undefined || value === null) return parseDuration(DEFAULT_CONFIG.pr_list_refresh) >= tick * 1000 ? DEFAULT_CONFIG.pr_list_refresh : `${tick}s`;
+  const refresh = duration(value, where, fail);
+  if (parseDuration(refresh) < tick * 1000) throw new ConfigError(`${where} must be at least the tick (${tick}s), not ${refresh}`);
+  return refresh;
+}
 const string = text;
 
 /** What the dashboard may set (spec: Lasso home and configuration); repos stay a hand edit in v1. */
@@ -509,6 +530,7 @@ export function applyLive(live: Config, fresh: Config): void {
   // Cleared and refilled, so the lists keep the order the file now gives them.
   for (const key of Object.keys(live.pr_lists)) delete live.pr_lists[key];
   Object.assign(live.pr_lists, fresh.pr_lists);
+  live.pr_list_refresh = fresh.pr_list_refresh;
 }
 
 function normaliseRepos(value: Record<string, unknown>, where: string): Record<string, RepoConfig> {

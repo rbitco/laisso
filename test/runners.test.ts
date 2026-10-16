@@ -462,7 +462,7 @@ describe("the shipped profiles", () => {
     const repo = await makeRepo(path.join(home, "..", "repos"), "app");
     const file = path.join(home, "config.yaml");
     const text = await readFile(file, "utf8");
-    await writeFile(file, text.replace("repos: {}\n", `repos:\n  app:\n    tracker: jira\n    project: APP\n    path: ${repo.path}\n`).replace("tick: 60 ", "tick: 3600 "));
+    await writeFile(file, text.replace("repos: {}\n", `repos:\n  app:\n    tracker: jira\n    project: APP\n    path: ${repo.path}\n`).replace("tick: 60 ", "tick: 3600 ").replace("pr_list_refresh: 5m", "pr_list_refresh: 1h"));
     const lasso = await startLasso({ home, pathDir, port: first.port });
     running.push(lasso);
     return lasso;

@@ -1,5 +1,5 @@
-/** Something the dashboard shows has changed: a Ticket (its row, Sessions or Feedback), a Session's stdout, the tick, config.yaml or a Pipeline file through /api, or the version notice. */
-export type Change = { kind: "ticket"; ticket: string } | { kind: "stdout"; ticket: string; session: string } | { kind: "tick" } | { kind: "config" } | { kind: "pipeline"; pipeline: string } | { kind: "version" };
+/** Something the dashboard shows has changed: a Ticket (its row, Sessions or Feedback), a Session's stdout, the tick, config.yaml or a Pipeline file through /api, the version notice, or the PR Lists (a list started or finished fetching). */
+export type Change = { kind: "ticket"; ticket: string } | { kind: "stdout"; ticket: string; session: string } | { kind: "tick" } | { kind: "config" } | { kind: "pipeline"; pipeline: string } | { kind: "version" } | { kind: "prlists" };
 
 /**
  * The one place writes announce themselves, so the dashboard can be pushed

@@ -168,6 +168,23 @@ describe("loadConfig", () => {
     applyLive(live, loadConfig(homeWith("pr_lists:\n  B:\n    query: is:open\n  A:\n    query: is:draft\n")));
     expect(Object.keys(live.pr_lists)).toEqual(["B", "A"]);
   });
+
+  it("reads pr_list_refresh as a duration of at least the tick, defaulting to 5m or a longer tick", () => {
+    expect(loadConfig(homeWith("")).pr_list_refresh).toBe("5m");
+    expect(loadConfig(homeWith("tick: 30\npr_list_refresh: 90s\n")).pr_list_refresh).toBe("90s");
+    expect(loadConfig(homeWith("tick: 60\npr_list_refresh: 1m\n")).pr_list_refresh).toBe("1m");
+    // A long tick alone is never an error: left out, the refresh follows it.
+    expect(loadConfig(homeWith("tick: 3600\n")).pr_list_refresh).toBe("3600s");
+    expect(() => loadConfig(homeWith("tick: 60\npr_list_refresh: 30s\n"))).toThrow(/pr_list_refresh must be at least the tick \(60s\), not 30s/);
+    expect(() => loadConfig(homeWith("pr_list_refresh: soon\n"))).toThrow(ConfigError);
+    expect(() => loadConfig(homeWith("pr_list_refresh: 300\n"))).toThrow(/pr_list_refresh/);
+  });
+
+  it("carries an edited pr_list_refresh into the running config", () => {
+    const live = loadConfig(homeWith(""));
+    applyLive(live, loadConfig(homeWith("pr_list_refresh: 10m\n")));
+    expect(live.pr_list_refresh).toBe("10m");
+  });
 });
 
 describe("resolveProfile", () => {
