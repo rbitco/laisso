@@ -131,7 +131,7 @@ _Avoid_: last output, status line, stdout
 **Owned PR**:
 A pull request that carries a Ticket's own work. Lasso polls it for
 Feedback, runs Rounds on it, and waits for it to merge. A Ticket may have
-several.
+several; a PR is Owned by at most one active Ticket.
 _Avoid_: the Ticket's PR, working PR, main PR
 
 **Referenced PR**:
