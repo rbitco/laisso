@@ -343,13 +343,19 @@ dialog.modal::backdrop { background: rgba(0, 0, 0, 0.55); backdrop-filter: blur(
 .session .pill.running { background: var(--run); color: #fff; }
 .session .pill.failed, .session .pill.exhausted, .session .pill.interrupted { background: var(--crit); color: #fff; }
 .session pre { margin: 0; max-height: 360px; overflow: auto; white-space: pre-wrap; word-break: break-all; color: var(--term-dim); }
-.session pre[data-trimmed]::before { content: '… earlier output trimmed; the whole log is at the stdout path below'; display: block; color: var(--muted); }
+.session pre[data-trimmed]::before { content: '… earlier output trimmed; the whole log is at the path above'; display: block; color: var(--muted); }
 .session .final { color: var(--term-bright); border-top: 1px solid var(--term-line); padding-top: 8px; white-space: pre-wrap; }
 .session .final.ok { color: var(--term-ok); }
 .session .paths { display: flex; flex-wrap: wrap; gap: 6px; }
 .session .paths button { font: inherit; font-size: 11px; padding: 2px 8px; background: var(--term-pill); color: var(--term-dim); border-color: var(--term-line); }
 .session button.stop { background: var(--crit); color: #fff; border-color: var(--crit); font: inherit; }
 .session .hint { color: var(--term-dim); }
+.session .paths button.stdout-open { color: var(--term-bright); border-color: var(--term-dim); }
+/* The stdout modal: the terminal pane grown to nearly the window, its output filling what the header leaves. */
+dialog.modal.stdout-modal { width: min(1280px, calc(100vw - 32px)); height: calc(100vh - 64px); background: var(--term-bg); border-color: var(--term-line); }
+.stdout-modal .session { height: 100%; box-sizing: border-box; grid-template-rows: auto minmax(0, 1fr); border: 0; border-radius: 0; }
+.stdout-modal .session .head .path { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.stdout-modal .session pre { max-height: none; height: 100%; }
 
 /* the Sessions timeline */
 .timeline { list-style: none; margin: 4px 0 0 6px; padding: 0 0 0 16px; border-left: 2px solid var(--line); display: grid; gap: 6px; font-size: 12px; }

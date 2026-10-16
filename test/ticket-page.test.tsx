@@ -17,6 +17,14 @@ class FakeEventSource extends EventTarget {
 }
 vi.stubGlobal("EventSource", FakeEventSource);
 
+// jsdom has <dialog> but not its modal methods; these stand in for what the stdout modal uses.
+HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) {
+  this.open = true;
+};
+HTMLDialogElement.prototype.close ??= function (this: HTMLDialogElement) {
+  this.open = false;
+};
+
 const T0 = "2026-10-12T10:00:00Z";
 
 const BUDGET: BudgetView = {
@@ -298,12 +306,45 @@ describe("keeping up with Lasso", () => {
     expect(detailReads(lasso, "A")).toBe(2);
   });
 
-  it("streams a running Session's output from where it stopped, on each stdout event for it, and Stops it", async () => {
+  it("keeps stdout out of the pane, behind a button that opens it in a modal", async () => {
+    const lasso = fakeLasso([ticket("A")]);
+    lasso.state.stdout.S1 = "planning\n";
+    await showPage("A");
+    const pane = document.querySelector<HTMLElement>('[data-role="session"]')!;
+    expect(pane.querySelector("pre")).toBeNull();
+    expect(within(pane).queryByRole("button", { name: "stdout" })).toBeNull();
+    expect(lasso.reads.filter((r) => r.includes("/stdout"))).toEqual([]);
+    const user = userEvent.setup();
+    await user.click(within(pane).getByRole("button", { name: "View stdout" }));
+    const modal = document.querySelector<HTMLDialogElement>('[data-role="stdout"]')!;
+    expect(modal.open).toBe(true);
+    expect(within(modal).getByText("plan #1 · stdout")).toBeTruthy();
+    expect(within(modal).getByText("/out/S1.log")).toBeTruthy();
+    await waitFor(() => expect(modal.querySelector("pre")!.textContent).toBe("planning\n"));
+    await user.click(within(modal).getByRole("button", { name: "Close" }));
+    expect(document.querySelector('[data-role="stdout"]')).toBeNull();
+    // Escape closes it too.
+    await user.click(within(pane).getByRole("button", { name: "View stdout" }));
+    act(() => void document.querySelector('[data-role="stdout"]')!.dispatchEvent(new Event("cancel", { cancelable: true })));
+    expect(document.querySelector('[data-role="stdout"]')).toBeNull();
+  });
+
+  it("offers no stdout for a built-in action Session", async () => {
+    const action = session({ ticket: "A", id: "S3", stage: "transition-done", mode: "action", stdoutPath: null, runner: null, profile: null, finalMessage: "moved to Done" });
+    fakeLasso([ticket("A", { session: action, sessions: [action] })]);
+    await showPage("A");
+    const pane = document.querySelector<HTMLElement>('[data-role="session"]')!;
+    expect(within(pane).getByText("Lasso performed this Stage itself; there is no Runner output.")).toBeTruthy();
+    expect(within(pane).queryByRole("button", { name: /View stdout/ })).toBeNull();
+  });
+
+  it("tails a running Session's stdout in the modal from where it stopped, on each stdout event for it, and Stops it", async () => {
     const running = session({ ticket: "A", id: "S9", stage: "implement", running: true, outcome: null, finalMessage: null });
     const lasso = fakeLasso([ticket("A", { session: running, sessions: [running] })]);
     lasso.state.stdout.S9 = "reading the code\n";
     await showPage("A");
-    const out = document.querySelector('[data-role="session"] pre')!;
+    await userEvent.setup().click(screen.getByRole("button", { name: "View stdout (live)" }));
+    const out = document.querySelector('[data-role="stdout"] pre')!;
     await waitFor(() => expect(out.textContent).toBe("reading the code\n"));
     const stdoutEvent = (id: string) => act(() => void events().dispatchEvent(new MessageEvent("stdout", { data: JSON.stringify({ ticket: "A", session: id }) })));
     lasso.state.stdout.S9 += "writing a test\n";

@@ -83,11 +83,12 @@ function Duration({ session: s }: { session: SessionView }) {
 }
 
 /**
- * The latest Session: its header, Stop, Take over or Open terminal while it runs, its output, its last word, and the paths to
+ * The latest Session: its header, Stop, Take over or Open terminal while it runs, its last word, its stdout behind a button, and the paths to
  * copy. `refresh` follows a Stop or Open terminal that went through.
  */
 export function SessionPane({ ticket: t, session: s, refresh }: { ticket: TicketDetail; session: SessionView; refresh: () => Promise<void> }) {
   const [busy, setBusy] = useState(false);
+  const [stdout, setStdout] = useState(false);
   const outcome = s.running ? "running" : s.outcome || "unknown";
   const profile = sessionProfile(s);
   const post = async (route: string, body?: string) => {
@@ -175,15 +176,61 @@ export function SessionPane({ ticket: t, session: s, refresh }: { ticket: Ticket
     <section className="session" data-role="session">
       {head}
       <FeedbackList items={s.feedback} />
-      <Output ticket={t.id} session={s.id} running={s.running} />
       {final}
       <div className="paths">
+        {s.stdoutPath && (
+          <button type="button" className="stdout-open" data-role="stdout-open" onClick={() => setStdout(true)}>
+            {s.running ? "View stdout (live)" : "View stdout"}
+          </button>
+        )}
         <WorktreeChip ticket={t} />
-        {s.stdoutPath ? <CopyChip label="stdout" value={s.stdoutPath} /> : <span />}
         {s.runnerSessionId ? <CopyChip label="runner session" value={s.runnerSessionId} /> : <span />}
         {s.transcriptPath ? <CopyChip label="transcript" value={s.transcriptPath} /> : <span />}
       </div>
+      {stdout && <StdoutModal ticket={t} session={s} onClose={() => setStdout(false)} />}
     </section>
+  );
+}
+
+/**
+ * A Session's raw stdout in a modal near the size of the window, tailed live while the Session runs. Escape, Close or
+ * a click on the backdrop closes it.
+ */
+function StdoutModal({ ticket: t, session: s, onClose }: { ticket: TicketDetail; session: SessionView; onClose: () => void }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const el = dialog.current!;
+    if (!el.open) el.showModal();
+    return () => el.close();
+  }, []);
+  const outcome = s.running ? "running" : s.outcome || "unknown";
+  return (
+    <dialog
+      ref={dialog}
+      className="modal stdout-modal"
+      data-role="stdout"
+      aria-label={sessionLabel(s) + " stdout"}
+      onCancel={(ev) => {
+        ev.preventDefault();
+        onClose();
+      }}
+      onClick={(ev) => ev.target === dialog.current && onClose()}
+    >
+      <section className="session">
+        <div className="head">
+          <span className={"pill " + outcome}>{outcome}</span>
+          <strong>{sessionLabel(s) + " · stdout"}</strong>
+          <span className="meta path">{s.stdoutPath}</span>
+          <span className="paths">
+            <CopyChip label="copy path" value={s.stdoutPath!} />
+            <button type="button" onClick={onClose}>
+              Close
+            </button>
+          </span>
+        </div>
+        <Output ticket={t.id} session={s.id} running={s.running} />
+      </section>
+    </dialog>
   );
 }
 
