@@ -152,8 +152,8 @@ _Avoid_: signature, tag, stamp
 
 **Quiet**:
 The displayed state of a Ticket on a repeating Stage with nothing to
-address: no PR yet, checks running, or checks green with nothing
-outstanding. Lasso keeps polling the PR; a human merges it.
+address: no Owned PR yet, or no open Owned PR with Feedback outstanding.
+Lasso keeps polling the Owned PRs; a human merges them.
 _Avoid_: idle, waiting, blocked
 
 **Tick**:
