@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ListChecks, Settings2, Workflow, type LucideIcon } from "lucide-react";
+import { GitPullRequest, ListChecks, Settings2, Workflow, type LucideIcon } from "lucide-react";
 import type { DisplayState, TicketView } from "../../../api/views.ts";
 import { api } from "../api.ts";
 import { useEvents } from "../events.ts";
@@ -7,10 +7,11 @@ import { DevBadge } from "../header/DevBadge.tsx";
 import { Tick } from "../header/Tick.tsx";
 import { ThemeToggle } from "./Theme.tsx";
 
-export type NavView = "ledger" | "pipelines" | "config";
+export type NavView = "ledger" | "prs" | "pipelines" | "config";
 
 const VIEWS: { href: string; view: NavView; name: string; icon: LucideIcon }[] = [
   { href: "#", view: "ledger", name: "Tickets", icon: ListChecks },
+  { href: "#prs", view: "prs", name: "Pull Requests", icon: GitPullRequest },
   { href: "#pipelines", view: "pipelines", name: "Pipelines", icon: Workflow },
   { href: "#config", view: "config", name: "Config", icon: Settings2 },
 ];
@@ -52,7 +53,7 @@ function useNeedsYou(): number {
 }
 
 /**
- * The page's nav: the name and dev badge, the three views with how many Tickets need you, and
+ * The page's nav: the name and dev badge, the four views with how many Tickets need you, and
  * the Tick and theme button at the foot.
  * It is a sidebar; `compact` (a Ticket's page) shrinks it to an icon rail, and below 700px the views become a bottom
  * tab bar. `onChecked` follows a Check now, so the page reads again.

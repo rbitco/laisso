@@ -89,7 +89,7 @@ nav.pages .theme:hover { color: var(--ink); background: var(--surface2); }
   nav.pages .tick-toggle { width: 32px; height: 30px; }
   .tick-pop { left: auto; right: 0; bottom: auto; top: calc(100% + 8px); }
   nav.pages .theme { width: 32px; height: 30px; padding: 0; }
-  nav.pages .views { position: fixed; z-index: 20; left: 0; right: 0; bottom: 0; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; padding: 8px 6px calc(8px + env(safe-area-inset-bottom)); background: var(--side); border-top: 1px solid var(--line); }
+  nav.pages .views { position: fixed; z-index: 20; left: 0; right: 0; bottom: 0; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; padding: 8px 6px calc(8px + env(safe-area-inset-bottom)); background: var(--side); border-top: 1px solid var(--line); }
   nav.pages .views a { flex-direction: column; gap: 3px; padding: 4px 0; font-size: 11px; }
   nav.pages .views a:hover { background: none; }
   nav.pages .views a.on { background: none; color: var(--accent); }
@@ -552,3 +552,28 @@ button.quiet { background: transparent; }
 .sp-name { font-weight: 600; font-size: 13px; overflow-wrap: anywhere; }
 .sp-line { font: 11px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
 .triggers .why { flex-basis: 100%; }
+
+/* Pull Requests: the PR Lists stacked, each a heading over its rows. */
+.prs { display: grid; gap: 28px; min-width: 0; }
+.prs .note { margin: 0; color: var(--muted); }
+.pr-list { display: grid; gap: 10px; min-width: 0; }
+.pr-list h2 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 0; font-size: 15px; font-weight: 600; }
+.pr-list h2 .n { color: var(--muted); font-size: 12.5px; font-weight: 400; font-variant-numeric: tabular-nums; }
+.pr-list h2 .more { font-size: 12.5px; font-weight: 400; color: var(--accent); text-decoration: none; }
+.pr-list h2 .more:hover { text-decoration: underline; }
+.pr-error { margin: 0; font-size: 12.5px; color: var(--amber); }
+.pr-rows { display: grid; gap: 8px; }
+.pr-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 16px; align-items: center; padding: 12px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.pr-row .title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pr-row .where { display: grid; gap: 2px; justify-items: end; text-align: right; }
+.pr-row .where a { color: inherit; text-decoration: none; white-space: nowrap; }
+.pr-row .where a:hover { text-decoration: underline; }
+.pr-row .where a:focus-visible, .pr-list h2 .more:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.pr-row .ext { color: var(--muted); font-size: 11px; }
+.pr-row .sub { color: var(--muted); font-size: 12.5px; }
+@media (max-width: 699px) {
+  .pr-row { grid-template-columns: minmax(0, 1fr); }
+  .pr-row .title { white-space: normal; }
+  .pr-row .where { justify-items: start; text-align: left; grid-auto-flow: column; justify-content: start; gap: 8px; }
+}
+textarea.raw.pr-lists-yaml { min-height: 200px; }

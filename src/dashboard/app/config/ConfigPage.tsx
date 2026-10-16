@@ -7,6 +7,7 @@ import { EditorHead, GroupTitle } from "../Setting.tsx";
 import { SettingsForm } from "./SettingsForm.tsx";
 import { Actions, Repos } from "./FromConfigFile.tsx";
 import { ProfileTiles } from "../profiles/ProfileTiles.tsx";
+import { PrListsForm } from "./PrListsForm.tsx";
 
 export interface ConfigPageProps {
   /** Bumped each time the page is shown, so it reads config afresh. */
@@ -20,8 +21,8 @@ interface Loaded {
 }
 
 /**
- * Config, in three groups by how each saves: settings saved with Save changes; Agent Profiles, which save from
- * their drawer at once; and Actions and repos, which are read-only here and edited in config.yaml by hand.
+ * Config, in four groups by how each saves: settings saved with Save changes; Agent Profiles, which save from
+ * their drawer at once; PR Lists, edited as YAML and saved with Save PR Lists; and Actions and repos, which are read-only here and edited in config.yaml by hand.
  * It reads config again whenever the server says config changed.
  */
 export function ConfigPage({ visit }: ConfigPageProps) {
@@ -48,6 +49,8 @@ export function ConfigPage({ visit }: ConfigPageProps) {
       <SettingsForm config={loaded.file.config} onSaved={(file) => setLoaded((was) => was && { ...was, file })} />
       <GroupTitle title="Agent Profiles" how="Each saves from its editor as you go" />
       <ProfileTiles config={loaded.file.config} pipelines={loaded.pipelines} onChange={(config) => setLoaded((was) => was && { ...was, file: { ...was.file, config } })} />
+      <GroupTitle title="PR Lists" how="YAML, saved with Save PR Lists" />
+      <PrListsForm visit={visit} />
       <GroupTitle title="From config.yaml" how="Read-only here; edit the file by hand" />
       <div className="sheet readonly">
         <Actions actions={loaded.actions} />

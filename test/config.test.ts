@@ -3,7 +3,7 @@ import { parse } from "yaml";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { DEFAULT_CONFIG, DEFAULT_CONFIG_YAML, loadConfig, ConfigError, actionsFor, actionSets, profilesFor, resolveProfile } from "../src/server/config.ts";
+import { DEFAULT_CONFIG, DEFAULT_CONFIG_YAML, loadConfig, ConfigError, actionsFor, actionSets, profilesFor, resolveProfile, prListsBlock, prListsText, applyLive } from "../src/server/config.ts";
 import { resolveHome } from "../src/server/home.ts";
 
 const homeWith = (yaml: string) => {
@@ -125,6 +125,48 @@ describe("loadConfig", () => {
     expect(bad("    profiles:\n      fast: { runner: claude, human: { runner: pi } }\n")).toThrow(/repos\.app\.profiles\.fast\.human: unknown field runner/);
     expect(bad("    profiles: [fast]\n")).toThrow(/repos\.app\.profiles must be a mapping/);
     expect(bad("    default_profile: Big\n")).toThrow(/repos\.app\.default_profile: a profile name is lowercase/);
+  });
+
+  it("reads PR Lists in file order, defaulting to Mine and Review requested, and refuses a malformed one", () => {
+    expect(loadConfig(homeWith("")).pr_lists).toEqual(DEFAULT_CONFIG.pr_lists);
+    expect(Object.keys(loadConfig(homeWith(DEFAULT_CONFIG_YAML)).pr_lists)).toEqual(["Mine", "Review requested"]);
+    const written = loadConfig(homeWith("pr_lists:\n  Zeta:\n    query: is:open org:example\n  Alpha:\n    query: is:open author:@me\n    limit: 100\n")).pr_lists;
+    expect(Object.entries(written)).toEqual([
+      ["Zeta", { query: "is:open org:example", limit: 25 }],
+      ["Alpha", { query: "is:open author:@me", limit: 100 }],
+    ]);
+    expect(loadConfig(homeWith("pr_lists: {}\n")).pr_lists).toEqual({});
+    const bad = (yaml: string) => () => loadConfig(homeWith(`pr_lists:\n  Mine:\n${yaml}`));
+    expect(bad("    query: is:open\n    limit: 0\n")).toThrow(/pr_lists\.Mine\.limit must be a whole number of 1 or more/);
+    expect(bad("    query: is:open\n    limit: 101\n")).toThrow(/pr_lists\.Mine\.limit must be 100 or less/);
+    expect(bad("    query: is:open is:issue\n")).toThrow(/pr_lists\.Mine\.query asks for is:issue/);
+    expect(bad("    query: ''\n")).toThrow(/pr_lists\.Mine\.query must be a GitHub search/);
+    expect(bad("    query: is:open\n    sort: updated\n")).toThrow(/pr_lists\.Mine: unknown field sort/);
+    expect(() => loadConfig(homeWith("pr_lists:\n  2024:\n    query: is:open\n"))).toThrow(/pr_lists\.2024: a PR List name needs a letter/);
+  });
+
+  it("writes the Config page's pr_lists: block in place, and reads it back with its comments", () => {
+    const file = "/c/config.yaml";
+    expect(parse(prListsBlock(DEFAULT_CONFIG_YAML))).toEqual(DEFAULT_CONFIG.pr_lists);
+    expect(parse(prListsBlock("tick: 30\n"))).toEqual(DEFAULT_CONFIG.pr_lists);
+    const edited = prListsText(DEFAULT_CONFIG_YAML, file, "# mine first\nOld:\n  query: is:closed author:@me # recent\n  limit: 5\n");
+    expect(edited.config.pr_lists).toEqual({ Old: { query: "is:closed author:@me", limit: 5 } });
+    expect(edited.config.tick).toBe(DEFAULT_CONFIG.tick);
+    expect(edited.text).toContain("# recent");
+    expect(edited.text).toContain("notifications:\n  enabled: true");
+    expect(prListsBlock(edited.text)).toContain("query: is:closed author:@me # recent");
+    const none = prListsText(edited.text, file, "");
+    expect(none.config.pr_lists).toEqual({});
+    expect(none.text).toContain("pr_lists: {}");
+    expect(prListsBlock(none.text)).toBe("{}\n");
+    expect(() => prListsText(DEFAULT_CONFIG_YAML, file, "Mine:\n  query: is:issue\n")).toThrow(/is:issue/);
+    expect(() => prListsText(DEFAULT_CONFIG_YAML, file, "- Mine\n")).toThrow(/pr_lists must be a mapping/);
+  });
+
+  it("carries an edited pr_lists into the running config, in its new order", () => {
+    const live = loadConfig(homeWith(""));
+    applyLive(live, loadConfig(homeWith("pr_lists:\n  B:\n    query: is:open\n  A:\n    query: is:draft\n")));
+    expect(Object.keys(live.pr_lists)).toEqual(["B", "A"]);
   });
 });
 

@@ -1,9 +1,10 @@
 import { readFileSync } from "node:fs";
-import { isMap, isSeq, parse, parseDocument, type Document } from "yaml";
+import { Document, isMap, isScalar, isSeq, parse, parseDocument, stringify } from "yaml";
 import { applyPatch, writeLike } from "../yaml-edit.ts";
 import type { LassoHome } from "./home.ts";
 import { count, duration, flag, isPlainObject, mapping, money, positive, text, type Fail } from "../fields.ts";
 import { RUNNERS, type Pipeline, type RunnerName, type RunnerStage } from "../pipeline/load.ts";
+import { asksForIssues } from "../prs/query.ts";
 
 export interface RepoConfig {
   tracker: "jira" | "github";
@@ -80,6 +81,14 @@ export interface ProfileConfig extends ProfileSettings {
   human?: ProfileBlock;
 }
 
+/** A PR List: a named GitHub pull request search shown on the Pull Requests page. */
+export interface PrListConfig {
+  /** GitHub search syntax; is:pr is added, and it is scoped to the configured repos unless it names repo:, org: or user:. */
+  query: string;
+  /** How many PRs it shows, 1 to 100. */
+  limit: number;
+}
+
 export interface Config {
   repos: Record<string, RepoConfig>;
   actions: Record<string, ActionConfig>;
@@ -95,6 +104,8 @@ export interface Config {
   notifications: NotificationConfig;
   /** Where a human Stage's terminal opens; auto picks herdr or tmux when Lasso runs inside one. */
   terminal: TerminalSetting;
+  /** The Pull Requests page's lists, by name, in the order config.yaml writes them. */
+  pr_lists: Record<string, PrListConfig>;
 }
 
 /** The values terminal: takes: auto, or a terminal named outright. */
@@ -118,6 +129,10 @@ export const DEFAULT_CONFIG: Config = {
   port: 7433,
   notifications: { enabled: true, flagged: true, human: true, gate: true },
   terminal: "auto",
+  pr_lists: {
+    Mine: { query: "is:open author:@me", limit: 25 },
+    "Review requested": { query: "is:open review-requested:@me", limit: 25 },
+  },
 };
 
 export const DEFAULT_CONFIG_YAML = `# Lasso configuration. Every key is optional; the values shown are the defaults.
@@ -195,6 +210,18 @@ notifications:
   flagged: true    # a Ticket was Flagged
   human: true      # a human Stage became current
   gate: true       # a Stage finished and the next waits on Start
+
+# PR Lists: the Pull Requests page, one GitHub pull request search per list,
+# in the order written here. is:pr is added for you, and each list is scoped
+# to the repos above unless its query names repo:, org: or user:. Writing
+# pr_lists: replaces these two whole; pr_lists: {} shows no lists.
+pr_lists:
+  Mine:
+    query: is:open author:@me
+    limit: 25        # PRs shown, 1 to 100
+  Review requested:
+    query: is:open review-requested:@me
+    limit: 25
 `;
 
 export class ConfigError extends Error {}
@@ -284,6 +311,7 @@ export function parseConfig(text: string, file: string, overrides: { port?: numb
       gate: flag(notifications.gate, at("notifications.gate"), fail, D.notifications.gate),
     },
     terminal: raw.terminal === undefined || raw.terminal === null ? D.terminal : oneOf(TERMINALS, raw.terminal, at("terminal")),
+    pr_lists: raw.pr_lists === undefined ? structuredClone(D.pr_lists) : parsePrLists(mapping(raw.pr_lists, at("pr_lists"), fail), at("pr_lists")),
   };
   if (overrides.port !== undefined) config.port = overrides.port;
   return config;
@@ -478,6 +506,9 @@ export function applyLive(live: Config, fresh: Config): void {
   live.retention = fresh.retention;
   live.branch_prefix = fresh.branch_prefix;
   live.terminal = fresh.terminal;
+  // Cleared and refilled, so the lists keep the order the file now gives them.
+  for (const key of Object.keys(live.pr_lists)) delete live.pr_lists[key];
+  Object.assign(live.pr_lists, fresh.pr_lists);
 }
 
 function normaliseRepos(value: Record<string, unknown>, where: string): Record<string, RepoConfig> {
@@ -517,6 +548,57 @@ function parseActions(value: Record<string, unknown>, where: string): Record<str
     actions[name] = { run: action.run, params: params as string[], timeout: duration(action.timeout, `${at}.timeout`, fail, DEFAULT_ACTION_TIMEOUT) };
   }
   return actions;
+}
+
+export const DEFAULT_PR_LIST_LIMIT = 25;
+const PR_LIST_FIELDS = new Set(["query", "limit"]);
+
+function parsePrLists(value: Record<string, unknown>, where: string): Record<string, PrListConfig> {
+  const lists: Record<string, PrListConfig> = {};
+  for (const [name, entry] of Object.entries(value)) {
+    const at = `${where}.${name}`;
+    // An object puts number-like keys first whatever the file says, which would break the page's order.
+    if (/^\d+$/.test(name)) throw new ConfigError(`${at}: a PR List name needs a letter in it, so the lists keep their order`);
+    const list = mapping(entry, at, fail);
+    for (const key of Object.keys(list)) if (!PR_LIST_FIELDS.has(key)) throw new ConfigError(`${at}: unknown field ${key}`);
+    if (typeof list.query !== "string" || !list.query.trim()) throw new ConfigError(`${at}.query must be a GitHub search`);
+    if (asksForIssues(list.query)) throw new ConfigError(`${at}.query asks for is:issue, but a PR List shows only pull requests`);
+    const limit = positive(list.limit, `${at}.limit`, fail, DEFAULT_PR_LIST_LIMIT);
+    if (limit > 100) throw new ConfigError(`${at}.limit must be 100 or less, not ${limit}`);
+    lists[name] = { query: list.query, limit };
+  }
+  return lists;
+}
+
+/**
+ * Replace config.yaml's pr_lists: with `yaml`, the block as the Config page
+ * edits it (a mapping of name to query and limit; empty for no lists). Its
+ * comments go in with it; the rest of the file is left as it was. Checked by
+ * the same parser as config load, so nothing is written that does not parse.
+ */
+export function prListsText(text: string, file: string, yaml: string): { text: string; config: Config } {
+  const block = parseDocument(yaml);
+  if (block.errors.length) throw new ConfigError(`pr_lists: ${block.errors[0]!.message}`);
+  const value: unknown = block.toJS();
+  if (value !== null && value !== undefined && !isPlainObject(value)) throw new ConfigError("pr_lists must be a mapping of list names to a query and limit");
+  const doc = parseDocument(text);
+  if (!isPlainObject(value) || !Object.keys(value).length) doc.setIn(["pr_lists"], doc.createNode({}));
+  else doc.setIn(["pr_lists"], block.contents);
+  const node = doc.getIn(["pr_lists"], true);
+  if (isMap(node)) node.flow = node.items.length === 0;
+  const out = doc.toString(writeLike(text));
+  return { text: out, config: parseConfig(out, file) };
+}
+
+/** config.yaml's pr_lists: as YAML for the Config page to edit, comments kept; the defaults written out when the file has none. */
+export function prListsBlock(text: string): string {
+  const node = parseDocument(text).getIn(["pr_lists"], true);
+  if (node === undefined || node === null || (isScalar(node) && node.value === null)) return stringify(DEFAULT_CONFIG.pr_lists, { lineWidth: 0 });
+  if (isMap(node) && node.items.length === 0) return "{}\n";
+  if (isMap(node)) node.flow = false;
+  const block = new Document();
+  block.contents = node as Document["contents"];
+  return block.toString({ lineWidth: 0 });
 }
 
 /** What an Agent Profile may be called. */

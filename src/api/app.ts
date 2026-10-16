@@ -1,7 +1,8 @@
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { Changes, Change } from "../server/changes.ts";
-import { ConfigError, patchConfigText, writeProfileText, deleteProfileText, repoDefaultText, profileNamers, applyLive, RESTART_KEYS, parseConfig, currentConfig, type Config } from "../server/config.ts";
+import { ConfigError, patchConfigText, writeProfileText, deleteProfileText, repoDefaultText, profileNamers, applyLive, RESTART_KEYS, parseConfig, currentConfig, prListsBlock, prListsText, type Config } from "../server/config.ts";
+import type { PrLists } from "../prs/lists.ts";
 import type { LassoHome } from "../server/home.ts";
 import type { Tick } from "../server/tick.ts";
 import { parseName, type Tickets, type TicketRow } from "../store/tickets.ts";
@@ -20,7 +21,7 @@ import { Intake, IntakeError, type IntakeRequest } from "../intake/intake.ts";
 import { PipelineError, type Pipeline } from "../pipeline/load.ts";
 import { PipelineFiles } from "../pipeline/files.ts";
 import type { Dashboard } from "../dashboard/page.ts";
-import { ticketView, ticketDetail, sessionView, sortForLedger, pipelineListing, pipelineFileView, pipelineVersionView, actionListings, type LiveVersionView, type ViewContext, type IntakeResult, type ConfigFile, type Health, type MissingTool, type VersionView } from "./views.ts";
+import { ticketView, ticketDetail, sessionView, sortForLedger, pipelineListing, pipelineFileView, pipelineVersionView, actionListings, type LiveVersionView, type ViewContext, type IntakeResult, type ConfigFile, type PrListsYaml, type Health, type MissingTool, type VersionView } from "./views.ts";
 import { readFileSync } from "node:fs";
 import { isPlainObject } from "../fields.ts";
 import { replaceFile } from "../atomic-write.ts";
@@ -42,6 +43,8 @@ export interface AppDeps {
   budgets: Budgets;
   queue: Queue;
   changes: Changes;
+  /** The Pull Requests page's lists, cached in memory for every tab. */
+  prLists: PrLists;
   dashboard: Dashboard;
   version: string;
   /** Needed tools PATH lacked at startup; the dashboard header lists them. */
@@ -317,6 +320,17 @@ export function createApp(deps: AppDeps): Hono {
     const { text, config } = writeProfileText(configText(), deps.home.configFile, c.req.param("name"), body.profile, { create });
     return c.json(writeConfig(text, config), create ? 201 : 200);
   });
+  // PR Lists, edited on the Config page as their YAML block; like any config edit they apply at once.
+  app.get("/api/config/pr-lists", (c) => c.json({ text: prListsBlock(configText()) } satisfies PrListsYaml));
+  app.put("/api/config/pr-lists", async (c) => {
+    const body = ((await c.req.json().catch(() => null)) ?? {}) as { text?: unknown };
+    if (typeof body.text !== "string") return c.json({ error: "text must be the pr_lists: block as YAML" }, 400);
+    const { text, config } = prListsText(configText(), deps.home.configFile, body.text);
+    writeConfig(text, config);
+    return c.json({ text: prListsBlock(text) } satisfies PrListsYaml);
+  });
+  // The Pull Requests page: every PR List in config order, fetching any not fetched yet.
+  app.get("/api/pr-lists", async (c) => c.json(await deps.prLists.read()));
   // What still names a profile is listed first and the delete waits for ?confirm=1, as those Stages would be Flagged at their next Session.
   app.delete("/api/profiles/:name", (c) => {
     const name = c.req.param("name");

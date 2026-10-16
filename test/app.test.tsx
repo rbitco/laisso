@@ -4,7 +4,7 @@ import { render, screen, cleanup, act, waitFor, within } from "@testing-library/
 import { userEvent } from "@testing-library/user-event";
 import { DEFAULT_CONFIG } from "../src/server/config.ts";
 import type { BudgetView } from "../src/budget/budget.ts";
-import type { ConfigFile, IntakeResult, PipelineListing, PipelineVersionView, TicketDetail, VersionView, Health } from "../src/api/views.ts";
+import type { ConfigFile, PrListsView, IntakeResult, PipelineListing, PipelineVersionView, TicketDetail, VersionView, Health } from "../src/api/views.ts";
 import type { Detection } from "../src/intake/detect.ts";
 import type { TickResult, TickStatus } from "../src/server/tick.ts";
 import { App } from "../src/dashboard/app/App.tsx";
@@ -57,6 +57,14 @@ const DETECTED: Detection = {
   title: "Fix the login page", branch: null, notes: ["pick a repo to see the branch"],
 };
 
+/** Two PR Lists: Mine cut short at its limit of one, Review requested whole. */
+const PR_LISTS: PrListsView = {
+  lists: [
+    { name: "Mine", query: "is:open author:@me", search: "is:pr is:open author:@me repo:rbitco/lasso sort:updated-desc", url: "https://github.com/pulls?q=mine", limit: 1, total: 4, fetchedAt: ago(30), error: null, rows: [{ title: "Tick grace when the laptop sleeps", repo: "rbitco/lasso", number: 101, url: "https://github.com/rbitco/lasso/pull/101", author: "matt", updatedAt: ago(45 * 60) }] },
+    { name: "Review requested", query: "is:open review-requested:@me", search: "is:pr is:open review-requested:@me repo:rbitco/lasso sort:updated-desc", url: "https://github.com/pulls?q=review", limit: 25, total: 0, fetchedAt: ago(30), error: null, rows: [] },
+  ],
+};
+
 const VERSION: PipelineVersionView = { name: "default", version: 2, createdAt: ago(180), live: 1, deleted: false, pipeline: { profile: null, budget: {}, stages: [] } };
 
 /** A Tick status as of now: last tick 10s ago, next in 20s. Built when sent, so a slow machine's delay since setup can't skew the tooltip. */
@@ -104,6 +112,7 @@ function fakeLasso() {
     if (url === "/api/pipelines/default/versions/2") return json(VERSION);
     if (url === "/api/config") return json({ file: "/c/config.yaml", text: "", config: DEFAULT_CONFIG, restart: [] } satisfies ConfigFile);
     if (url === "/api/actions") return json([]);
+    if (url === "/api/pr-lists") return json(PR_LISTS);
     return json({ error: `not found: ${url}` }, 404);
   });
   return { sent, state, gets: (route: string) => sent.filter((s) => s.method === "GET" && s.route === route).length };
@@ -118,7 +127,7 @@ const notice = () => document.querySelector('[data-role="notice"]')!;
 /** The value of the checked radio in the confirm step's group named `group`, or null. */
 const chosen = (confirm: HTMLElement, group: string) => (within(within(confirm).getByRole("radiogroup", { name: group })).getAllByRole("radio") as HTMLInputElement[]).find((r) => r.checked)?.value ?? null;
 const section = (role: string) => document.querySelector<HTMLElement>(`[data-role="${role}"]`)!;
-const shownViews = () => ["ledger", "detail", "pipelines", "config"].filter((r) => !section(r).hidden);
+const shownViews = () => ["ledger", "detail", "prs", "pipelines", "config"].filter((r) => !section(r).hidden);
 const navOn = () => [...document.querySelectorAll("nav .views a.on")].map((a) => a.textContent);
 const go = (hash: string) => act(() => void (location.hash = hash));
 
@@ -401,11 +410,12 @@ describe("intake", () => {
 });
 
 describe("the page's views", () => {
-  it("links Tickets, Pipelines and Config, marking the one shown", async () => {
+  it("links Tickets, Pull Requests, Pipelines and Config, marking the one shown", async () => {
     fakeLasso();
     render(<App />);
     expect(within(document.querySelector("nav .views")!).getAllByRole("link").map((a) => [a.textContent, a.getAttribute("href")])).toEqual([
       ["Tickets", "#"],
+      ["Pull Requests", "#prs"],
       ["Pipelines", "#pipelines"],
       ["Config", "#config"],
     ]);
@@ -420,6 +430,10 @@ describe("the page's views", () => {
     await screen.findByText("Pick a Pipeline to edit it, or make a new one.");
     expect(navOn()).toEqual(["Pipelines"]);
     expect(shownViews()).toEqual(["pipelines"]);
+    go("#prs");
+    await screen.findByText("1 of 4");
+    expect(navOn()).toEqual(["Pull Requests"]);
+    expect(shownViews()).toEqual(["prs"]);
   });
 
   it("counts the Tickets that need you on Tickets, and keeps the count up as Tickets change", async () => {
@@ -451,6 +465,7 @@ describe("the page's views", () => {
     expect(within(section("nav")).getAllByRole("link").map((a) => [a.textContent, a.getAttribute("title")])).toEqual([
       ["LASSOL", null],
       ["Tickets", "Tickets"],
+      ["Pull Requests", "Pull Requests"],
       ["Pipelines", "Pipelines"],
       ["Config", "Config"],
     ]);
@@ -557,8 +572,29 @@ describe("the theme button", () => {
   });
 });
 
+describe("the Pull Requests page", () => {
+  it("shows each PR List with N of total, links the rest on GitHub when cut short, and each PR's repo and number", async () => {
+    fakeLasso();
+    location.hash = "#prs";
+    await new Promise((r) => setTimeout(r, 10));
+    render(<App />);
+    await screen.findByText("1 of 4");
+    const lists = [...document.querySelectorAll<HTMLElement>('[data-role="pr-list"]')];
+    expect(lists.map((l) => l.getAttribute("aria-label"))).toEqual(["Mine", "Review requested"]);
+    expect(within(lists[1]!).getByText("0 of 0")).toBeTruthy();
+    expect(within(lists[1]!).queryByRole("link")).toBeNull();
+    const all = within(lists[0]!).getByRole("link", { name: /^All 4 on GitHub/ });
+    expect([all.getAttribute("href"), all.getAttribute("target")]).toEqual(["https://github.com/pulls?q=mine", "_blank"]);
+    const row = section("pr-row");
+    expect(within(row).getByText("Tick grace when the laptop sleeps")).toBeTruthy();
+    const pr = within(row).getByRole("link", { name: /^lasso #101/ });
+    expect([pr.getAttribute("href"), pr.getAttribute("target")]).toEqual(["https://github.com/rbitco/lasso/pull/101", "_blank"]);
+    expect(within(row).getByText(/^matt/).textContent).toBe("matt · 45m ago");
+  });
+});
+
 describe("the page's hash", () => {
-  it("names the Ledger, a Ticket, Pipelines with a Pipeline or one of its Versions, or Config", () => {
+  it("names the Ledger, a Ticket, Pull Requests, Pipelines with a Pipeline or one of its Versions, or Config", () => {
     expect(parseRoute("")).toEqual({ view: "ledger" });
     expect(parseRoute("#01J9ZX")).toEqual({ view: "detail", id: "01J9ZX" });
     expect(parseRoute("#APP%2D7")).toEqual({ view: "detail", id: "APP-7" });
@@ -566,6 +602,7 @@ describe("the page's hash", () => {
     expect(parseRoute("#pipelines/my%20flow")).toEqual({ view: "pipelines", name: "my flow", version: null });
     expect(parseRoute("#pipelines/default/v12")).toEqual({ view: "pipelines", name: "default", version: 12 });
     expect(parseRoute("#config")).toEqual({ view: "config" });
+    expect(parseRoute("#prs")).toEqual({ view: "prs" });
     // A malformed escape is taken as written.
     expect(parseRoute("#%E0")).toEqual({ view: "detail", id: "%E0" });
   });

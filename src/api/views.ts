@@ -247,6 +247,14 @@ export interface ConfigFile {
   restart: string[];
 }
 
+/** /api/config/pr-lists: config.yaml's pr_lists: block as YAML, as the Config page edits it. */
+export interface PrListsYaml {
+  text: string;
+}
+
+export type { PrListsView, PrListView } from "../prs/lists.ts";
+export type { PrRow } from "../prs/rows.ts";
+
 /** The running version and what Lasso has to say about it; `text` is the line to show, null when there is nothing to say. */
 export interface VersionView {
   version: string;

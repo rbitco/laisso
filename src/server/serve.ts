@@ -31,6 +31,9 @@ import { startupToolCheck } from "../tools/startup.ts";
 import { chooseTerminal } from "../session/openers.ts";
 import { VersionCheck, npmLatest } from "./version-check.ts";
 import { ActionChecks } from "../artifact/action-check.ts";
+import { PrLists } from "../prs/lists.ts";
+import { githubRepos } from "../prs/origins.ts";
+import { ghSearch } from "../prs/search.ts";
 
 export interface ServeOptions {
   portFlag?: number;
@@ -141,7 +144,13 @@ export async function serve(opts: ServeOptions): Promise<number> {
     }
   };
   const versionCheck = new VersionCheck({ running: pkg.version, onDisk, latest: npmLatest, log, changed: () => changes.emit({ kind: "version" }) });
-  const app = createApp({ config, home, tick, tickets, versions, sessions, feedback, runs, progress, terminal, exits, overrides, budgets, queue, changes, dashboard, version: pkg.version, missingTools, versionNotice: () => versionCheck.current() });
+  // The Pull Requests page reads config live, so a pr_lists or repos edit applies at its next read.
+  const prLists = new PrLists({
+    lists: () => Object.entries(config.pr_lists).map(([name, list]) => ({ name, ...list })),
+    repos: () => githubRepos(config.repos),
+    search: ghSearch(),
+  });
+  const app = createApp({ config, home, tick, tickets, versions, sessions, feedback, runs, progress, terminal, exits, overrides, budgets, queue, changes, prLists, dashboard, version: pkg.version, missingTools, versionNotice: () => versionCheck.current() });
 
   if (defaults.wroteConfig) log.info("config.written", { file: home.configFile });
   if (defaults.wrotePipeline) log.info("pipeline.written", { name: "default" });

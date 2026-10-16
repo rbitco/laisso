@@ -10,6 +10,7 @@ import { Ledger } from "./ledger/Ledger.tsx";
 import { TicketPage } from "./ticket/TicketPage.tsx";
 import { PipelinesPage } from "./pipelines/PipelinesPage.tsx";
 import { ConfigPage } from "./config/ConfigPage.tsx";
+import { PrsPage } from "./prs/PrsPage.tsx";
 import { ProfileDrawerHost } from "./profiles/drawer.tsx";
 
 const LEDGER: Place = { route: { view: "ledger" }, visit: 0 };
@@ -84,6 +85,9 @@ export function App() {
               </section>
               <section data-role="detail" className="detail" hidden={view !== "detail"}>
                 {route.view === "detail" && <TicketPage id={route.id} visit={place.visit} all={all} side={side} onShown={() => setTicketShown(true)} />}
+              </section>
+              <section data-role="prs" aria-label="Pull Requests" hidden={view !== "prs"}>
+                {view === "prs" && <PrsPage visit={shown.visit} />}
               </section>
               <section data-role="pipelines" className="panel editor-panel" aria-label="Pipelines" hidden={view !== "pipelines"}>
                 {shown.route.view === "pipelines" && <PipelinesPage name={shown.route.name} version={shown.route.version} visit={shown.visit} />}

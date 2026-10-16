@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 
-/** What the page shows, from its hash: the Ledger (""), a Ticket ("#<id>"), Pipelines ("#pipelines/<name>[/v<n>]"), or Config. */
+/** What the page shows, from its hash: the Ledger (""), a Ticket ("#<id>"), Pull Requests ("#prs"), Pipelines ("#pipelines/<name>[/v<n>]"), or Config. */
 export type Route =
   | { view: "ledger" }
+  | { view: "prs" }
   | { view: "detail"; id: string }
   /** The Pipeline open on the right, if any, and its frozen Version shown read-only, or null for its editor. */
   | { view: "pipelines"; name: string | null; version: number | null }
@@ -19,6 +20,7 @@ function decodeName(part: string): string {
 export function parseRoute(hash: string): Route {
   const h = hash.replace(/^#/, "");
   if (h === "config") return { view: "config" };
+  if (h === "prs") return { view: "prs" };
   if (h === "pipelines" || h.startsWith("pipelines/")) {
     const rest = h.startsWith("pipelines/") ? decodeName(h.slice("pipelines/".length)) : null;
     const m = rest ? /^(.+)\/v(\d+)$/.exec(rest) : null;
