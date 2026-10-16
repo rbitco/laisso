@@ -10,6 +10,7 @@ import type { Tickets, TicketRow } from "../store/tickets.ts";
 import type { Sessions } from "../store/sessions.ts";
 import type { ActionStage } from "../pipeline/load.ts";
 import type { Progress } from "./progress.ts";
+import { actionLine, LatestMessageTracker } from "./latest-message.ts";
 
 export interface ActionsDeps {
   config: Config;
@@ -93,12 +94,17 @@ export class Actions {
       this.live.set(row.id, { kill: () => undefined, done });
       return `started ${stage.name}`;
     }
+    const messages = new LatestMessageTracker(actionLine);
     const command = runCommand(action, ticket.worktree, actionEnv(this.deps.config, ticket, stage.name, row.id, stage.with), (chunk) => {
       writeSync(fd, chunk);
       this.deps.stdoutWritten?.(ticket.id, id);
+      const message = messages.feed(chunk);
+      if (message !== null) sessions.setLatestMessage(id, message);
     });
     const done = command.done.then(({ code, killed, spawnError, tail }) => {
       closeSync(fd);
+      const message = messages.flush();
+      if (message !== null) sessions.setLatestMessage(id, message);
       const failure =
         killed === "shutdown" ? null
         : killed === "timeout" ? `${stage.action} timed out after ${action.timeout}`

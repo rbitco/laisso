@@ -57,7 +57,7 @@ describe("A config Action", () => {
     expect(detail.stage.name).toBe("implement");
     expect(detail.flag).toBeNull();
     const session = detail.sessions.find((s) => s.mode === "action")!;
-    expect(session).toMatchObject({ stage: "notify", outcome: "succeeded", finalMessage: "told ops about Tell ops" });
+    expect(session).toMatchObject({ stage: "notify", outcome: "succeeded", finalMessage: "told ops about Tell ops", latestMessage: "told ops about Tell ops" });
 
     const seen = (await readFile(path.join(detail.worktree, "seen.txt"), "utf8")).split("\n");
     expect(await realpath(seen[0]!)).toBe(await realpath(detail.worktree));
@@ -100,10 +100,20 @@ describe("A config Action", () => {
     await checkNow(lasso);
     // While the command runs its Session is open and the Ticket reads as running.
     expect((await detailOf(lasso, ticket.id)).display).toMatchObject({ state: "running", why: "notify, running its command" });
+    // Its last line so far is its Latest Message, while it runs.
+    await waitFor(async () => ((await detailOf(lasso, ticket.id)).session?.latestMessage === "started" ? true : null), "the Latest Message");
     const detail = await actionEnded(lasso, ticket.id);
 
     expect(Date.now() - started).toBeLessThan(8000);
     expect(detail.flag).toMatchObject({ reason: "outcome.failed", detail: "notify timed out after 1s" });
+    expect(detail.sessions.find((s) => s.mode === "action")).toMatchObject({ finalMessage: "notify timed out after 1s", latestMessage: "started" });
+  });
+
+  it("keeps the last non-empty line as its Latest Message, even with no newline after it", async () => {
+    const { lasso } = await lassoWith({ notify: { params: ["channel"], run: "printf 'first\\n\\nlast line\\n  \\n'; printf 'really last' >&2" } });
+    const ticket = await intake(lasso, "Tell ops");
+    const detail = await actionEnded(lasso, ticket.id);
+    expect(detail.sessions.find((s) => s.mode === "action")).toMatchObject({ outcome: "succeeded", latestMessage: "really last" });
   });
 
   it("is read from config.yaml when it runs, so a hand edit counts without a restart", async () => {

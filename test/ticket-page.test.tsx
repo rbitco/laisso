@@ -358,6 +358,17 @@ describe("keeping up with Lasso", () => {
     expect(document.querySelector('[data-role="words"]')!.textContent).toBe("Final message" + "killed: stop" + "Agent's last words" + "Adding the toggle.");
   });
 
+  it("shows a running config Action's last line, waiting on its first line of output before that", async () => {
+    const action = session({ ticket: "A", id: "S4", stage: "notify", mode: "action", runner: null, profile: null, running: true, outcome: null, finalMessage: null });
+    const lasso = fakeLasso([ticket("A", { session: action, sessions: [action] })]);
+    await showPage("A");
+    expect(document.querySelector('[data-role="latest"]')!.textContent).toBe("Waiting for the first line of output…");
+    const said = { ...action, latestMessage: "deploying to staging" };
+    lasso.state.tickets.A = { ...lasso.state.tickets.A!, session: said, sessions: [said] };
+    act(() => void events().dispatchEvent(new MessageEvent("ticket", { data: JSON.stringify({ ticket: "A" }) })));
+    await waitFor(() => expect(document.querySelector('[data-role="latest"]')!.textContent).toBe("deploying to staging"));
+  });
+
   it("offers no stdout for a built-in action Session", async () => {
     const action = session({ ticket: "A", id: "S3", stage: "transition-done", mode: "action", stdoutPath: null, runner: null, profile: null, finalMessage: "moved to Done" });
     fakeLasso([ticket("A", { session: action, sessions: [action] })]);

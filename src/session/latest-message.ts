@@ -5,6 +5,9 @@ import { StringDecoder } from "node:string_decoder";
  * line `read` finds the agent's words in. Chunks split lines and characters anywhere, so
  * a partial last line is held until its newline comes, or until `flush` at the end.
  */
+/** An Action's reader: any line with something on it, trimmed, so the last non-empty line wins. */
+export const actionLine = (line: string): string | null => line.trim() || null;
+
 export class LatestMessageTracker {
   private decoder = new StringDecoder("utf8");
   private partial = "";

@@ -139,7 +139,7 @@ export interface SessionView {
   endedReason: SessionRow["ended_reason"];
   outcome: SessionRow["outcome"];
   finalMessage: string | null;
-  /** The newest message the agent wrote as it ran; null before its first, and for Actions not yet read. */
+  /** The newest message the agent wrote as it ran; null before its first, and for built-in Actions, which have no output. */
   latestMessage: string | null;
   costUsd: number | null;
   usage: Record<string, unknown> | null;
