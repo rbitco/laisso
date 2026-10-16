@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import type { SessionView, TicketDetail, TicketView } from "../../../api/views.ts";
+import type { TicketDetail, TicketView } from "../../../api/views.ts";
 import type { Drift } from "../../../store/versions.ts";
 import type { ArtifactCheck } from "../../../store/tickets.ts";
 import { relative } from "../../metro.ts";
@@ -12,7 +12,7 @@ import { ticketHref, type Selection } from "../route.ts";
 import { BudgetEditor, Gauges } from "./Budget.tsx";
 import { Flow, Timeline } from "./Flow.tsx";
 import { SessionPane, sessionLabel, worktreeGone } from "./SessionPane.tsx";
-import { shownSession } from "./selection.ts";
+import { shownSession, type Shown } from "./selection.ts";
 import { StageProfiles } from "./StageProfiles.tsx";
 import { listTickets, message, readTicket } from "./ticket.ts";
 import { Triggers } from "./Triggers.tsx";
@@ -176,7 +176,11 @@ function NameEditor({ ticket: t, done, refresh }: { ticket: TicketDetail; done: 
  */
 function TicketBody({ ticket: t, select, refresh }: { ticket: TicketDetail; select: Selection; refresh: () => Promise<void> }) {
   const [editing, setEditing] = useState(false);
-  const shown = shownSession(t, select);
+  // The live Session when this selection was made, so one starting later is noticed rather than jumped to.
+  const key = ticketHref(t.id, select);
+  const [baseline, setBaseline] = useState({ key, live: t.session?.id ?? null });
+  if (baseline.key !== key) setBaseline({ key, live: t.session?.id ?? null });
+  const shown = shownSession(t, select, baseline.key === key ? baseline.live : (t.session?.id ?? null));
   const narrowed = shown.stage;
   const go = (to: Selection) => void (location.hash = ticketHref(t.id, to));
   const setFocus = (stage: string | null) => go(stage ? { stage } : null);
@@ -190,8 +194,8 @@ function TicketBody({ ticket: t, select, refresh }: { ticket: TicketDetail; sele
       {t.flag && <FlagBox ticket={t}>{triggers}</FlagBox>}
       <div className="dgrid">
         <div className="stack">
-          {shown.past && shown.session && <Viewing ticket={t} session={shown.session} back={() => go(null)} />}
-          {shown.session ? <SessionPane key={shown.session.id} ticket={t} session={shown.session} past={shown.past} refresh={refresh} /> : <div className="panel muted">No Session yet.</div>}
+          {(shown.past || shown.empty) && <Viewing ticket={t} shown={shown} back={() => go(null)} />}
+          {shown.empty ? null : shown.session ? <SessionPane key={shown.session.id} ticket={t} session={shown.session} past={shown.past} refresh={refresh} /> : <div className="panel muted">No Session yet.</div>}
           <dl>
             <dt>worktree</dt>
             <dd>{worktreeGone(t) ? t.worktree + " (removed)" : t.worktree}</dd>
@@ -215,13 +219,23 @@ function TicketBody({ ticket: t, select, refresh }: { ticket: TicketDetail; sele
   );
 }
 
-/** Over a past Session's pane: which Session it is, whether the live one is running, and the way back to it. */
-function Viewing({ ticket: t, session: s, back }: { ticket: TicketDetail; session: SessionView; back: () => void }) {
+/**
+ * Over a past Session's pane, or in place of the pane for a Stage with no Sessions: what is shown, and the way back to
+ * the live Session. It turns blue and names a Session that started since, without moving the pane; otherwise it says
+ * when the live Session is running.
+ */
+function Viewing({ ticket: t, shown, back }: { ticket: TicketDetail; shown: Shown; back: () => void }) {
+  const what = shown.empty ? `No Sessions for ${shown.stage} yet` : "Viewing " + sessionLabel(shown.session!);
+  const live = t.session;
   return (
-    <div className="viewing" data-role="viewing">
+    <div className={"viewing" + (shown.empty ? " empty" : "") + (shown.newer ? " newer" : "")} data-role={shown.empty ? "empty-stage" : "viewing"}>
       <span>
-        {"Viewing " + sessionLabel(s)}
-        {t.session?.running && <span className="muted">{" · the current Session, " + sessionLabel(t.session) + ", is running"}</span>}
+        {what}
+        {shown.newer ? (
+          <span data-role="newer">{" · " + sessionLabel(shown.newer) + " has started"}</span>
+        ) : (
+          live?.running && <span className="muted">{" · the current Session, " + sessionLabel(live) + ", is running"}</span>
+        )}
       </span>
       <button type="button" className="sm" onClick={back}>
         Back to current

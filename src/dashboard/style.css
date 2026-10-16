@@ -371,6 +371,8 @@ dialog.modal.stdout-modal { width: min(1280px, calc(100vw - 32px)); height: calc
 .timeline li:hover { background: var(--surface2); }
 .timeline li.sel { background: var(--accent-soft); outline: 1px solid var(--accent); }
 .viewing { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 10px; background: var(--surface2); border: 1px solid var(--line); font-size: 13px; }
+.viewing.empty { padding: 18px 16px; }
+.viewing.newer { background: var(--run-bg); border-color: var(--run); }
 .timeline .when { color: var(--muted); font-variant-numeric: tabular-nums; }
 .timeline .pill { font-size: 11px; padding: 1px 6px; }
 .timeline .pill.succeeded { background: var(--good-bg); color: var(--good); }

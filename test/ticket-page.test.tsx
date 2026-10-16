@@ -303,6 +303,35 @@ describe("choosing the Session shown", () => {
     expect(within(document.querySelector<HTMLElement>('[data-role="timeline"]')!).getByRole("heading").textContent).toBe("Sessions");
   });
 
+  it("says a Stage with no Sessions has none, in place of the pane, with the way back", async () => {
+    const stages = [...three().stages, { name: "review", kind: "runner" as const, label: "review", human: false }];
+    fakeLasso([ticket("A", { session: live, sessions: [live, plan2, plan1], stages })]);
+    await showRouted("#A");
+    await userEvent.setup().click(document.querySelector('[data-role="flow"] [data-stage="review"]')!);
+    const empty = await waitFor(() => document.querySelector<HTMLElement>('[data-role="empty-stage"]')!);
+    expect(empty.textContent).toBe("No Sessions for review yet · the current Session, implement #1, is running" + "Back to current");
+    expect(document.querySelector('[data-role="session"]')).toBeNull();
+    await userEvent.setup().click(within(empty).getByRole("button", { name: "Back to current" }));
+    await waitFor(() => expect(within(pane()).getByText("implement #1")).toBeTruthy());
+  });
+
+  it("stays on a past Session when a new one starts, naming it in a blue banner, until Back to current", async () => {
+    const lasso = fakeLasso([three()]);
+    await showRouted("#A/stages/plan");
+    expect(within(pane()).getByText("plan #2")).toBeTruthy();
+    const ended = { ...live, running: false, outcome: "failed" as const, finalMessage: "Tests fail." };
+    const retry = session({ ticket: "A", id: "S4", stage: "implement", ordinal: 2, running: true, outcome: null, finalMessage: null });
+    lasso.state.tickets.A = { ...lasso.state.tickets.A!, session: retry, sessions: [retry, ended, plan2, plan1] };
+    act(() => void events().dispatchEvent(new MessageEvent("ticket", { data: JSON.stringify({ ticket: "A" }) })));
+    await waitFor(() => expect(viewing()!.className).toBe("viewing newer"));
+    expect(viewing()!.textContent).toBe("Viewing plan #2 · implement #2 has started" + "Back to current");
+    expect(within(pane()).getByText("plan #2")).toBeTruthy();
+
+    await userEvent.setup().click(within(viewing()!).getByRole("button", { name: "Back to current" }));
+    await waitFor(() => expect(within(pane()).getByText("implement #2")).toBeTruthy());
+    expect(viewing()).toBeNull();
+  });
+
   it("names no running Session in the banner when the live one has ended", async () => {
     const ended = { ...live, running: false, outcome: "succeeded" as const, finalMessage: "Done." };
     fakeLasso([ticket("A", { session: ended, sessions: [ended, plan2, plan1] })]);
