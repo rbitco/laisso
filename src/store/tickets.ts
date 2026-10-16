@@ -46,6 +46,8 @@ export interface TicketRow {
   profile_overrides: string | null;
   /** The latest check Action run per Stage name, as JSON (ADR 0014); null before any. */
   artifact_checks: string | null;
+  /** When a human skipped each Stage, by Stage name, as JSON; null before any skip. */
+  skipped_stages: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -74,6 +76,11 @@ export interface ArtifactCheck {
 /** The latest check Action run at this Stage of the Ticket, or null. */
 export function checkFor(ticket: Pick<TicketRow, "artifact_checks">, stage: string): ArtifactCheck | null {
   return ticket.artifact_checks ? ((JSON.parse(ticket.artifact_checks) as Record<string, ArtifactCheck>)[stage] ?? null) : null;
+}
+
+/** When a human skipped each Stage of the Ticket, by Stage name. */
+export function skipsOf(ticket: Pick<TicketRow, "skipped_stages">): Record<string, string> {
+  return ticket.skipped_stages ? (JSON.parse(ticket.skipped_stages) as Record<string, string>) : {};
 }
 
 /** The tail of the ULID humans quote when a Ticket has no tracker reference. */
@@ -173,6 +180,13 @@ export class Tickets {
     checks[stage] = check;
     this.db.prepare(`UPDATE tickets SET artifact_checks = ? WHERE id = ?`).run(JSON.stringify(checks), id);
     this.changed(id);
+  }
+
+  /** Record that a human skipped this Stage now, over any earlier skip of it. */
+  setSkipped(id: string, stage: string, now: string = new Date().toISOString()): TicketRow {
+    const skips = skipsOf(this.get(id)!);
+    skips[stage] = now;
+    return this.update(id, { skipped_stages: JSON.stringify(skips) }, now);
   }
 
   /** Set or (with null) clear the override for one Stage; it applies from the Stage's next Session. */

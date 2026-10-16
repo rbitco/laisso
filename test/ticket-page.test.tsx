@@ -63,8 +63,8 @@ function ticket(id: string, over: Partial<TicketDetail> = {}): TicketDetail {
     ],
     budget: BUDGET,
     stages: [
-      { name: "plan", kind: "runner", label: "plan", human: false },
-      { name: "implement", kind: "runner", label: "implement", human: false },
+      { name: "plan", kind: "runner", label: "plan", human: false, skippedAt: null },
+      { name: "implement", kind: "runner", label: "implement", human: false, skippedAt: null },
     ],
     mirrorPending: false, createdAt: T0, updatedAt: T0, url: `http://lasso/#${id}`,
     session: s, sessions: [session({ ticket: id, id: "S2", stage: "implement", outcome: "failed" }), s], pipelineDrift: "same",
@@ -304,7 +304,7 @@ describe("choosing the Session shown", () => {
   });
 
   it("says a Stage with no Sessions has none, in place of the pane, with the way back", async () => {
-    const stages = [...three().stages, { name: "review", kind: "runner" as const, label: "review", human: false }];
+    const stages = [...three().stages, { name: "review", kind: "runner" as const, label: "review", human: false, skippedAt: null }];
     fakeLasso([ticket("A", { session: live, sessions: [live, plan2, plan1], stages })]);
     await showRouted("#A");
     await userEvent.setup().click(document.querySelector('[data-role="flow"] [data-stage="review"]')!);
@@ -313,6 +313,26 @@ describe("choosing the Session shown", () => {
     expect(document.querySelector('[data-role="session"]')).toBeNull();
     await userEvent.setup().click(within(empty).getByRole("button", { name: "Back to current" }));
     await waitFor(() => expect(within(pane()).getByText("implement #1")).toBeTruthy());
+  });
+
+  it("marks a skipped Stage on the diagram and says when it was skipped (LASSO-159)", async () => {
+    const at = new Date(Date.now() - 5 * 60_000).toISOString();
+    const stages = [
+      { name: "grill", kind: "runner" as const, label: "grill", human: true, skippedAt: at },
+      { name: "plan", kind: "runner" as const, label: "plan", human: false, skippedAt: at },
+      { name: "implement", kind: "runner" as const, label: "implement", human: false, skippedAt: null },
+    ];
+    fakeLasso([ticket("A", { session: live, sessions: [live, plan2, plan1], stages, stage: { ...three().stage, index: 2, total: 3 } })]);
+    await showRouted("#A/stages/grill");
+    const station = (name: string) => document.querySelector<SVGGElement>(`[data-role="flow"] [data-stage="${name}"]`)!;
+    expect(station("grill").getAttribute("class")).toBe("node done skipped focus");
+    expect(station("grill").textContent).toContain("skipped");
+    expect(station("implement").getAttribute("class")).toBe("node current");
+    const empty = await waitFor(() => document.querySelector<HTMLElement>('[data-role="empty-stage"]')!);
+    expect(empty.textContent).toBe("Skipped grill 5m ago · the current Session, implement #1, is running" + "Back to current");
+    // A Stage skipped after it ran (a Flagged one, say) still shows its Sessions, and says it was skipped.
+    await showRouted("#A/stages/plan");
+    await waitFor(() => expect(viewing()!.textContent).toBe("Viewing plan #2 · skipped 5m ago · the current Session, implement #1, is running" + "Back to current"));
   });
 
   it("stays on a past Session when a new one starts, naming it in a blue banner, until Back to current", async () => {

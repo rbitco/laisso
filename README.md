@@ -158,6 +158,11 @@ Flags the Ticket when they run out or the spend is used up. A Flagged
 Ticket offers six exits in the dashboard and the API: Retry, Resume,
 Extend, Mark done, Skip and Abandon.
 
+Skip also passes over a Stage that has not started yet, such as a
+second review you don't need: from a Start gate, or while the Stage is
+ready or queued. The Pipeline's hold after that Stage still applies,
+and the Ticket page marks the Stage Skipped.
+
 `concurrency:` in `config.yaml` caps how many headless Sessions run at
 once across all Tickets (default 3). Terminal Sessions never hold a
 slot. Tickets past the cap queue in the order they became runnable and

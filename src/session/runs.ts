@@ -103,6 +103,9 @@ export class Runs {
     // Flags, and a human Retry or Resume may take a slot meanwhile.
     for (const { ticket, pipeline, stage } of ready) {
       if (this.deps.queue.freeSlots() <= 0) break;
+      // A human may have moved the Ticket while an earlier launch awaited (a Skip, say): start only what is still due.
+      const fresh = this.deps.tickets.get(ticket.id);
+      if (!fresh || fresh.state !== "active" || fresh.stage !== stage.name || fresh.holding_since || fresh.flagged_at) continue;
       changes.push({ ticket: ticket.id, summary: await this.launch(ticket, pipeline, stage, "auto") });
     }
     return changes;

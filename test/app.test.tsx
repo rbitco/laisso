@@ -45,7 +45,7 @@ function ticket(id: string): TicketDetail {
     pipeline: "default", pipelineVersion: 2,
     stage: { name: "plan", kind: "runner", label: "plan", human: false, index: 0, total: 1, repeat: false, override: null },
     state: "active", flag: null, pr: null, display: { state: "quiet", label: "Quiet", why: "waiting" }, queue: null, triggers: [], budget: BUDGET,
-    stages: [{ name: "plan", kind: "runner", label: "plan", human: false }],
+    stages: [{ name: "plan", kind: "runner", label: "plan", human: false, skippedAt: null }],
     mirrorPending: false, createdAt: ago(60), updatedAt: ago(5), url: `http://lasso/#${id}`,
     session: null, sessions: [], pipelineDrift: "same", profiles: [],
   };

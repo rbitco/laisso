@@ -69,7 +69,7 @@ function renderDetail(t: TicketDetail): string {
     `url:       ${t.url}`,
     "",
     "stages:",
-    ...t.stages.map((s, i) => `  ${i === t.stage.index ? ">" : " "} ${s.label}${s.human ? " (human)" : ""}`),
+    ...t.stages.map((s, i) => `  ${i === t.stage.index ? ">" : " "} ${s.label}${s.human ? " (human)" : ""}${s.skippedAt ? " (skipped)" : ""}`),
   ];
   if (t.flag) lines.splice(2, 0, `flag:      ${t.flag.reason}${t.flag.detail ? `: ${t.flag.detail}` : ""}`);
   if (t.mirrorPending) lines.splice(2, 0, "tracker:   labels not written yet; retried each tick");

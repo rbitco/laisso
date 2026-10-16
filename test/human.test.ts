@@ -112,7 +112,7 @@ describe("a human Stage", () => {
     const held = await pull(lasso, ticket.id, "done", { override: true });
     expect(held.stage.name).toBe("implement");
     expect(held.display).toEqual({ state: "holding", label: "Holding", why: "Start implement when ready" });
-    expect(held.triggers).toEqual([{ action: "start", label: "Start implement" }, { action: "abandon", label: "Abandon" }]);
+    expect(held.triggers).toEqual([{ action: "start", label: "Start implement" }, { action: "skip", label: "Skip implement" }, { action: "abandon", label: "Abandon" }]);
     expect(held.session).toMatchObject({ stage: "grill", mode: "terminal", running: false, endedBy: "human", endedReason: null, outcome: null });
     const [, gate] = await notified(lasso, 2);
     expect(gate).toMatchObject({ title: "Add dark mode", body: "grill finished; Start implement when ready" });
@@ -172,6 +172,34 @@ describe("a human Stage", () => {
     expect(skipped.stage.name).toBe("implement");
     expect(skipped.display.state).toBe("holding");
     expect(skipped.sessions).toEqual([]);
+  });
+
+  it("skips Stages that have not started, one at a time to the end, and records each (LASSO-159)", async () => {
+    const { lasso, ticket } = await lassoWithTicket();
+    // grill says advance: false, so skipping it holds before implement, as finishing it would.
+    const held = await pull(lasso, ticket.id, "skip");
+    expect(held.display.state).toBe("holding");
+    // implement is skipped from the gate without a Session; it auto-advances, so notes is current.
+    const notes = await pull(lasso, ticket.id, "skip");
+    expect(notes.stage.name).toBe("notes");
+    expect(notes.sessions).toEqual([]);
+    expect(notes.stages.map((s) => [s.name, s.skippedAt !== null])).toEqual([["grill", true], ["implement", true], ["notes", false]]);
+    // Skipping the last Stage finishes the Ticket.
+    const done = await pull(lasso, ticket.id, "skip");
+    expect(done.state).toBe("done");
+    expect(done.stages.every((s) => s.skippedAt !== null)).toBe(true);
+  });
+
+  it("refuses Skip once a headless Stage has started", async () => {
+    const { lasso, ticket } = await lassoWithTicket();
+    await pull(lasso, ticket.id, "skip");
+    await lasso.runner.script({ hang: true });
+    const started = await pull(lasso, ticket.id, "start");
+    expect(started.triggers.map((x) => x.action)).toEqual(["takeover", "abandon"]);
+    const refused = await lasso.api<Response>(`/api/tickets/${ticket.id}/skip`, { method: "POST", body: "{}", raw: true });
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toEqual({ error: "implement has started; Skip only a Stage that has not, or one that is Flagged" });
+    expect((await detailOf(lasso, ticket.id)).stage.name).toBe("implement");
   });
 
   it("holds after a headless Stage with advance: false and Start resumes the run", async () => {

@@ -57,7 +57,8 @@ describe("the concurrency cap", () => {
     expect(queued.display).toEqual({ state: "queued", label: "Queued", why: "1 in line; implement starts when a slot frees" });
     expect(queued.queue).toBe(1);
     expect(queued.sessions).toEqual([]);
-    expect(queued.triggers.map((x) => x.action)).toEqual(["abandon"]);
+    // Queued, implement has not started: it may be skipped (LASSO-159).
+    expect(queued.triggers.map((x) => x.action)).toEqual(["skip", "abandon"]);
     expect((await detailOf(lasso, a.id)).display.state).toBe("running");
     expect((await detailOf(lasso, b.id)).display.state).toBe("running");
 

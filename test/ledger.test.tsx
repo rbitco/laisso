@@ -33,8 +33,8 @@ function view(id: string, over: Partial<TicketView> = {}): TicketView {
     stage: { name: "implement", kind: "runner", label: "implement", human: false, index: 1, total: 2, repeat: false, override: null },
     state: "active", flag: null, pr: null, display: { state: "quiet", label: "Quiet", why: "waiting on the next tick" }, queue: null, triggers: [], budget: BUDGET,
     stages: [
-      { name: "plan", kind: "runner", label: "plan", human: false },
-      { name: "implement", kind: "runner", label: "implement", human: false },
+      { name: "plan", kind: "runner", label: "plan", human: false, skippedAt: null },
+      { name: "implement", kind: "runner", label: "implement", human: false, skippedAt: null },
     ],
     mirrorPending: false, createdAt: ago(60), updatedAt: ago(5), url: `http://lasso/#${id}`, ...over,
   };

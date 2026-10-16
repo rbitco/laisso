@@ -113,7 +113,7 @@ describe("Take over in terminal", () => {
 
   it("is refused on a Stage with no Session yet", async () => {
     const { lasso, ticket } = await lassoWithTicket();
-    expect(ticket.triggers.map((t) => t.action)).toEqual(["abandon"]);
+    expect(ticket.triggers.map((t) => t.action)).toEqual(["skip", "abandon"]);
     const res = await lasso.api<Response>(`/api/tickets/${ticket.id}/takeover`, { method: "POST", body: "{}", raw: true });
     expect(res.status).toBe(400);
     expect((await res.json()).error).toBe("no Session of plan to take over yet");
@@ -188,6 +188,7 @@ describe("Open the draft at a Start gate", () => {
     expect(holding.triggers).toEqual([
       { action: "start", label: "Start act" },
       { action: "draft", label: "Open plan in terminal" },
+      { action: "skip", label: "Skip act" },
       { action: "abandon", label: "Abandon" },
     ]);
     const plan = holding.session!;

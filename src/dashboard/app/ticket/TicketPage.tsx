@@ -225,12 +225,19 @@ function TicketBody({ ticket: t, select, refresh }: { ticket: TicketDetail; sele
  * when the live Session is running.
  */
 function Viewing({ ticket: t, shown, back }: { ticket: TicketDetail; shown: Shown; back: () => void }) {
-  const what = shown.empty ? `No Sessions for ${shown.stage} yet` : "Viewing " + sessionLabel(shown.session!);
+  // A Stage a human skipped (LASSO-159) says so, and when: in place of "No Sessions", or after the Session viewed.
+  const skippedAt = t.stages.find((s) => s.name === shown.stage)?.skippedAt ?? null;
+  const what = shown.empty ? (skippedAt ? `Skipped ${shown.stage}` : `No Sessions for ${shown.stage} yet`) : "Viewing " + sessionLabel(shown.session!);
   const live = t.session;
   return (
     <div className={"viewing" + (shown.empty ? " empty" : "") + (shown.newer ? " newer" : "")} data-role={shown.empty ? "empty-stage" : "viewing"}>
       <span>
         {what}
+        {skippedAt && (
+          <span className="muted" data-role="skipped" title={new Date(skippedAt).toLocaleString()}>
+            {(shown.empty ? " " : " · skipped ") + relative(skippedAt)}
+          </span>
+        )}
         {shown.newer ? (
           <span data-role="newer">{" · " + sessionLabel(shown.newer) + " has started"}</span>
         ) : (

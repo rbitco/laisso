@@ -1,4 +1,4 @@
-import { checkFor, overrideFor, shortId, ticketLabel, type ArtifactCheck, type TicketRow } from "../store/tickets.ts";
+import { checkFor, overrideFor, shortId, skipsOf, ticketLabel, type ArtifactCheck, type TicketRow } from "../store/tickets.ts";
 import { runnerOf, type SessionProfile, type SessionRow } from "../store/sessions.ts";
 import { type Pipeline, type RunnerName, type RunnerStage, type Stage } from "../pipeline/load.ts";
 import type { PipelineSource } from "../pipeline/files.ts";
@@ -100,8 +100,8 @@ export interface TicketView {
   triggers: Trigger[];
   /** The four gauges as they stand, and the Ticket layer behind them. */
   budget: BudgetView;
-  /** Every Stage of the Pipeline, for the Metro track and diagram; empty when the Pipeline does not load. */
-  stages: Array<Pick<StageView, "name" | "kind" | "label" | "human">>;
+  /** Every Stage of the Pipeline, for the Metro track and diagram, with when a human skipped it; empty when the Pipeline does not load. */
+  stages: Array<Pick<StageView, "name" | "kind" | "label" | "human"> & { skippedAt: string | null }>;
   /** How the current Stage's check Action artifact last came out (ADR 0014), or null when it has none or has not run. */
   check: ArtifactCheck | null;
   /** True while a label push to the tracker is owed and the tick will retry it. */
@@ -331,6 +331,7 @@ export function ticketView(ticket: TicketRow, ctx: ViewContext): TicketView {
   const finished = index > 0 ? pipeline!.stages[index - 1]! : null;
   const draft = ticket.holding_since && finished?.kind === "runner" && !finished.human && resumableHeadless(rows, finished.name) ? finished.name : null;
   const triggers = ticketTriggers(ticket, stage, rows, resume, takenOver, draft);
+  const skips = skipsOf(ticket);
   return {
     id: ticket.id,
     shortId: shortId(ticket.id),
@@ -362,7 +363,7 @@ export function ticketView(ticket: TicketRow, ctx: ViewContext): TicketView {
     queue,
     triggers,
     budget,
-    stages: (pipeline?.stages ?? []).map((s) => ({ name: s.name, kind: s.kind, label: stageLabel(s), human: s.kind === "runner" && s.human })),
+    stages: (pipeline?.stages ?? []).map((s) => ({ name: s.name, kind: s.kind, label: stageLabel(s), human: s.kind === "runner" && s.human, skippedAt: skips[s.name] ?? null })),
     check: stage?.kind === "runner" && stage.artifactWith ? checkFor(ticket, stage.name) : null,
     mirrorPending: ticket.mirror_pending !== null,
     createdAt: ticket.created_at,
@@ -483,14 +484,19 @@ function ticketTriggers(ticket: TicketRow, stage: Stage | null, rows: SessionRow
       abandon,
     ];
   }
-  if (ticket.holding_since) return [{ action: "start", label: `Start ${stage.name}` }, ...(draft ? [{ action: "draft" as const, label: `Open ${draft} in terminal` }] : []), abandon];
-  if (stage.kind !== "runner" || headlessRunning(rows[0] ?? null) || !(stage.human || takenOver)) return [...takeOver(), abandon];
+  const skip: Trigger = { action: "skip", label: `Skip ${stage.name}` };
+  if (ticket.holding_since) return [{ action: "start", label: `Start ${stage.name}` }, ...(draft ? [{ action: "draft" as const, label: `Open ${draft} in terminal` }] : []), skip, abandon];
+  if (stage.kind !== "runner" || headlessRunning(rows[0] ?? null) || !(stage.human || takenOver)) {
+    // A Stage that has not started may be skipped (LASSO-159): no Session of it yet, and none running.
+    const unstarted = !rows.some((r) => r.stage === stage.name || r.ended_at === null);
+    return [...takeOver(), ...(unstarted ? [skip] : []), abandon];
+  }
   return [
     { action: "terminal", label: "Open terminal" },
     // A taken-over Stage can go back to Lasso: its Rounds, or a headless Session on the terminal's session.
     ...(takenOver ? [{ action: "handback" as const, label: "Hand back to Lasso" }] : []),
     { action: "done", label: `Mark ${stage.name} done` },
-    { action: "skip", label: `Skip ${stage.name}` },
+    skip,
     abandon,
   ];
 }

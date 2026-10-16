@@ -224,6 +224,10 @@ const MIGRATIONS: Array<(db: DatabaseSync) => void> = [
   (db) => {
     db.exec(`ALTER TABLE sessions ADD COLUMN latest_message TEXT;`);
   },
+  // Skipped Stages (LASSO-159): when a human skipped each Stage, as JSON keyed by Stage name.
+  (db) => {
+    db.exec(`ALTER TABLE tickets ADD COLUMN skipped_stages TEXT;`);
+  },
 ];
 
 /** The schema version this Lasso migrates a store up to. */

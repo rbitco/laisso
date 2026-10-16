@@ -204,7 +204,8 @@ describe("the other exits", () => {
     const skipped = await pull(lasso, ticket.id, "skip");
     expect(skipped.flag).toBeNull();
     expect(skipped.stage.name).toBe("notes");
-    expect(skipped.triggers.map((x) => x.action)).toEqual(["abandon"]);
+    expect(skipped.stages.map((s) => s.skippedAt === null)).toEqual([false, true]);
+    expect(skipped.triggers.map((x) => x.action)).toEqual(["skip", "abandon"]);
   });
 
   it("Abandon ends the Ticket, kills its running Session, and hides it from the Ledger", async () => {

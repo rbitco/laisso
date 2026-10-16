@@ -74,7 +74,7 @@ export function sessionProfile(s: SessionView): { text: string; title: string } 
   };
 }
 
-/** What one Stage of a Ticket is: done, current, or ahead, with its Sessions (newest first, as the API lists them). */
+/** What one Stage of a Ticket is: done (or skipped), current, or ahead, with its Sessions (newest first, as the API lists them). */
 export function stageInfo(t: MetroTicket, index: number) {
   const stage = t.stages[index]!;
   const sessions = (t.sessions || []).filter((s) => s.stage === stage.name);
@@ -84,6 +84,8 @@ export function stageInfo(t: MetroTicket, index: number) {
   return {
     stage,
     done,
+    // Passed over by a human's Skip (LASSO-159): done, without its artifact.
+    skipped: done && stage.skippedAt !== null,
     cur,
     ahead: !done && !cur,
     sessions,
@@ -154,6 +156,10 @@ export function metroTrack(t: TicketView): string {
       return;
     }
     const c = done ? COL.done : cur ? COL[state] : "var(--line)";
+    if (done && s.skippedAt !== null) {
+      o += `<circle class="skipped" cx="${cx}" cy="9" r="4" fill="var(--surface)" stroke="${c}" stroke-width="2" stroke-dasharray="2 1.5"/>`;
+      return;
+    }
     o += cur
       ? `<circle class="current" cx="${cx}" cy="9" r="5" fill="var(--surface)" stroke="${c}" stroke-width="2.5"/><circle cx="${cx}" cy="9" r="2" fill="${c}"/>`
       : `<circle class="${done ? "done" : "ahead"}" cx="${cx}" cy="9" r="4" fill="${done ? c : "var(--surface)"}" stroke="${c}" stroke-width="2"/>`;
@@ -228,10 +234,12 @@ export function metroDiagram(t: MetroTicket, focus: string | null, width: number
     let shape = "";
     if (sel) shape += `<circle class="focus-ring" cx="${cx}" cy="${baseY}" r="18" fill="none" stroke="${COL.accent}" stroke-width="2" stroke-dasharray="3 3"/>`;
     if (inf.cur && t.flag) shape += `<polygon class="flagged" points="${octagon(cx, baseY, 13)}" fill="${COL.crit}" stroke="var(--surface)" stroke-width="2"/><text x="${cx}" y="${baseY + 4.5}" text-anchor="middle" class="bang">!</text>`;
+    else if (inf.skipped)
+      shape += `<circle class="skipped" cx="${cx}" cy="${baseY}" r="11" fill="var(--surface)" stroke="${COL.done}" stroke-width="3" stroke-dasharray="4 3"/><path d="M${cx - 5} ${baseY - 4} l4 4 l-4 4 M${cx + 1} ${baseY - 4} l4 4 l-4 4" fill="none" stroke="${COL.done}" stroke-width="2"/><title>Skipped</title>`;
     else if (inf.done) shape += `<circle class="done" cx="${cx}" cy="${baseY}" r="11" fill="${COL.done}" stroke="var(--surface)" stroke-width="2"/><path d="M${cx - 5} ${baseY} l3.5 3.5 l6.5 -7" fill="none" stroke="var(--surface)" stroke-width="2.2"/>`;
     else if (inf.cur) shape += `<circle class="current${inf.running ? " pulse" : ""}" cx="${cx}" cy="${baseY}" r="11" fill="var(--surface)" stroke="${c}" stroke-width="3.5"/><circle cx="${cx}" cy="${baseY}" r="4.5" fill="${c}"/>`;
     else shape += `<circle class="ahead" cx="${cx}" cy="${baseY}" r="9" fill="var(--surface)" stroke="var(--line)" stroke-width="3"/>`;
-    const cls = inf.done ? "done" : inf.cur ? "current" : "ahead";
+    const cls = inf.skipped ? "done skipped" : inf.done ? "done" : inf.cur ? "current" : "ahead";
     out += `<g class="node ${cls}${sel ? " focus" : ""}" data-stage="${esc(s.name)}">${shape}<text x="${cx}" y="${baseY + 30}" text-anchor="middle" class="name${inf.cur ? " cur" : ""}${inf.ahead ? " dim" : ""}">${name}</text>`;
     if (inf.roundsUsed) {
       // The PR feedback orbit: Rounds of a repeating Stage, with Rounds used of the Budget on its badge.
@@ -262,6 +270,7 @@ type StationInfo = ReturnType<typeof stageInfo>;
 
 /** The line over a station with no orbit: how long its last Session ran, and its cost, or the Ticket's state when current. */
 function aboveText(t: MetroTicket, inf: StationInfo): string {
+  if (inf.skipped) return "skipped";
   if (inf.last) return (inf.running ? "running" : duration(inf.last.durationMs)) + (inf.last.costUsd === null ? "" : " · $" + inf.last.costUsd.toFixed(2));
   return inf.cur ? t.display.label.toLowerCase() : "";
 }

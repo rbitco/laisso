@@ -118,7 +118,7 @@ export class Progress {
   }
 
   /**
-   * The Stage a human-only Trigger (Open terminal, Mark done, Skip) acts on: a human Stage, or a headless one a
+   * The Stage a human-only Trigger (Open terminal, Mark done) acts on: a human Stage, or a headless one a
    * human has taken over in a terminal, which is worked as a human Stage until it finishes.
    */
   humanStage(ticket: TicketRow): { pipeline: Pipeline; stage: RunnerStage } {
@@ -142,7 +142,7 @@ export class Progress {
     return current;
   }
 
-  /** Mark done and Skip act on the human Stage under way, or on whatever Stage a Flagged Ticket stopped at. */
+  /** Mark done acts on the human Stage under way, or on whatever Stage a Flagged Ticket stopped at. */
   private exitStage(ticket: TicketRow): { pipeline: Pipeline; stage: Stage } {
     return ticket.flagged_at ? this.flaggedStage(ticket) : this.humanStage(ticket);
   }
@@ -222,12 +222,27 @@ export class Progress {
     return this.deps.tickets.get(ticket.id)!;
   }
 
-  /** Skip: the Stage finishes without its artifact (a human Stage, or a Flagged one: drop and advance). */
+  /**
+   * The Stage Skip acts on: where a Flagged Ticket stopped, the human Stage under way, or one that has not started
+   * (LASSO-159): the Stage a holding Ticket waits at, or one with no Session yet and none running.
+   */
+  private skipStage(ticket: TicketRow): Stage {
+    if (ticket.flagged_at) return this.flaggedStage(ticket).stage;
+    const { stage } = this.currentForTrigger(ticket);
+    if (ticket.holding_since) return stage;
+    if (stage.kind === "runner" && (stage.human || this.takenOver(ticket, stage.name))) return stage;
+    const started = this.deps.sessions.running(ticket.id).length > 0 || this.deps.sessions.forTicket(ticket.id).some((s) => s.stage === stage.name);
+    if (started) throw new TriggerError(`${stage.name} has started; Skip only a Stage that has not, or one that is Flagged`);
+    return stage;
+  }
+
+  /** Skip: the Stage finishes without its artifact, and the Ticket records when (a human Stage, a Flagged one, or one not yet started). */
   async skip(ticket: TicketRow): Promise<TicketRow> {
-    const { stage } = this.exitStage(ticket);
+    const stage = this.skipStage(ticket);
     this.endHumanSessions(ticket);
-    this.deps.log.info("ticket.skipped", { ticket: ticket.id, stage: stage.name, flagged: ticket.flagged_at !== null });
-    await this.finished(ticket);
+    const skipped = this.deps.tickets.setSkipped(ticket.id, stage.name);
+    this.deps.log.info("ticket.skipped", { ticket: ticket.id, stage: stage.name, flagged: ticket.flagged_at !== null, holding: ticket.holding_since !== null });
+    await this.finished(skipped);
     return this.deps.tickets.get(ticket.id)!;
   }
 
