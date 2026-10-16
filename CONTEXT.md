@@ -121,8 +121,19 @@ killed or crashed), with the Runner's final message. Lasso, not the Runner,
 decides from an Outcome whether the Ticket is Flagged.
 _Avoid_: result, exit code, status, verdict
 
+**Owned PR**:
+A pull request that carries a Ticket's own work. Lasso polls it for
+Feedback, runs Rounds on it, and waits for it to merge. A Ticket may have
+several.
+_Avoid_: the Ticket's PR, working PR, main PR
+
+**Referenced PR**:
+A pull request a Ticket points at for context, such as a teammate's PR
+under review. Lasso never comments on it, closes it, or waits on it.
+_Avoid_: linked PR, watched PR, related PR
+
 **Feedback**:
-Anything on a Ticket's PR that asks for a change: a failed check, an
+Anything on a Ticket's Owned PR that asks for a change: a failed check, an
 inline review thread, a top-level comment, or a changes-requested verdict.
 Comments the Runner itself posted are not Feedback. Comments on the Ticket
 in the tracker are not Feedback either.
@@ -155,5 +166,5 @@ _Avoid_: poll, refresh, sync, heartbeat
 **PR List**:
 A named list of pull requests found by one GitHub search, shown on the
 Pull Requests page. It shows PRs whether or not Lasso made them; a PR that
-is a Ticket's PR links to that Ticket. A PR List only shows; it never acts.
+is a Ticket's Owned PR links to that Ticket. A PR List only shows; it never acts.
 _Avoid_: column, widget, lane, section, saved search
