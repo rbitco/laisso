@@ -5,7 +5,7 @@ import type { LassoHome } from "./home.ts";
 import { count, duration, flag, isPlainObject, mapping, money, positive, text, type Fail } from "../fields.ts";
 import { parseDuration } from "../duration.ts";
 import { RUNNERS, type Pipeline, type RunnerName, type RunnerStage } from "../pipeline/load.ts";
-import { asksForIssues } from "../prs/query.ts";
+import { asksForIssues, type SearchSyntax } from "../prs/query.ts";
 
 export interface RepoConfig {
   tracker: "jira" | "github";
@@ -98,6 +98,8 @@ export interface PrListConfig {
   query: string;
   /** How many PRs it shows, 1 to 100. */
   limit: number;
+  /** `advanced` runs GitHub's advanced search, which reads AND, OR and parentheses (LASSO-161); left out, the legacy search. */
+  search?: SearchSyntax;
 }
 
 export interface Config {
@@ -248,6 +250,7 @@ pr_lists:
   Mine:
     query: is:open author:@me
     limit: 25        # PRs shown, 1 to 100
+    # search: advanced   # GitHub's advanced search: AND, OR and parentheses
   Review requested:
     query: is:open review-requested:@me
     limit: 25
@@ -630,7 +633,7 @@ function parseActions(value: Record<string, unknown>, where: string): Record<str
 }
 
 export const DEFAULT_PR_LIST_LIMIT = 25;
-const PR_LIST_FIELDS = new Set(["query", "limit"]);
+const PR_LIST_FIELDS = new Set(["query", "limit", "search"]);
 
 function parsePrLists(value: Record<string, unknown>, where: string): Record<string, PrListConfig> {
   const lists: Record<string, PrListConfig> = {};
@@ -644,7 +647,8 @@ function parsePrLists(value: Record<string, unknown>, where: string): Record<str
     if (asksForIssues(list.query)) throw new ConfigError(`${at}.query asks for is:issue, but a PR List shows only pull requests`);
     const limit = positive(list.limit, `${at}.limit`, fail, DEFAULT_PR_LIST_LIMIT);
     if (limit > 100) throw new ConfigError(`${at}.limit must be 100 or less, not ${limit}`);
-    lists[name] = { query: list.query, limit };
+    if (list.search !== undefined && list.search !== "legacy" && list.search !== "advanced") throw new ConfigError(`${at}.search must be legacy or advanced`);
+    lists[name] = { query: list.query, limit, ...(list.search === "advanced" ? { search: "advanced" as const } : {}) };
   }
   return lists;
 }

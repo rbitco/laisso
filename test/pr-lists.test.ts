@@ -37,6 +37,20 @@ describe("a PR List's search", () => {
     });
   }
 
+  // Advanced search (LASSO-161): the query in parentheses, the repos in one OR group, the sort outside both.
+  const advanced: { what: string; query: string; repos: GitHubRepo[]; search: string }[] = [
+    { what: "groups the query and the repos so the query's OR stays its own", query: "is:open (author:@me OR assignee:@me) (-status:success OR -review:approved)", repos: [LASSO, SITE], search: "is:pr (is:open (author:@me OR assignee:@me) (-status:success OR -review:approved)) (repo:rbitco/lasso OR repo:rbitco/site) sort:updated-desc" },
+    { what: "adds a lone repo without a group", query: "is:open author:@me OR assignee:@me", repos: [LASSO], search: "is:pr (is:open author:@me OR assignee:@me) repo:rbitco/lasso sort:updated-desc" },
+    { what: "moves the query's sort: outside the parentheses", query: "is:open sort:created-asc", repos: [LASSO], search: "is:pr (is:open) repo:rbitco/lasso sort:created-asc" },
+    { what: "reads a scope inside parentheses as the query's own", query: "is:open (repo:nodejs/node OR org:example)", repos: [LASSO], search: "is:pr (is:open (repo:nodejs/node OR org:example)) sort:updated-desc" },
+    { what: "does not add is:pr twice, in parentheses or not", query: "(is:pr is:open)", repos: [LASSO], search: "((is:pr is:open)) repo:rbitco/lasso sort:updated-desc" },
+  ];
+  for (const c of advanced) {
+    it(`advanced: ${c.what}`, () => {
+      expect(buildSearch(c.query, c.repos, "advanced")).toEqual({ search: c.search, url: searchUrl(c.search) });
+    });
+  }
+
   it("does not search all of GitHub when a scoped list has no GitHub repos, and says why", () => {
     expect(buildSearch("is:open author:@me", [])).toEqual({ problem: NO_GITHUB_REPOS });
   });
@@ -75,15 +89,18 @@ describe("the PR List cache", () => {
     let lists = opts.lists ?? [MINE, REVIEW];
     let answer = opts.answer ?? ((s: string) => (s.includes("review-requested") ? ok(31, 1, 2) : ok(1, 3)));
     const calls: string[] = [];
+    const syntaxes: string[] = [];
     let held: Promise<void> | null = null;
     let release = () => undefined as void;
-    const search: PrSearchClient = async (s) => {
+    const search: PrSearchClient = async (s, _limit, syntax = "legacy") => {
       calls.push(s);
+      syntaxes.push(syntax);
       if (held) await held;
       return answer(s);
     };
     const t = {
       calls,
+      syntaxes,
       changes: 0,
       cache: null as unknown as PrLists,
       advance: (ms: number) => void (now += ms),
@@ -371,6 +388,20 @@ describe("the PR List cache", () => {
     t.setLists([{ ...MINE, query: "is:open author:@me draft:false" }]);
     await t.cache.read();
     expect(t.calls).toHaveLength(4);
+  });
+
+  it("runs a list on advanced search when it says so, and fetches afresh when that changes (LASSO-161)", async () => {
+    const t = setup({ lists: [{ ...MINE, query: "is:open author:@me OR assignee:@me", search: "advanced" }] });
+    await t.cache.read();
+    await t.cache.settle();
+    expect(t.calls).toEqual(["is:pr (is:open author:@me OR assignee:@me) repo:rbitco/lasso sort:updated-desc"]);
+    expect(t.syntaxes).toEqual(["advanced"]);
+    // Back on legacy: the same words make a different search, so the list starts again.
+    t.setLists([{ ...MINE, query: "is:open author:@me OR assignee:@me" }]);
+    await t.cache.read();
+    await t.cache.settle();
+    expect(t.calls[1]).toBe("is:pr is:open author:@me OR assignee:@me repo:rbitco/lasso sort:updated-desc");
+    expect(t.syntaxes).toEqual(["advanced", "legacy"]);
   });
 });
 

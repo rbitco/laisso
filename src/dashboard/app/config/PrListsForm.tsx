@@ -48,7 +48,7 @@ export function PrListsForm({ visit }: { visit: number }) {
   if (saved === null) return null;
   return (
     <form className={dirty ? "sheet dirty" : "sheet"} data-role="config-pr-lists" onSubmit={submit}>
-      <Setting title="PR Lists" about="The Pull Requests page: each list is a name with a GitHub search query and an optional limit (25 unless set, at most 100). is:pr is added, and lists are scoped to your repos unless they name repo:, org: or user:.">
+      <Setting title="PR Lists" about="The Pull Requests page: each list is a name with a GitHub search query and an optional limit (25 unless set, at most 100). is:pr is added, and lists are scoped to your repos unless they name repo:, org: or user:. Add search: advanced to a list for GitHub's advanced search, with AND, OR and parentheses.">
         <textarea className="raw pr-lists-yaml" name="pr_lists" spellCheck={false} aria-label="pr_lists as YAML" value={text} onChange={(ev) => setText(ev.target.value)} />
       </Setting>
       <div className="savebar">

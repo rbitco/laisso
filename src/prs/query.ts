@@ -4,6 +4,13 @@ export interface GitHubRepo {
   name: string;
 }
 
+/**
+ * Which GitHub search a PR List runs (LASSO-161): `legacy` (GraphQL type ISSUE), where OR and parentheses are only
+ * text, or `advanced` (ISSUE_ADVANCED), which reads AND, OR and parentheses. A bare OR means something different in
+ * each, so legacy stays the default.
+ */
+export type SearchSyntax = "legacy" | "advanced";
+
 /** What a PR List searches for: the search string sent to GitHub and the same search on github.com, or why it cannot search. */
 export type PrSearch = { search: string; url: string } | { problem: string };
 
@@ -19,15 +26,29 @@ export const NO_GITHUB_REPOS = "no repo in config.yaml has a github.com origin, 
  * the query names its own repo:, org: or user:, then `sort:updated-desc`
  * unless it names a sort:. A scoped list with no GitHub repos never searches
  * all of GitHub; it reports why instead.
+ *
+ * Under advanced search the query goes in parentheses and the repos in one
+ * OR group, so the query's own ORs cannot reach the added terms; its sort:
+ * moves to the end, outside the parentheses.
  */
-export function buildSearch(query: string, repos: GitHubRepo[]): PrSearch {
+export function buildSearch(query: string, repos: GitHubRepo[], syntax: SearchSyntax = "legacy"): PrSearch {
   const terms = tokens(query);
-  const has = (test: (term: string) => boolean) => terms.some(test);
+  // A term's leading parentheses are grouping under advanced search, not part of its qualifier.
+  const bare = (t: string) => (syntax === "advanced" ? t.replace(/^\(+/, "").replace(/\)+$/, "") : t);
+  const has = (test: (term: string) => boolean) => terms.some((t) => test(bare(t)));
   const scoped = !has((t) => SCOPES.test(t));
   if (scoped && !repos.length) return { problem: NO_GITHUB_REPOS };
-  const parts = [...(has((t) => t.toLowerCase() === "is:pr") ? [] : ["is:pr"]), ...terms];
-  if (scoped) parts.push(...unique(repos).map((r) => `repo:${r.owner}/${r.name}`));
-  if (!has((t) => /^sort:/i.test(t))) parts.push("sort:updated-desc");
+  const isPr = has((t) => t.toLowerCase() === "is:pr") ? [] : ["is:pr"];
+  const repoTerms = scoped ? unique(repos).map((r) => `repo:${r.owner}/${r.name}`) : [];
+  const sorts = terms.filter((t) => /^sort:/i.test(t));
+  const sort = sorts.length ? sorts : ["sort:updated-desc"];
+  if (syntax === "legacy") {
+    const parts = [...isPr, ...terms, ...repoTerms, ...(sorts.length ? [] : sort)];
+    const search = parts.join(" ");
+    return { search, url: searchUrl(search) };
+  }
+  const rest = terms.filter((t) => !/^sort:/i.test(t));
+  const parts = [...isPr, ...(rest.length ? [`(${rest.join(" ")})`] : []), ...(repoTerms.length > 1 ? [`(${repoTerms.join(" OR ")})`] : repoTerms), ...sort];
   const search = parts.join(" ");
   return { search, url: searchUrl(search) };
 }

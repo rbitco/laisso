@@ -1,17 +1,19 @@
 import { failureReason, runTool, type ToolResult } from "../tracker/exec.ts";
 import type { PrNode } from "./rows.ts";
+import type { SearchSyntax } from "./query.ts";
 
 /**
- * One page of a PR search: search(type: ISSUE) with the fields a row uses,
+ * One page of a PR search: search(type: ISSUE, or ISSUE_ADVANCED for a list on
+ * advanced search) with the fields a row uses,
  * plus issueCount and rateLimit. contexts(first:0) asks for the check counts
  * by state and no checks, which keeps a page at its usual cost. Never
  * mergeStateStatus: it is what makes GitHub time out a page
  * (docs/research/pr-check-counts.md). The three review lists are what the row
  * mapper merges into reviewers; first:20 has been enough on every PR seen.
  */
-const QUERY = `query($q:String!,$n:Int!){
+const QUERY = `query($q:String!,$n:Int!,$t:SearchType!){
   rateLimit{ cost remaining resetAt }
-  search(query:$q, type:ISSUE, first:$n){
+  search(query:$q, type:$t, first:$n){
     issueCount
     nodes{ ... on PullRequest{
       number title url updatedAt
@@ -41,15 +43,16 @@ export type SearchProblem = "gh-missing" | "not-logged-in" | "rejected" | "rate-
 
 export type SearchResult = { ok: true; total: number; nodes: PrNode[]; rateLimit: RateLimit | null } | { ok: false; problem: SearchProblem; message: string };
 
-/** Runs one PR search of at most `limit` results. */
-export type PrSearchClient = (search: string, limit: number) => Promise<SearchResult>;
+/** Runs one PR search of at most `limit` results, on the legacy search unless told otherwise. */
+export type PrSearchClient = (search: string, limit: number, syntax?: SearchSyntax) => Promise<SearchResult>;
 
 type Run = (command: string, args: string[]) => Promise<ToolResult>;
 
 /** The PR search through `gh api graphql`, every outcome sorted into a SearchResult; it never throws. */
 export function ghSearch(run: Run = runTool): PrSearchClient {
-  return async (search, limit) => {
-    const r = await run("gh", ["api", "graphql", "-f", `query=${QUERY}`, "-f", `q=${search}`, "-F", `n=${limit}`]);
+  return async (search, limit, syntax = "legacy") => {
+    const type = syntax === "advanced" ? "ISSUE_ADVANCED" : "ISSUE";
+    const r = await run("gh", ["api", "graphql", "-f", `query=${QUERY}`, "-f", `q=${search}`, "-F", `n=${limit}`, "-f", `t=${type}`]);
     if (r.errno === "ENOENT") return { ok: false, problem: "gh-missing", message: "gh is not installed" };
     const body = parse(r.stdout);
     const errors = Array.isArray(body?.errors) ? (body.errors as { type?: unknown; message?: unknown }[]) : [];

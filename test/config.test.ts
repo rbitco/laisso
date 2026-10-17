@@ -145,6 +145,12 @@ describe("loadConfig", () => {
     expect(() => loadConfig(homeWith("pr_lists:\n  2024:\n    query: is:open\n"))).toThrow(/pr_lists\.2024: a PR List name needs a letter/);
   });
 
+  it("reads a PR List's search: advanced, keeps legacy as the default, and refuses anything else (LASSO-161)", () => {
+    const lists = loadConfig(homeWith("pr_lists:\n  Either:\n    query: author:@me OR assignee:@me\n    search: advanced\n  Plain:\n    query: is:open\n    search: legacy\n")).pr_lists;
+    expect(lists).toEqual({ Either: { query: "author:@me OR assignee:@me", limit: 25, search: "advanced" }, Plain: { query: "is:open", limit: 25 } });
+    expect(() => loadConfig(homeWith("pr_lists:\n  Mine:\n    query: is:open\n    search: fancy\n"))).toThrow(/pr_lists\.Mine\.search must be legacy or advanced/);
+  });
+
   it("writes the Config page's pr_lists: block in place, and reads it back with its comments", () => {
     const file = "/c/config.yaml";
     expect(parse(prListsBlock(DEFAULT_CONFIG_YAML))).toEqual(DEFAULT_CONFIG.pr_lists);

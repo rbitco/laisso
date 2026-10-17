@@ -1,4 +1,4 @@
-import { buildSearch, type GitHubRepo } from "./query.ts";
+import { buildSearch, type GitHubRepo, type SearchSyntax } from "./query.ts";
 import type { TicketRow } from "../store/tickets.ts";
 import { prRow, ticketForPr, ticketMatcher, type PrNode, type PrRow, type TicketForPr } from "./rows.ts";
 import type { PrSearchClient, SearchProblem } from "./search.ts";
@@ -9,6 +9,8 @@ export interface PrListSetting {
   name: string;
   query: string;
   limit: number;
+  /** GitHub's advanced search, with AND, OR and parentheses; legacy when left out. */
+  search?: SearchSyntax;
 }
 
 /** A PR List as the Pull Requests page shows it. */
@@ -106,6 +108,7 @@ const GH_PROBLEMS = new Set<SearchProblem>(["gh-missing", "not-logged-in"]);
 interface Entry {
   key: string;
   search: string;
+  syntax: SearchSyntax;
   limit: number;
   nodes: PrNode[];
   total: number;
@@ -225,15 +228,16 @@ export class PrLists {
     const repos = settings.length ? await this.deps.repos() : {};
     const current: Current[] = [];
     for (const setting of settings) {
-      const built = buildSearch(setting.query, Object.values(repos));
+      const syntax = setting.search ?? "legacy";
+      const built = buildSearch(setting.query, Object.values(repos), syntax);
       if ("problem" in built) {
         current.push({ setting, url: null, problem: { kind: "no-github-repos", message: built.problem }, entry: null });
         continue;
       }
-      const key = `${built.search}\n${setting.limit}`;
+      const key = `${syntax}\n${built.search}\n${setting.limit}`;
       let entry = this.entries.get(setting.name);
       if (!entry || entry.key !== key) {
-        entry = { key, search: built.search, limit: setting.limit, nodes: [], total: 0, fetchedAt: null, error: null, triedAt: null, inflight: null };
+        entry = { key, search: built.search, syntax, limit: setting.limit, nodes: [], total: 0, fetchedAt: null, error: null, triedAt: null, inflight: null };
         this.entries.set(setting.name, entry);
       }
       current.push({ setting, url: built.url, problem: null, entry });
@@ -263,7 +267,7 @@ export class PrLists {
    */
   private async fetch(entry: Entry): Promise<void> {
     try {
-      const result = await this.deps.search(entry.search, entry.limit);
+      const result = await this.deps.search(entry.search, entry.limit, entry.syntax);
       const gh = !result.ok && GH_PROBLEMS.has(result.problem);
       if (!gh) this.ghProblem = null;
       if (result.ok) {
