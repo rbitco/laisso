@@ -304,6 +304,39 @@ describe("the Review loop", () => {
 });
 
 // A check Action as a repeating Stage's end condition (ADR 0014, LASSO-117): the Action passes once `.ready` is in the worktree.
+describe("ignored authors", () => {
+  it("never opens a Round on comments by review.ignore_authors or the gh user, but does on a thread someone else joined", async () => {
+    const started = await startLassoWithRepos({ app: { pipeline: "loop" } }, { review: { ignore_authors: ["Dependabot"], ignore_self: true } }, { loop: PIPELINE });
+    running.push(started.lasso);
+    const { lasso } = started;
+    const ticket = await lasso.api<IntakeResult>("/api/tickets", { method: "POST", body: JSON.stringify({ input: "Add dark mode", repo: "app", pipeline: "loop" }) });
+    const viewer = { tool: "gh" as const, match: ["api user"], stdout: "me\n" };
+    const notes: Scene = {
+      tag: "notes",
+      threads: [{ id: "RT_1", resolved: false, path: "src/a.ts", line: 12, comments: [{ id: 101, author: "me", body: "Context: this mirrors the old parser.", at: T1 }] }],
+      comments: [{ id: 201, author: "me", body: "Note to self: bump the version.", at: T1 }, { id: 202, author: "dependabot", body: "Bumped a dependency.", at: T1 }],
+    };
+    await setScene(lasso, ticket.branch, notes, [viewer]);
+
+    expect((await checkNow(lasso)).changes).toEqual([{ ticket: ticket.id, summary: "PR #7 found" }]);
+    expect((await detailOf(lasso, ticket.id)).display).toEqual({ state: "quiet", label: "Quiet", why: "PR #7: nothing outstanding" });
+    expect(await lasso.runner.calls()).toEqual([]);
+
+    const joined: Scene = { ...notes, tag: "joined", threads: [{ ...notes.threads![0]!, comments: [...notes.threads![0]!.comments, { id: 102, author: "alice", body: "Then say so in a comment.", at: T2 }] }] };
+    await setScene(lasso, ticket.branch, joined, [viewer]);
+    await lasso.runner.script({ stdout: claudeFixture("success.json") });
+    expect((await checkNow(lasso)).changes).toEqual([
+      { ticket: ticket.id, summary: "PR #7: 1 new Feedback item: thread on src/a.ts:12 by me" },
+      { ticket: ticket.id, summary: "started review Round 1" },
+    ]);
+    const [call] = await launched(lasso, 1);
+    expect(call!.argv[2]).toContain("   > me: Context: this mirrors the old parser.");
+    expect(call!.argv[2]).toContain("Then say so in a comment.");
+    expect(call!.argv[2]).not.toContain("Note to self");
+    expect(call!.argv[2]).not.toContain("Bumped a dependency");
+  });
+});
+
 describe("a repeating Stage that ends on a check Action", () => {
   const CHECKED = `stages:
   - name: review

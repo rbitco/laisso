@@ -178,7 +178,13 @@ unchanged PR costs nothing against the rate limit. New Feedback opens a
 Round: a Session whose prompt carries the snapshot of what to address
 and a marker (`<!-- lasso:<ticket>:<stage>:round-<n> -->`) the Runner
 ends each of its PR comments with, so its own replies are never taken
-for Feedback. When the Round ends Lasso records how each item was
+for Feedback. To comment on your own PR without starting a Round, list
+logins under `review.ignore_authors`, or set `review.ignore_self: true`
+to ignore the login `gh` is authenticated as (a repo may set either
+under `repos.<name>.review`). Their PR comments, and threads no one
+else has joined, are never Feedback; a thread someone else has joined
+still is, and its Round reads every comment in it. Failed checks and a
+changes-requested verdict count whoever is involved. When the Round ends Lasso records how each item was
 addressed (a resolved thread, a marked reply, a new push) and Flags
 `review.unaddressed` for what still stands, `review.check_repeat` when
 the same check fails two Rounds running, and `review.pr_closed` when

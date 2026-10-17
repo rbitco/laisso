@@ -18,6 +18,16 @@ export interface RepoConfig {
   profiles: Record<string, ProfileConfig>;
   /** The profile this repo's Stages run under when neither they nor their Pipeline names one; null leaves config's default_profile. */
   default_profile: string | null;
+  /** This repo's review: settings; each one set here replaces the global one for this repo's Tickets. */
+  review?: Partial<ReviewConfig>;
+}
+
+/** Whose PR comments a repeating Stage never treats as Feedback. */
+export interface ReviewConfig {
+  /** GitHub logins, matched without regard to case. */
+  ignore_authors: string[];
+  /** Also ignore the login gh is authenticated as; Lasso's own replies are still told apart by marker. */
+  ignore_self: boolean;
 }
 
 export interface BudgetDefaults {
@@ -111,6 +121,7 @@ export interface Config {
   pr_list_refresh: string;
   /** How the Pull Requests page lays its lists out until a browser picks for itself. */
   pr_page_layout: PrPageLayout;
+  review: ReviewConfig;
 }
 
 /** The values pr_page_layout: takes: lists one under another in full rows, or side by side as wrapping columns. */
@@ -144,6 +155,7 @@ export const DEFAULT_CONFIG: Config = {
   },
   pr_list_refresh: "5m",
   pr_page_layout: "stacked",
+  review: { ignore_authors: [], ignore_self: false },
 };
 
 export const DEFAULT_CONFIG_YAML = `# Lasso configuration. Every key is optional; the values shown are the defaults.
@@ -215,6 +227,12 @@ port: 7433         # dashboard and API port
 # Where a human Stage's terminal opens: auto uses herdr or tmux when Lasso
 # runs inside one, else Terminal.app; herdr, tmux or terminal-app names one.
 terminal: auto
+
+# Review: whose PR comments a repeating Stage never treats as Feedback. A repo
+# may set its own under repos.<name>.review; each key there wins for that repo.
+review:
+  ignore_authors: []   # GitHub logins, e.g. [octocat]
+  ignore_self: false   # also ignore the login gh is authenticated as
 
 notifications:
   enabled: true
@@ -334,6 +352,7 @@ export function parseConfig(text: string, file: string, overrides: { port?: numb
     pr_lists: raw.pr_lists === undefined ? structuredClone(D.pr_lists) : parsePrLists(mapping(raw.pr_lists, at("pr_lists"), fail), at("pr_lists")),
     pr_list_refresh: D.pr_list_refresh,
     pr_page_layout: raw.pr_page_layout === undefined || raw.pr_page_layout === null ? D.pr_page_layout : oneOf(PR_PAGE_LAYOUTS, raw.pr_page_layout, at("pr_page_layout")),
+    review: { ...structuredClone(D.review), ...parseReview(raw.review, at("review")) },
   };
   config.pr_list_refresh = prListRefresh(raw.pr_list_refresh, config.tick, at("pr_list_refresh"));
   if (overrides.port !== undefined) config.port = overrides.port;
@@ -545,6 +564,7 @@ export function applyLive(live: Config, fresh: Config): void {
   Object.assign(live.pr_lists, fresh.pr_lists);
   live.pr_list_refresh = fresh.pr_list_refresh;
   live.pr_page_layout = fresh.pr_page_layout;
+  live.review = fresh.review;
 }
 
 function normaliseRepos(value: Record<string, unknown>, where: string): Record<string, RepoConfig> {
@@ -560,8 +580,31 @@ function normaliseRepos(value: Record<string, unknown>, where: string): Record<s
       profiles: parseProfiles(mapping(repo.profiles, `${where}.${name}.profiles`, fail), `${where}.${name}.profiles`),
       default_profile: repo.default_profile === undefined || repo.default_profile === null ? null : profileName(repo.default_profile, `${where}.${name}.default_profile`),
     };
+    const review = parseReview(repo.review, `${where}.${name}.review`);
+    if (Object.keys(review).length) repos[name]!.review = review;
   }
   return repos;
+}
+
+const REVIEW_FIELDS = new Set(["ignore_authors", "ignore_self"]);
+
+/** The review: keys a mapping sets, and only those, so a repo's leaves the rest to the global ones. */
+function parseReview(value: unknown, where: string): Partial<ReviewConfig> {
+  const review = mapping(value, where, fail);
+  for (const key of Object.keys(review)) if (!REVIEW_FIELDS.has(key)) throw new ConfigError(`${where}: unknown field ${key}`);
+  const out: Partial<ReviewConfig> = {};
+  if (review.ignore_authors !== undefined && review.ignore_authors !== null) {
+    const logins = review.ignore_authors;
+    if (!Array.isArray(logins) || !logins.every((l) => typeof l === "string" && l.trim())) throw new ConfigError(`${where}.ignore_authors must be a list of GitHub logins`);
+    out.ignore_authors = logins.map((l: string) => l.trim());
+  }
+  if (review.ignore_self !== undefined && review.ignore_self !== null) out.ignore_self = flag(review.ignore_self, `${where}.ignore_self`, fail);
+  return out;
+}
+
+/** The review: settings a repo's Tickets run under: the global ones, with each the repo sets replacing its own. */
+export function reviewFor(config: Pick<Config, "review" | "repos">, repo: string): ReviewConfig {
+  return { ...config.review, ...config.repos[repo]?.review };
 }
 
 /** What an Action may be called, and what a param may be called so that LASSO_<PARAM> is a plain variable name. */

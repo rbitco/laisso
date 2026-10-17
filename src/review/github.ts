@@ -44,6 +44,8 @@ export class PullRequests {
   private log: Logger;
   /** The last body each REST read returned, one entry per PR and kind of read, for If-None-Match. */
   private cache = new Map<string, { etag: string; body: string }>();
+  /** The login gh is authenticated as, read once; review.ignore_self asks for it every poll. */
+  private login: string | null = null;
 
   constructor(log: Logger) {
     this.log = log;
@@ -76,6 +78,16 @@ export class PullRequests {
   async close(ref: PrRef, comment: string): Promise<void> {
     const r = await runTool("gh", ["pr", "close", ref.url, "--comment", comment]);
     if (r.code !== 0) throw new PullRequestError(`PR #${ref.number}: ${failureReason("gh", r)}`);
+  }
+
+  /** The login gh is authenticated as. Read once and kept: a re-login under another account takes a restart. */
+  async viewer(): Promise<string> {
+    if (this.login) return this.login;
+    const r = await runTool("gh", ["api", "user", "--jq", ".login"]);
+    const login = r.stdout.trim();
+    if (r.code !== 0 || !login) throw new PullRequestError(`gh api user: ${failureReason("gh", r)}`);
+    this.login = login;
+    return login;
   }
 
   /**

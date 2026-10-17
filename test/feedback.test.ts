@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { outstanding, fresh, addressedEvidence, watermarkOf, logSlice, ownMark, marker, type PrFacts } from "../src/review/feedback.ts";
+import { outstanding, fresh, addressedEvidence, watermarkOf, logSlice, ownMark, marker, ignoring, withoutIgnored, type PrFacts } from "../src/review/feedback.ts";
 import { splitResponse } from "../src/review/github.ts";
 
 // Seam two, pure: the rules that turn a PR's state into Feedback items, and what counts as addressed.
@@ -119,5 +119,49 @@ describe("splitResponse", () => {
   it("reads the status, ETag, and body of gh api -i output", () => {
     expect(splitResponse('HTTP/2.0 200 OK\r\nEtag: W/"abc"\r\nContent-Type: application/json\r\n\r\n[{"id":1}]')).toEqual({ status: 200, etag: 'W/"abc"', body: '[{"id":1}]' });
     expect(splitResponse('HTTP/2.0 304 Not Modified\r\nEtag: W/"abc"\r\n\r\n')).toEqual({ status: 304, etag: 'W/"abc"', body: "" });
+  });
+});
+
+describe("withoutIgnored", () => {
+  const ignored = ignoring(["Me", "octocat"]);
+
+  it("ignores logins whatever their case, and no one when none are given", () => {
+    expect(ignored("me")).toBe(true);
+    expect(ignored("OCTOCAT")).toBe(true);
+    expect(ignored("alice")).toBe(false);
+    expect(ignoring([])("me")).toBe(false);
+  });
+
+  it("drops comments by ignored authors, so they are never Feedback, but keeps marked replies to pair with what they answer", () => {
+    const items = outstanding(withoutIgnored(facts({
+      // bob asked, then me noted something, then Lasso (posting as me) answered bob.
+      comments: [comment(10, "bob", "Add docs", 1), comment(11, "me", "Note to self", 2), comment(12, "me", `Done\n${mark}`, 3), comment(13, "octocat", "FYI", 4)],
+    }), own, ignored), own);
+    expect(items).toEqual([]);
+    const unanswered = outstanding(withoutIgnored(facts({ comments: [comment(10, "bob", "Add docs", 1), comment(11, "me", "Note to self", 2)] }), own, ignored), own);
+    expect(unanswered.map((i) => i.id)).toEqual(["10"]);
+  });
+
+  it("drops a thread only ignored authors asked in, and keeps a mixed one whole for the Round", () => {
+    const filtered = withoutIgnored(facts({
+      threads: [
+        { ...thread(false, [comment(1, "me", "Context for reviewers", 1), comment(2, "bot", `ok\n${mark}`, 2)]), id: "RT_self" },
+        { ...thread(false, [comment(3, "alice", "Why?", 1), comment(4, "me", "Because.", 2)]), id: "RT_mixed" },
+        { ...thread(false, [comment(5, "me", "Hm", 1), comment(6, "carol", "Agreed, fix it", 2)]), id: "RT_joined" },
+      ],
+    }), own, ignored);
+    const items = outstanding(filtered, own);
+    expect(items.map((i) => i.id)).toEqual(["RT_mixed", "RT_joined"]);
+    expect(items[0]!.body).toBe("alice: Why?\n\nme: Because.");
+    expect(items[1]).toMatchObject({ summary: "thread on src/a.ts:3 by me", body: "me: Hm\n\ncarol: Agreed, fix it" });
+  });
+
+  it("leaves failed checks and a changes-requested verdict standing, whoever is involved", () => {
+    const items = outstanding(withoutIgnored(facts({
+      reviewDecision: "CHANGES_REQUESTED",
+      reviews: [{ id: "5", state: "CHANGES_REQUESTED", author: "octocat", body: "No.", url: "r/5", submittedAt: at(2) }],
+      checks: [check(100, "failure")],
+    }), own, ignored), own);
+    expect(items.map((i) => [i.kind, i.id])).toEqual([["check", "100"], ["verdict", "5"]]);
   });
 });

@@ -9,7 +9,7 @@ import { actionArtifact, type RunnerStage } from "../pipeline/load.ts";
 import type { ActionChecks } from "../artifact/action-check.ts";
 import { checkFor } from "../store/tickets.ts";
 import { parsePrUrl, type PullRequests, type PrRef } from "./github.ts";
-import { addressedEvidence, checkFailed, describe, fresh, logSlice, marker, outstanding, ownMark, repeatedChecks, watermarkOf, type FeedbackItem, type PrFacts, type Seen } from "./feedback.ts";
+import { addressedEvidence, checkFailed, describe, fresh, logSlice, marker, outstanding, ownMark, repeatedChecks, watermarkOf, withoutIgnored, type FeedbackItem, type IgnoredAuthor, type PrFacts, type Seen } from "./feedback.ts";
 
 /** The Feedback snapshot of a Round that is due: what `tickets.feedback_due` holds until the Round starts. */
 export interface DueRound {
@@ -52,6 +52,8 @@ export interface ReviewDeps {
   /** Runs a repeating Stage's check Action, its end condition when it has one (ADR 0014). */
   checks: ActionChecks;
   log: Logger;
+  /** Whose comments are never Feedback on this Ticket's PR (review.ignore_authors, review.ignore_self); unset ignores no one. */
+  ignored?: (ticket: TicketRow) => Promise<IgnoredAuthor>;
 }
 
 /**
@@ -66,6 +68,11 @@ export class Review {
 
   constructor(deps: ReviewDeps) {
     this.deps = deps;
+  }
+
+  /** The facts less the comments of authors this Ticket's repo ignores, so they never start a Round or hold one open. */
+  private async withoutIgnored(ticket: TicketRow, own: (body: string) => boolean, facts: PrFacts): Promise<PrFacts> {
+    return this.deps.ignored ? withoutIgnored(facts, own, await this.deps.ignored(ticket)) : facts;
   }
 
   /** The tick's poll: one line per Ticket whose PR changed something. Feedback arriving mid-Round waits. */
@@ -96,13 +103,14 @@ export class Review {
       ticket = tickets.update(ticket.id, { pr: ref.url });
       changes.push({ ticket: ticket.id, summary: `PR #${ref.number} found` });
     }
-    const facts = await prs.facts(ref);
+    const own = ownMark(ticket.id, stage.name);
+    const facts = await this.withoutIgnored(ticket, own, await prs.facts(ref));
     // The fetch took a while: a human may have started a Round meanwhile, which moved the watermark. Then this poll is stale.
     const now = tickets.get(ticket.id);
     if (!now || now.state !== "active" || now.feedback_watermark !== ticket.feedback_watermark || sessions.running(ticket.id).some((s) => s.mode === "headless")) return changes;
     ticket = now;
     const seen = seenBy(feedback.forStage(ticket.id, stage.name));
-    const items = facts.state === "OPEN" ? outstanding(facts, ownMark(ticket.id, stage.name)) : [];
+    const items = facts.state === "OPEN" ? outstanding(facts, own) : [];
     const freshItems = fresh(items, ticket.feedback_watermark, seen);
     const status = statusOf(facts, freshItems.length, items.length);
     if (this.record(ticket, status)) changes.push({ ticket: ticket.id, summary: `PR #${ref.number}: checks ${status.checks}` });
@@ -194,10 +202,10 @@ export class Review {
     const { prs, feedback } = this.deps;
     const ref = await prs.discover(ticket);
     if (!ref) return { flag: "artifact.missing", detail: `${stage.artifact}: no PR for branch ${ticket.branch}` };
-    const facts = await prs.facts(ref);
+    const own = ownMark(ticket.id, stage.name);
+    const facts = await this.withoutIgnored(ticket, own, await prs.facts(ref));
     if (facts.state === "MERGED" && !stage.artifactWith) return "advance";
     if (facts.state === "MERGED") return this.endCheck(ticket, stage, true);
-    const own = ownMark(ticket.id, stage.name);
     const rows = feedback.forSession(sessionId);
     const evidence = new Map<number, string | null>();
     for (const row of rows) if (row.kind !== "verdict") evidence.set(row.id, addressedEvidence(itemOf(row), facts, own, false));

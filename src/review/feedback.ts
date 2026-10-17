@@ -94,6 +94,32 @@ export function ownMark(ticketId: string, stage: string): OwnMark {
   return (body) => body.includes(prefix);
 }
 
+/** Whose comments are never Feedback (review.ignore_authors, review.ignore_self). */
+export type IgnoredAuthor = (login: string) => boolean;
+
+/** Ignores the logins given, whatever their case; none given ignores no one. */
+export function ignoring(logins: string[]): IgnoredAuthor {
+  const set = new Set(logins.map((l) => l.toLowerCase()));
+  return (login) => set.has(login.toLowerCase());
+}
+
+/**
+ * The facts with ignored authors' comments taken out, so they are never
+ * Feedback: a top-level comment by one goes, and so does a thread whose
+ * comments, Lasso's own aside, are all by them. A thread anyone else has
+ * joined stays whole, so its Round still reads the ignored comments. Marked
+ * comments stay whoever posted them: they pair replies with what they answer.
+ * Checks and the verdict are untouched.
+ */
+export function withoutIgnored(facts: PrFacts, own: OwnMark, ignored: IgnoredAuthor): PrFacts {
+  const asked = (c: PrComment) => !own(c.body);
+  return {
+    ...facts,
+    threads: facts.threads.filter((t) => !t.comments.some(asked) || t.comments.some((c) => asked(c) && !ignored(c.author))),
+    comments: facts.comments.filter((c) => !asked(c) || !ignored(c.author)),
+  };
+}
+
 const FAILED = new Set(["failure", "timed_out", "action_required"]);
 
 export function checkFailed(check: CheckRun): boolean {

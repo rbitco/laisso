@@ -3,7 +3,7 @@ import { parse } from "yaml";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { DEFAULT_CONFIG, DEFAULT_CONFIG_YAML, loadConfig, ConfigError, actionsFor, actionSets, profilesFor, resolveProfile, prListsBlock, prListsText, applyLive } from "../src/server/config.ts";
+import { DEFAULT_CONFIG, DEFAULT_CONFIG_YAML, loadConfig, ConfigError, actionsFor, actionSets, profilesFor, resolveProfile, prListsBlock, prListsText, applyLive, reviewFor } from "../src/server/config.ts";
 import { resolveHome } from "../src/server/home.ts";
 
 const homeWith = (yaml: string) => {
@@ -244,5 +244,52 @@ describe("resolveProfile", () => {
     expect(resolveProfile(scoped, "web", pipeline(null), stage(null))).toEqual({ name: "claude", from: "default", profile: { runner: "claude" } });
     expect(resolveProfile(scoped, "web", pipeline("fast"), stage(null))).toEqual({ name: "fast", from: "pipeline", profile: { runner: "pi", model: "m" } });
     expect(resolveProfile(scoped, "web", pipeline("solo"), stage(null))).toEqual({ problem: "no profile named solo in config.yaml, which Pipeline p names" });
+  });
+});
+
+describe("review", () => {
+  it("ignores no one by default", () => {
+    expect(loadConfig(homeWith("tick: 60\n")).review).toEqual({ ignore_authors: [], ignore_self: false });
+  });
+
+  it("takes logins and ignore_self globally, and a repo's own keys win for that repo alone", () => {
+    const config = loadConfig(homeWith(`review:
+  ignore_authors: [octocat, " hubot "]
+  ignore_self: true
+repos:
+  web:
+    project: WEB
+    path: /tmp/web
+    review:
+      ignore_self: false
+  api:
+    project: API
+    path: /tmp/api
+    review:
+      ignore_authors: [dependabot]
+  docs:
+    project: DOCS
+    path: /tmp/docs
+`));
+    expect(config.review).toEqual({ ignore_authors: ["octocat", "hubot"], ignore_self: true });
+    expect(config.repos.web!.review).toEqual({ ignore_self: false });
+    expect(config.repos.docs!.review).toBeUndefined();
+    expect(reviewFor(config, "web")).toEqual({ ignore_authors: ["octocat", "hubot"], ignore_self: false });
+    expect(reviewFor(config, "api")).toEqual({ ignore_authors: ["dependabot"], ignore_self: true });
+    expect(reviewFor(config, "docs")).toEqual(config.review);
+  });
+
+  it("refuses a login that is not text, a non-boolean ignore_self, and unknown keys", () => {
+    expect(() => loadConfig(homeWith("review:\n  ignore_authors: octocat\n"))).toThrow(/review.ignore_authors must be a list of GitHub logins/);
+    expect(() => loadConfig(homeWith("review:\n  ignore_authors: [1]\n"))).toThrow(/review.ignore_authors must be a list of GitHub logins/);
+    expect(() => loadConfig(homeWith("review:\n  ignore_self: yes please\n"))).toThrow(/review.ignore_self must be true or false/);
+    expect(() => loadConfig(homeWith("review:\n  ignore: [a]\n"))).toThrow(/review: unknown field ignore/);
+    expect(() => loadConfig(homeWith("repos:\n  web:\n    project: W\n    path: /tmp/w\n    review:\n      ignore_authors: [2]\n"))).toThrow(/repos.web.review.ignore_authors must be a list/);
+  });
+
+  it("applies live", () => {
+    const live = structuredClone(DEFAULT_CONFIG);
+    applyLive(live, loadConfig(homeWith("review:\n  ignore_authors: [octocat]\n")));
+    expect(live.review.ignore_authors).toEqual(["octocat"]);
   });
 });
