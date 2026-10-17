@@ -100,6 +100,8 @@ export interface PrListConfig {
   limit: number;
   /** `advanced` runs GitHub's advanced search, which reads AND, OR and parentheses (LASSO-161); left out, the legacy search. */
   search?: SearchSyntax;
+  /** Hidden from the page while its search succeeds with no PRs; set only when true. */
+  hide_when_empty?: boolean;
 }
 
 export interface Config {
@@ -254,6 +256,9 @@ pr_lists:
   Review requested:
     query: is:open review-requested:@me
     limit: 25
+#  Pending train:
+#    query: is:open assignee:@me status:success review:approved
+#    hide_when_empty: true   # off the page while it finds no PRs
 
 # How often the PR Lists refresh while the Pull Requests page is open; at
 # least the tick above. Lists refresh only while some tab has the page open.
@@ -633,7 +638,7 @@ function parseActions(value: Record<string, unknown>, where: string): Record<str
 }
 
 export const DEFAULT_PR_LIST_LIMIT = 25;
-const PR_LIST_FIELDS = new Set(["query", "limit", "search"]);
+const PR_LIST_FIELDS = new Set(["query", "limit", "search", "hide_when_empty"]);
 
 function parsePrLists(value: Record<string, unknown>, where: string): Record<string, PrListConfig> {
   const lists: Record<string, PrListConfig> = {};
@@ -649,6 +654,7 @@ function parsePrLists(value: Record<string, unknown>, where: string): Record<str
     if (limit > 100) throw new ConfigError(`${at}.limit must be 100 or less, not ${limit}`);
     if (list.search !== undefined && list.search !== "legacy" && list.search !== "advanced") throw new ConfigError(`${at}.search must be legacy or advanced`);
     lists[name] = { query: list.query, limit, ...(list.search === "advanced" ? { search: "advanced" as const } : {}) };
+    if (flag(list.hide_when_empty, `${at}.hide_when_empty`, fail, false)) lists[name]!.hide_when_empty = true;
   }
   return lists;
 }

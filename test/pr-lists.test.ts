@@ -248,6 +248,42 @@ describe("the PR List cache", () => {
     expect(t.cache.status()).toEqual({ failing: false });
   });
 
+  it("hides a hide_when_empty list only once a search succeeds with no PRs, never while loading or failed, and without flicker", async () => {
+    const TRAIN: PrListSetting = { name: "Pending train", query: "is:open label:train", limit: 25, hide_when_empty: true };
+    const EMPTY_TOO: PrListSetting = { ...MINE, name: "Empty, shown" };
+    const t = setup({ lists: [TRAIN, EMPTY_TOO], answer: () => ok(0) });
+    const hidden = async () => (await t.cache.read()).lists.map((l) => [l.name, l.hidden]);
+    t.hold();
+    // Loading: shown, like any list, until its first answer.
+    expect(await hidden()).toEqual([["Pending train", false], ["Empty, shown", false]]);
+    t.release();
+    await t.cache.settle();
+    // Empty: hidden. A list without the setting stays, empty.
+    expect(await hidden()).toEqual([["Pending train", true], ["Empty, shown", false]]);
+    // A refresh under way keeps the last answer, so it stays hidden while fetching.
+    t.hold();
+    await t.cache.checkNow();
+    expect((await t.cache.read()).lists[0]).toMatchObject({ hidden: true, fetching: true });
+    t.setAnswer(() => ok(1, 7));
+    t.release();
+    await t.cache.settle();
+    // PRs found: back on the page.
+    expect((await t.cache.read()).lists[0]).toMatchObject({ hidden: false, total: 1 });
+    // A failed search shows the list with its error, even over an empty last answer.
+    t.setAnswer(() => ok(0));
+    await t.cache.checkNow();
+    await t.cache.settle();
+    t.setAnswer(() => ({ ok: false, problem: "failed", message: "timed out" }));
+    await t.cache.checkNow();
+    await t.cache.settle();
+    expect((await t.cache.read()).lists[0]).toMatchObject({ hidden: false, total: 0, error: { kind: "failed" } });
+  });
+
+  it("never hides a list that cannot search", async () => {
+    const t = setup({ lists: [{ name: "Elsewhere", query: "is:open", limit: 25, hide_when_empty: true }], repos: {} });
+    expect((await t.cache.read()).lists[0]).toMatchObject({ hidden: false, error: { kind: "no-github-repos" } });
+  });
+
   it("reports a list it cannot search without fetching it", async () => {
     const t = setup({ lists: [MINE, { name: "Elsewhere", query: "org:example", limit: 25 }], repos: {} });
     const view = await t.cache.read();

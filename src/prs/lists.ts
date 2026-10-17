@@ -11,6 +11,7 @@ export interface PrListSetting {
   limit: number;
   /** GitHub's advanced search, with AND, OR and parentheses; legacy when left out. */
   search?: SearchSyntax;
+  hide_when_empty?: boolean;
 }
 
 /** A PR List as the Pull Requests page shows it. */
@@ -31,6 +32,11 @@ export interface PrListView {
   fetching: boolean;
   /** Why the list cannot search, or why its last fetch failed; null when it is fine. */
   error: PrListError | null;
+  /**
+   * hide_when_empty is set and its last fetch succeeded with no PRs, so the page leaves it out. Never before the first
+   * fetch or after a failed one, and a refresh under way keeps the last answer, so the list doesn't flicker.
+   */
+  hidden: boolean;
 }
 
 /**
@@ -173,6 +179,7 @@ export class PrLists {
         fetchedAt: entry?.fetchedAt ?? null,
         fetching: entry?.inflight != null,
         error: problem ?? entry?.error ?? null,
+        hidden: !!setting.hide_when_empty && !problem && !!entry && entry.fetchedAt !== null && entry.error === null && entry.total === 0,
       })),
       pausedUntil: this.pausedUntil === null ? null : new Date(this.pausedUntil).toISOString(),
       ghProblem: current.length ? this.ghProblem : null,

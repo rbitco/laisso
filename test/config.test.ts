@@ -151,6 +151,12 @@ describe("loadConfig", () => {
     expect(() => loadConfig(homeWith("pr_lists:\n  Mine:\n    query: is:open\n    search: fancy\n"))).toThrow(/pr_lists\.Mine\.search must be legacy or advanced/);
   });
 
+  it("takes hide_when_empty on a PR List, keeping it only when true", () => {
+    const lists = loadConfig(homeWith("pr_lists:\n  Train:\n    query: is:open label:train\n    hide_when_empty: true\n  Mine:\n    query: is:open author:@me\n    hide_when_empty: false\n")).pr_lists;
+    expect(lists).toEqual({ Train: { query: "is:open label:train", limit: 25, hide_when_empty: true }, Mine: { query: "is:open author:@me", limit: 25 } });
+    expect(() => loadConfig(homeWith("pr_lists:\n  Train:\n    query: is:open\n    hide_when_empty: maybe\n"))).toThrow(/pr_lists\.Train\.hide_when_empty must be true or false/);
+  });
+
   it("writes the Config page's pr_lists: block in place, and reads it back with its comments", () => {
     const file = "/c/config.yaml";
     expect(parse(prListsBlock(DEFAULT_CONFIG_YAML))).toEqual(DEFAULT_CONFIG.pr_lists);

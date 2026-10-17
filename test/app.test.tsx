@@ -68,8 +68,8 @@ const REVIEWERS: Reviewer[] = [
 /** Two PR Lists: Mine cut short at its limit of one, Review requested whole. */
 const PR_LISTS: PrListsView = {
   lists: [
-    { name: "Mine", query: "is:open author:@me", search: "is:pr is:open author:@me repo:rbitco/lasso sort:updated-desc", url: "https://github.com/pulls?q=mine", limit: 1, total: 4, fetchedAt: ago(30), fetching: false, error: null, rows: [{ title: "Tick grace when the laptop sleeps", repo: "rbitco/lasso", number: 101, url: "https://github.com/rbitco/lasso/pull/101", author: "matt", updatedAt: ago(45 * 60), verdict: { word: "Checks failing", reason: "a required check failed", tone: "crit" }, checks: { passed: 7, failing: 2 }, reviewers: REVIEWERS, ticket: null }] },
-    { name: "Review requested", query: "is:open review-requested:@me", search: "is:pr is:open review-requested:@me repo:rbitco/lasso sort:updated-desc", url: "https://github.com/pulls?q=review", limit: 25, total: 0, fetchedAt: ago(30), fetching: false, error: null, rows: [] },
+    { name: "Mine", query: "is:open author:@me", search: "is:pr is:open author:@me repo:rbitco/lasso sort:updated-desc", url: "https://github.com/pulls?q=mine", limit: 1, total: 4, fetchedAt: ago(30), fetching: false, error: null, hidden: false, rows: [{ title: "Tick grace when the laptop sleeps", repo: "rbitco/lasso", number: 101, url: "https://github.com/rbitco/lasso/pull/101", author: "matt", updatedAt: ago(45 * 60), verdict: { word: "Checks failing", reason: "a required check failed", tone: "crit" }, checks: { passed: 7, failing: 2 }, reviewers: REVIEWERS, ticket: null }] },
+    { name: "Review requested", query: "is:open review-requested:@me", search: "is:pr is:open review-requested:@me repo:rbitco/lasso sort:updated-desc", url: "https://github.com/pulls?q=review", limit: 25, total: 0, fetchedAt: ago(30), fetching: false, error: null, hidden: false, rows: [] },
   ],
   layout: "stacked",
   pausedUntil: null,
@@ -796,6 +796,18 @@ describe("the Pull Requests page", () => {
     const line = empty.querySelector<HTMLElement>('[data-role="pr-empty"]')!;
     const link = within(line).getByRole("link", { name: /^Search on GitHub/ });
     expect([line.textContent, link.getAttribute("href"), link.getAttribute("target")]).toEqual(["No PRs match · Search on GitHub ↗", "https://github.com/pulls?q=review", "_blank"]);
+  });
+
+  it("leaves hidden empty lists off the page, and names them in a note", async () => {
+    const [mine, review] = PR_LISTS.lists;
+    await prsPage({ ...PR_LISTS, lists: [mine!, { ...review!, hidden: true }, { ...review!, name: "Pending train", hidden: true }] });
+    expect([...document.querySelectorAll<HTMLElement>('[data-role="pr-list"]')].map((l) => l.getAttribute("aria-label"))).toEqual(["Mine"]);
+    expect(section("pr-hidden").textContent).toBe("2 empty lists hidden: Review requested, Pending train");
+  });
+
+  it("shows no hidden note when nothing is hidden", async () => {
+    await prsPage(PR_LISTS);
+    expect(document.querySelector('[data-role="pr-hidden"]')).toBeNull();
   });
 
   it("says there are no PR Lists with pr_lists: {}, with the defaults as an example, and keeps the nav entry", async () => {

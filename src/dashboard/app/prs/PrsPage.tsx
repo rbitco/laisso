@@ -105,7 +105,9 @@ export function PrsPage({ visit }: { visit: number }) {
     }, GATHER_MS);
   });
   useEffect(() => () => clearTimeout(owed.current ?? undefined), []);
-  const chips = layout === "stacked" && (view?.lists.length ?? 0) > CHIPS_OVER;
+  const shown = view?.lists.filter((list) => !list.hidden) ?? [];
+  const hidden = view?.lists.filter((list) => list.hidden) ?? [];
+  const chips = layout === "stacked" && shown.length > CHIPS_OVER;
 
   return (
     <div className="prs">
@@ -121,14 +123,19 @@ export function PrsPage({ visit }: { visit: number }) {
       ) : (
         <>
           <div className={"pr-top" + (chips ? " has-chips" : "")} data-role="pr-top">
-            {chips ? <JumpChips lists={view.lists} /> : <span />}
+            {chips ? <JumpChips lists={shown} /> : <span />}
             <LayoutSwitch layout={layout} onPick={pick} />
           </div>
           <div className={`pr-lists ${layout}`} data-role="pr-lists" data-layout={layout}>
-            {view.lists.map((list, i) => (
+            {shown.map((list, i) => (
               <PrListBlock key={list.name} list={list} anchor={listAnchor(i)} pausedUntil={view.pausedUntil} />
             ))}
           </div>
+          {hidden.length > 0 && (
+            <p className="note pr-hidden" data-role="pr-hidden" title="hide_when_empty is set on these lists in config.yaml">
+              {hidden.length === 1 ? "1 empty list hidden" : `${hidden.length} empty lists hidden`}: {hidden.map((list) => list.name).join(", ")}
+            </p>
+          )}
         </>
       )}
     </div>
