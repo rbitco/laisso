@@ -12,7 +12,7 @@ const request: RunRequest = {
   stage: "implement",
   prompt: "Do the work described by the Ticket.",
   skills: ["implement", "tdd"],
-  context: { id: "01J8ZK3M9Q4R5S6T7V8W9X0Y1Z", reference: "APP-12", repo: "app", branch: "APP-12-add-dark-mode", title: "Add dark mode", body: "A toggle in settings." },
+  context: { id: "01J8ZK3M9Q4R5S6T7V8W9X0Y1Z", reference: "APP-12", repo: "app", branch: "APP-12-add-dark-mode", title: "Add dark mode", body: "A toggle in settings.", prs: [] },
   cwd: "/tmp/lasso-fixture/worktree",
   mode: "headless",
   sessionId: "3e728ae2-8d99-42f3-a7ba-6066de05d169",
@@ -20,7 +20,36 @@ const request: RunRequest = {
   profile: { runner: "claude" },
 };
 
+/** The line every preamble carries, linked PRs or none. */
+const LINKING =
+  "If you open a PR on a branch other than APP-12-add-dark-mode, run `lasso pr link <url>` so Lasso tracks it as this Ticket's; for a PR you only read, add --referenced. `lasso pr list --json` shows the Ticket's PRs as they are now.";
+
 describe("claude adapter command", () => {
+  it("lists the Ticket's linked PRs in the preamble, leaving out what no read has seen, before the linking line", () => {
+    const prs: RunRequest["context"]["prs"] = [
+      { url: "https://github.com/owner/app/pull/7", role: "owned", title: "Add dark mode", head: "APP-12-add-dark-mode", base: "main" },
+      { url: "https://github.com/owner/lib/pull/3", role: "referenced", title: null, head: null, base: "main" },
+      { url: "https://github.com/owner/app/pull/9", role: "owned", title: "Theme tokens", head: null, base: null },
+    ];
+    const prompt = claudeAdapter.command({ ...request, context: { ...request.context, prs } }).argv[2]!;
+    expect(prompt).toContain(
+      [
+        "A toggle in settings.",
+        "",
+        "Linked PRs:",
+        '- owned: https://github.com/owner/app/pull/7 "Add dark mode" (head APP-12-add-dark-mode, base main)',
+        "- referenced: https://github.com/owner/lib/pull/3 (base main)",
+        '- owned: https://github.com/owner/app/pull/9 "Theme tokens"',
+        "",
+        LINKING,
+        "",
+        "Do the work described by the Ticket.",
+      ].join("\n"),
+    );
+    // No new variable: the env is the same with links as without.
+    expect(claudeAdapter.command({ ...request, context: { ...request.context, prs } }).env).toEqual(claudeAdapter.command(request).env);
+  });
+
   it("builds a headless claude -p with skills as /name first, then the preamble, the baseline flags, and the chosen session id", () => {
     const cmd = claudeAdapter.command(request);
     expect(cmd.argv[0]).toBe("claude");
@@ -34,6 +63,8 @@ describe("claude adapter command", () => {
         "Title: Add dark mode",
         "",
         "A toggle in settings.",
+        "",
+        LINKING,
         "",
         "Do the work described by the Ticket.",
       ].join("\n"),

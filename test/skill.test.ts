@@ -99,6 +99,33 @@ describe("the skill's examples", () => {
     expect(meta.name).toBe("lasso");
     expect(meta.description).toMatch(/config\.yaml/);
     expect(meta.description).toMatch(/Flagged/);
+    expect(meta.description).toMatch(/lasso pr/);
+  });
+});
+
+describe("the skill on a Ticket's PRs", () => {
+  const prs = readFileSync(path.join(SKILL, "prs.md"), "utf8");
+  const context = readFileSync(path.join(findPackageRoot().root, "CONTEXT.md"), "utf8");
+  /** A term's definition in CONTEXT.md, joined onto one line. */
+  const defined = (term: string) => /\*\*[^*]+\*\*:\n([\s\S]*?)\n_Avoid_/.exec(context.slice(context.indexOf(`**${term}**:`)))![1]!.replace(/\s+/g, " ");
+  const flat = prs.replace(/\s+/g, " ");
+
+  it("covers lasso pr link, unlink and list with their arguments", () => {
+    expect(prs).toContain("lasso pr link <pr> [ticket] [--referenced]");
+    expect(prs).toContain("lasso pr unlink <pr> [ticket]");
+    expect(prs).toContain("lasso pr list [ticket] [--json]");
+    for (const form of ["URL", "`owner/repo#N`", "`#N`", "`N`", "lasso pr link '#7'", "`$LASSO_TICKET`"]) expect(prs).toContain(form);
+  });
+
+  it("defines Owned and Referenced in CONTEXT.md's words, and says when an agent links", () => {
+    expect(flat).toContain(defined("Owned PR"));
+    expect(flat).toContain(defined("Referenced PR"));
+    expect(flat).toContain("Opened a PR on a branch other than the Ticket's own");
+    expect(flat).toContain("lasso pr link <url> --referenced");
+  });
+
+  it("is reached from SKILL.md", () => {
+    expect(readFileSync(path.join(SKILL, "SKILL.md"), "utf8")).toContain("[prs.md](prs.md)");
   });
 });
 

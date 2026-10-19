@@ -48,7 +48,9 @@ and name the fix.
 
 Every Runner Session's prompt starts with a preamble Lasso writes: the
 Ticket id and reference, repo, branch, Stage, the issue title, and its body
-(or the prompt, for a prompt Ticket). The Session also gets `LASSO_TICKET`,
+(or the prompt, for a prompt Ticket), then the Ticket's linked PRs and a
+line telling the Runner to `lasso pr link` any PR it opens off the Ticket's
+branch (see [prs.md](prs.md)). The Session also gets `LASSO_TICKET`,
 `LASSO_REFERENCE`, `LASSO_REPO`, `LASSO_BRANCH`, `LASSO_STAGE`,
 `LASSO_SESSION`, and in a Round `LASSO_ROUND` and `LASSO_MARKER`. So a
 prompt need not restate the Ticket.

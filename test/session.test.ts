@@ -222,3 +222,60 @@ describe("a headless Stage", () => {
     expect(d.flag).toBeNull();
   });
 });
+
+// LASSO-167: every Session's preamble lists the Ticket's linked PRs and has the Runner link the PRs it opens.
+describe("a Session's linked PRs", () => {
+  const LINKED = `stages:
+  - name: grill
+    prompt: Interview me about the Ticket.
+    human: true
+  - name: implement
+    prompt: Do the work.
+    artifact: commits-on-branch
+`;
+  const OWNED = "https://github.com/owner/app/pull/7";
+  const REFERENCED = "https://github.com/owner/lib/pull/3";
+  /** gh's answer to the lookup of one PR. */
+  const lookup = (url: string, title: string, head: string, base: string) => ({
+    tool: "gh" as const,
+    match: ["pr view", url, "--json"],
+    stdout: JSON.stringify({ number: Number(url.split("/").at(-1)), url, title, state: "OPEN", headRefName: head, baseRefName: base, author: { login: "alice" } }),
+  });
+  const linking = (branch: string) => `If you open a PR on a branch other than ${branch}, run \`lasso pr link <url>\``;
+
+  it("lists both links, with role, title, head and base, in a headless Session's prompt", async () => {
+    const { lasso, ticket } = await lassoWithTicket(LINKED);
+    await lasso.tracker.reply(lookup(OWNED, "Add dark mode", "feat-dark", "main"));
+    await lasso.tracker.reply(lookup(REFERENCED, "Theme tokens", "tokens", "develop"));
+    for (const [pr, role] of [[OWNED, "owned"], [REFERENCED, "referenced"]]) {
+      await lasso.api(`/api/tickets/${ticket.id}/prs`, { method: "POST", body: JSON.stringify({ pr, role }) });
+    }
+    await lasso.runner.script({ stdout: '{"type":"system","subtype":"init","session_id":"ignored"}', hang: true });
+    await lasso.api(`/api/tickets/${ticket.id}/done`, { method: "POST", body: "{}" });
+    await checkNow(lasso);
+
+    const [call] = await launched(lasso);
+    expect(call!.argv[2]).toContain(
+      [
+        "Linked PRs:",
+        `- owned: ${OWNED} "Add dark mode" (head feat-dark, base main)`,
+        `- referenced: ${REFERENCED} "Theme tokens" (head tokens, base develop)`,
+        "",
+        linking(ticket.branch),
+      ].join("\n"),
+    );
+    expect(call!.argv[2]).toContain("`lasso pr list --json`");
+    // The prompt carries the links; no environment variable does.
+    expect(Object.keys(call!.env).filter((k) => k.startsWith("LASSO_PR"))).toEqual([]);
+  });
+
+  it("gives a Ticket with no links no PR list, but still the linking line", async () => {
+    const { lasso, ticket } = await lassoWithTicket();
+    await lasso.runner.script({ stdout: '{"type":"system","subtype":"init","session_id":"ignored"}', hang: true });
+    await checkNow(lasso);
+
+    const [call] = await launched(lasso);
+    expect(call!.argv[2]).not.toContain("Linked PRs:");
+    expect(call!.argv[2]).toContain(linking(ticket.branch));
+  });
+});

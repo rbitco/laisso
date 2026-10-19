@@ -1,6 +1,7 @@
 import type { RunnerName } from "../pipeline/load.ts";
 import type { Effort, ProfileSettings } from "../server/config.ts";
 import { renderFeedback, type FeedbackItem } from "../review/feedback.ts";
+import type { PrLinkRow } from "../store/links.ts";
 
 export type OutcomeStatus = "succeeded" | "failed" | "exhausted" | "interrupted";
 
@@ -12,7 +13,12 @@ export interface TicketContext {
   branch: string;
   title: string;
   body: string | null;
+  /** The Ticket's linked PRs as Lasso last saw them, in link order; prompt only, never an env variable. */
+  prs: TicketPr[];
 }
+
+/** One linked PR as a Session is told of it; what no read of the PR has seen yet is null. */
+export type TicketPr = Pick<PrLinkRow, "url" | "role" | "title" | "head" | "base">;
 
 /** Best-effort limits handed to a Runner that can stop cleanly at them; Lasso enforces wall time itself. */
 export interface RunLimits {
@@ -89,12 +95,13 @@ export interface RunnerAdapter {
 }
 
 /** The part of a RunRequest that comes from the Ticket and the Stage; the caller adds mode, session id, and limits. */
-export function requestFor(ticket: TicketLike, stage: StageLike, profile: ProfileSettings): Pick<RunRequest, "stage" | "prompt" | "skills" | "context" | "cwd" | "profile"> {
+export function requestFor(ticket: TicketLike, stage: StageLike, profile: ProfileSettings, links: TicketPr[]): Pick<RunRequest, "stage" | "prompt" | "skills" | "context" | "cwd" | "profile"> {
+  const prs = links.map(({ url, role, title, head, base }) => ({ url, role, title, head, base }));
   return {
     stage: stage.name,
     prompt: stage.prompt,
     skills: stage.skills,
-    context: { id: ticket.id, reference: ticket.reference, repo: ticket.repo, branch: ticket.branch, title: ticket.title, body: ticket.origin === "prompt" ? ticket.prompt : ticket.body },
+    context: { id: ticket.id, reference: ticket.reference, repo: ticket.repo, branch: ticket.branch, title: ticket.title, body: ticket.origin === "prompt" ? ticket.prompt : ticket.body, prs },
     cwd: ticket.worktree,
     profile,
   };
@@ -126,12 +133,26 @@ export function renderPrompt(request: RunRequest, skill: (name: string) => strin
     `You are working Lasso Ticket ${who} in repo ${context.repo} on branch ${context.branch}, Stage ${request.stage}.`,
     `Title: ${context.title}`,
     ...(context.body ? ["", context.body.trim()] : []),
+    "",
+    ...renderPrs(context),
   ];
   // Skill invocations lead so the Runner sees them where it expects a command (spec: adapters prepend them).
   const skills = request.skills.map(skill);
   const feedback = request.feedback ? renderFeedback(request.feedback.items, request.feedback.pr, request.feedback.round, request.feedback.marker) : "";
   const body = [skills.join("\n"), preamble.join("\n"), request.prompt?.trim() ?? "", feedback].filter(Boolean);
   return body.join("\n\n");
+}
+
+/** The Ticket's linked PRs, when it has any, then the line that has the Runner link each PR it opens off the Ticket's branch. */
+function renderPrs(context: TicketContext): string[] {
+  const list = context.prs.map((pr) => {
+    const branches = [pr.head ? `head ${pr.head}` : null, pr.base ? `base ${pr.base}` : null].filter(Boolean);
+    return `- ${pr.role}: ${pr.url}${pr.title ? ` "${pr.title}"` : ""}${branches.length ? ` (${branches.join(", ")})` : ""}`;
+  });
+  return [
+    ...(list.length ? ["Linked PRs:", ...list, ""] : []),
+    `If you open a PR on a branch other than ${context.branch}, run \`lasso pr link <url>\` so Lasso tracks it as this Ticket's; for a PR you only read, add --referenced. \`lasso pr list --json\` shows the Ticket's PRs as they are now.`,
+  ];
 }
 
 export function ticketEnv(request: RunRequest): Record<string, string> {
