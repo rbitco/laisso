@@ -47,3 +47,16 @@ head and base branch) as they were when the Session started; `lasso pr list
   `lasso pr link <url> --referenced`, so humans see it beside the Ticket.
 - **Never** link a PR another Ticket owns as Owned, and never unlink a PR a
   human linked unless asked.
+
+## Reviewing someone else's PR
+
+`lasso add "<what to look for>" --pr owner/repo#N --pipeline pr-review`
+starts a Ticket on the `pr-review` Pipeline (see
+[pipelines.md](pipelines.md#the-pr-review-pipeline)). `--pr` is repeatable
+and links each PR as Referenced.
+
+## Abandoning a Ticket
+
+Abandon keeps the branch. The dashboard asks which of the Ticket's open
+Owned PRs to close, all ticked by default; each closed PR gets a comment.
+Referenced PRs are never closed.

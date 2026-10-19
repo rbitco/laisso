@@ -97,14 +97,15 @@ skipped this way; Flag it or let it finish.
 
 ### Repeating Stage (`repeat: feedback`)
 
-Each Tick Lasso polls the Ticket's PR with `gh`. New Feedback (failed
-checks, review threads, comments, a changes-requested verdict) starts a
-Round: a Session whose prompt lists what to address and the marker
+Each Tick Lasso polls every Owned PR of the Ticket with `gh`; Referenced
+PRs are never polled. New Feedback (failed checks, review threads,
+comments, a changes-requested verdict) on any open Owned PR starts a
+Round: one Session whose prompt lists what to address, grouped by PR, and the marker
 (`<!-- lasso:<ticket>:<stage>:round-<n> -->`) the Runner must end each PR
 comment with. Comments by the logins under `review.ignore_authors`, or by
 the `gh` user with `review.ignore_self`, are not Feedback (see
 [config.md](config.md#review)). A thread counts as addressed once it has a marked reply and
-is resolved. The Stage finishes when the PR merges, or, when its artifact is
+is resolved. The Stage finishes when every Owned PR has merged, or, when its artifact is
 a [check Action](#check-actions), once that check is met; `budget.rounds` caps the
 Rounds. The prompt should tell the Runner to reply with the marker, push,
 and resolve what it fixed, as the default Pipeline's `review` Stage does.

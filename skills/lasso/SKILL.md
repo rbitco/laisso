@@ -1,6 +1,6 @@
 ---
 name: lasso
-description: Set up or edit Lasso, the tool that drives Tickets through Pipelines of Stages with coding-agent Runners. Use when writing or changing Lasso's config.yaml (repos and their trackers, Actions, Agent Profiles, Runners, Budget), writing or changing a Pipeline or its Stages, diagnosing why a Lasso Ticket is Flagged, or linking a PR to a Ticket with `lasso pr` (including from inside a Lasso Session).
+description: Set up or edit Lasso, the tool that drives Tickets through Pipelines of Stages with coding-agent Runners. Use when writing or changing Lasso's config.yaml (repos and their trackers, Actions, Agent Profiles, Runners, Budget), writing or changing a Pipeline or its Stages, diagnosing why a Lasso Ticket is Flagged, linking a PR to a Ticket with `lasso pr` (including from inside a Lasso Session), or starting a review of someone else's PR with `lasso add --pr`.
 ---
 
 # Lasso
@@ -29,12 +29,7 @@ Lasso uses them; say them that way to the user.
    - Complete, tested homes for a GitHub-tracked and a JIRA-tracked repo:
      [examples/github/](examples/github/) and [examples/jira/](examples/jira/)
    - A Flagged Ticket: [flags.md](flags.md)
-   - A Ticket's PRs, Owned and Referenced, and `lasso pr`: [prs.md](prs.md)
-
-**Inside a Lasso Session** (`$LASSO_TICKET` is set), skip the workflow
-above for PRs: link any PR you open on a branch other than the Ticket's own
-with `lasso pr link <url>`, and one you only read with `--referenced`. See
-[prs.md](prs.md).
+   - A Ticket's PRs, Owned and Referenced, `lasso pr`, and `lasso add --pr`: [prs.md](prs.md)
 4. **Check it.** Run `lasso doctor`. Done when it prints no config error,
    every needed tool is found and logged in, and each tool's "needed by"
    matches what you meant to configure. Doctor checks config.yaml parses but
@@ -44,6 +39,11 @@ with `lasso pr link <url>`, and one you only read with `--referenced`. See
    that does not parse or names a missing Action or profile.
 5. **Say what needs a restart.** Tell the user which edits apply now and
    which need Lasso restarted, using the table in [config.md](config.md#when-edits-apply).
+
+**Inside a Lasso Session** (`$LASSO_TICKET` is set), skip the workflow
+above for PRs: link any PR you open on a branch other than the Ticket's own
+with `lasso pr link <url>`, and one you only read with `--referenced`. See
+[prs.md](prs.md).
 
 When a rule here and Lasso disagree, Lasso wins: report the mismatch to the
 user rather than working around it.

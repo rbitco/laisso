@@ -20,7 +20,7 @@ own log is `<Lasso home>/lasso.log` (one JSON line per event, e.g.
 | `pipeline.missing` | the Ticket's Pipeline cannot be loaded: its pinned Version is gone from the store, or a Ticket from before Versions has lost its Pipeline file or Stage | restore the Pipeline file for an unpinned Ticket; otherwise Skip or Abandon |
 | `review.unaddressed` | a Round ended with Feedback still standing | read the detail; Retry, or address it by hand |
 | `review.check_repeat` | the same check failed two Rounds running | fix the check by hand, then Retry |
-| `review.pr_closed` | the PR was closed without merging | reopen it and Retry, or Abandon |
+| `review.pr_closed` | an Owned PR was closed without merging; the detail names it | reopen it and Retry, unlink it (`lasso pr unlink`, see [prs.md](prs.md)) and Retry, or Abandon |
 | `review.poll_failed` | the PR could not be read (`gh` down, rate limited, logged out) | `gh auth status`, then Retry |
 
 A Flagged GitHub Ticket at a `tracker.transition` Stage with a status other
@@ -33,5 +33,5 @@ allows), **Extend** (raise the Ticket's own Budget), **Mark done** (accept
 and advance), **Skip** (drop the Stage and advance; also offered on a Stage that has not started, see [pipelines.md](pipelines.md#runner-stage)), **Take over in
 terminal** (re-enter the Session in a terminal and work the Stage as a human
 Stage, until Hand back returns it to Lasso), **Abandon** (final; the Ticket cannot be reopened, though its issue
-can be intaken again). Retry and Resume count against attempts. Fixing config.yaml or a Pipeline does not
+can be intaken again; the branch is kept, and the dashboard asks which open Owned PRs to close, all ticked by default). Retry and Resume count against attempts. Fixing config.yaml or a Pipeline does not
 clear the Flag on its own; a human still picks an exit.
