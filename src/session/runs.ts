@@ -173,7 +173,7 @@ export class Runs {
     // The id re-entered is the earliest one in the chain, so a later Resume of this row finds it too.
     const resumed = resumeFrom ? (resumeFrom.runner_session_id ?? resumeFrom.id) : null;
     const resume = resumed ? { resume: true, runnerSessionId: resumed } : {};
-    const feedback = plan ? { feedback: { round: plan.round, pr: plan.pr, items: plan.items, marker: plan.marker } } : {};
+    const feedback = plan ? { feedback: { round: plan.round, prs: plan.prs, marker: plan.marker } } : {};
     const request: RunRequest = { ...requestFor(ticket, stage, profile.profile, this.deps.links.links(ticket.id)), mode: "headless", sessionId, ...resume, limits: { wallTimeMs, remainingSpendUsd }, ...feedback };
     const command = adapter.command(request);
 

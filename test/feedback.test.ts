@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { outstanding, fresh, addressedEvidence, watermarkOf, logSlice, ownMark, marker, ignoring, withoutIgnored, type PrFacts } from "../src/review/feedback.ts";
+import { outstanding, fresh, addressedEvidence, watermarkOf, logSlice, ownMark, marker, ignoring, withoutIgnored, renderFeedback, type PrFacts } from "../src/review/feedback.ts";
 import { splitResponse } from "../src/review/github.ts";
 
 // Seam two, pure: the rules that turn a PR's state into Feedback items, and what counts as addressed.
@@ -94,6 +94,41 @@ describe("addressedEvidence", () => {
     expect(base.map((i) => addressedEvidence(i, same, own, false))).toEqual([null, null, null, null]);
     // An unmarked reply from someone else is not Lasso addressing the comment.
     expect(addressedEvidence(commentItem!, facts({ comments: [comment(10, "bob", "Add docs", 1), comment(11, "carol", "+1", 4)] }), own, false)).toBeNull();
+  });
+});
+
+describe("renderFeedback", () => {
+  const seven = { number: 7, url: "https://github.com/o/r/pull/7", head: "feat-a", base: "main" };
+  const eight = { number: 8, url: "https://github.com/o/r/pull/8", head: "feat-b", base: "feat-a" };
+  const items = (f: PrFacts) => outstanding(f, own);
+
+  it("heads each PR's items with its number, head and base branch, numbering items across PRs, with one marker", () => {
+    const text = renderFeedback([
+      { pr: seven, items: items(facts({ comments: [comment(10, "bob", "Add docs", 1)] })) },
+      { pr: eight, items: items(facts({ number: 8, url: eight.url, threads: [thread(false, [comment(1, "alice", "Fix", 1)])] })) },
+    ], 2, mark);
+    expect(text).toBe([
+      "Feedback on 2 PRs, Round 2: 2 items.",
+      "",
+      "PR #7 (https://github.com/o/r/pull/7), head branch feat-a, base branch main:",
+      "1. [comment 10] comment by bob u/10",
+      "   > Add docs",
+      "",
+      "PR #8 (https://github.com/o/r/pull/8), head branch feat-b, base branch feat-a:",
+      "2. [thread RT_1] thread on src/a.ts:3 by alice at src/a.ts:3 u/1",
+      "   > alice: Fix",
+      "",
+      `Reply to each comment separately, and end every comment you post on the PR with this marker, on its own line: ${mark}`,
+    ].join("\n"));
+  });
+
+  it("names the one PR up front, and leaves out branches GitHub did not give", () => {
+    const text = renderFeedback([{ pr: { ...seven, head: null, base: null }, items: items(facts({ comments: [comment(10, "bob", "Add docs", 1)] })) }], 1, mark);
+    expect(text.split("\n").slice(0, 3)).toEqual(["Feedback on PR #7 (https://github.com/o/r/pull/7), Round 1: 1 item.", "", "PR #7 (https://github.com/o/r/pull/7):"]);
+  });
+
+  it("tags each item with the PR it is on", () => {
+    expect(items(facts({ number: 8, url: eight.url, comments: [comment(10, "bob", "Add docs", 1)] })).map((i) => i.pr)).toEqual([eight.url]);
   });
 });
 

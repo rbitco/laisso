@@ -257,6 +257,15 @@ const MIGRATIONS: Array<(db: DatabaseSync) => void> = [
       ALTER TABLE tickets DROP COLUMN feedback_due;
     `);
   },
+  // Rounds across Owned PRs (LASSO-165): each Feedback item names the PR it is on; earlier items were on their Ticket's one PR.
+  (db) => {
+    db.exec(`
+      ALTER TABLE feedback_item ADD COLUMN pr TEXT;
+      UPDATE feedback_item SET pr = (
+        SELECT l.url FROM sessions s JOIN ticket_prs l ON l.ticket = s.ticket AND l.role = 'owned' WHERE s.id = feedback_item.session ORDER BY l.added_at LIMIT 1
+      );
+    `);
+  },
 ];
 
 /** The schema version this Lasso migrates a store up to. */

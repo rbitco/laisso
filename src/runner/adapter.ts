@@ -1,6 +1,6 @@
 import type { RunnerName } from "../pipeline/load.ts";
 import type { Effort, ProfileSettings } from "../server/config.ts";
-import { renderFeedback, type FeedbackItem } from "../review/feedback.ts";
+import { renderFeedback, type PrFeedback } from "../review/feedback.ts";
 import type { PrLinkRow } from "../store/links.ts";
 
 export type OutcomeStatus = "succeeded" | "failed" | "exhausted" | "interrupted";
@@ -50,8 +50,8 @@ export interface RunRequest {
 
 export interface RoundContext {
   round: number;
-  pr: { number: number; url: string };
-  items: FeedbackItem[];
+  /** The Feedback grouped by the PR it is on. */
+  prs: PrFeedback[];
   marker: string;
 }
 
@@ -138,7 +138,7 @@ export function renderPrompt(request: RunRequest, skill: (name: string) => strin
   ];
   // Skill invocations lead so the Runner sees them where it expects a command (spec: adapters prepend them).
   const skills = request.skills.map(skill);
-  const feedback = request.feedback ? renderFeedback(request.feedback.items, request.feedback.pr, request.feedback.round, request.feedback.marker) : "";
+  const feedback = request.feedback ? renderFeedback(request.feedback.prs, request.feedback.round, request.feedback.marker) : "";
   const body = [skills.join("\n"), preamble.join("\n"), request.prompt?.trim() ?? "", feedback].filter(Boolean);
   return body.join("\n\n");
 }

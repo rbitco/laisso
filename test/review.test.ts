@@ -5,7 +5,7 @@ import path from "node:path";
 import { startLassoWithRepos, startLasso, runCli, waitFor, claudeFixture, type Lasso } from "./harness.ts";
 import type { TicketDetail, IntakeResult } from "../src/api/views.ts";
 import type { TickChange } from "../src/server/tick.ts";
-import { PR_URL, setScene, sceneFile, swapTo, marker, type Scene } from "./scenes.ts";
+import { PR_URL, prUrl, setScene, setScenes, sceneFile, scenesFile, swapTo, marker, type Scene } from "./scenes.ts";
 
 // Seam one: the Review loop through the API. The gh shim plays the PR: one
 // scene per state of the PR, swapped by the fake Runner mid-Round the way a
@@ -301,6 +301,148 @@ describe("the Review loop", () => {
     const other = await runCli(["check", "nope"], lasso);
     expect(other.code).toBe(1);
     expect(other.stderr).toContain("no Ticket matches nope");
+  });
+});
+
+// Rounds across several Owned PRs (LASSO-165): PR #7 is on the Ticket's branch, PR #8 is linked through the API.
+describe("several Owned PRs", () => {
+  const PR8 = prUrl(8);
+  const linkTicks = (lasso: Lasso) => lasso.stdout().split("\n").filter((line) => line.includes("trigger=pr-link")).length;
+  /** Link a PR to an active Ticket and wait out the Tick the link kicks. */
+  const link = async (lasso: Lasso, id: string, url: string) => {
+    const before = linkTicks(lasso);
+    await lasso.api(`/api/tickets/${id}/prs`, { method: "POST", body: JSON.stringify({ pr: url }) });
+    await waitFor(async () => (linkTicks(lasso) > before ? true : null), "the Tick the link kicks");
+  };
+  const eight: Scene = { ...green, tag: "eight", number: 8, head: "ccccccc3", headRef: "feat-b", baseRef: "main" };
+
+  it("runs one Round across every Owned PR with Feedback, grouped by PR with its head and base branch", async () => {
+    const { lasso, ticket } = await lassoWithTicket();
+    const seven: Scene = { ...green, tag: "seven", headRef: ticket.branch, baseRef: "main" };
+    await setScene(lasso, ticket.branch, seven);
+    expect((await checkNow(lasso)).changes).toEqual([{ ticket: ticket.id, summary: "PR #7 found" }]);
+
+    const asked7: Scene = { ...seven, tag: "asked7", comments: [{ id: 201, author: "bob", body: "Rename this.", at: T1 }] };
+    const asked8: Scene = { ...eight, tag: "asked8", baseRef: ticket.branch, threads: [{ id: "RT_8", resolved: false, path: "src/b.ts", line: 4, comments: [{ id: 801, author: "alice", body: "Use a Set.", at: T1 }] }] };
+    await setScenes(lasso, [[ticket.branch, asked7], ["feat-b", asked8]]);
+    await lasso.runner.script({ stdout: claudeFixture("success.json") });
+    await link(lasso, ticket.id, PR8);
+    const [call] = await launched(lasso, 1);
+    expect(call!.argv[2]).toContain([
+      "Feedback on 2 PRs, Round 1: 2 items.",
+      "",
+      `PR #7 (${PR_URL}), head branch ${ticket.branch}, base branch main:`,
+      `1. [comment 201] comment by bob ${PR_URL}#issuecomment-201`,
+      "   > Rename this.",
+      "",
+      `PR #8 (${PR8}), head branch feat-b, base branch ${ticket.branch}:`,
+      `2. [thread RT_8] thread on src/b.ts:4 by alice at src/b.ts:4 ${PR8}#discussion_r-801`,
+      "   > alice: Use a Set.",
+      "",
+      `Reply to each comment separately, and end every comment you post on the PR with this marker, on its own line: ${marker(ticket.id, 1)}`,
+    ].join("\n"));
+    expect(call!.env).toMatchObject({ LASSO_ROUND: "1", LASSO_MARKER: marker(ticket.id, 1) });
+
+    const d = await settled(lasso, ticket.id);
+    expect(d.session!.feedback.map((f) => [f.kind, f.id])).toEqual([["comment", "201"], ["thread", "RT_8"]]);
+    expect(d.flag).toMatchObject({ reason: "review.unaddressed", detail: "2 of 2 Feedback items unaddressed: comment by bob, thread on src/b.ts:4 by alice" });
+  });
+
+  it("counts Feedback already on a newly linked PR as new, however far another PR's watermark has moved", async () => {
+    const { lasso, ticket } = await lassoWithTicket();
+    const asked: Scene = { ...green, tag: "asked", comments: [{ id: 201, author: "bob", body: "Rename this.", at: T2 }] };
+    const replied: Scene = { ...asked, tag: "replied", comments: [...asked.comments!, { id: 202, author: "lasso-bot", body: `Renamed.\n${marker(ticket.id, 1)}`, at: T3 }] };
+    await setScene(lasso, ticket.branch, asked);
+    await lasso.runner.script({ stdout: claudeFixture("success.json"), commands: swapTo(lasso, await sceneFile(lasso, ticket.branch, "replied", replied)) });
+    await checkNow(lasso);
+    expect((await settled(lasso, ticket.id)).flag).toBeNull();
+
+    // PR #8's comment is older than anything PR #7's watermark has passed.
+    const old8: Scene = { ...eight, comments: [{ id: 801, author: "carol", body: "An old note.", at: T0 }] };
+    await setScenes(lasso, [[ticket.branch, replied], ["feat-b", old8]]);
+    await link(lasso, ticket.id, PR8);
+    const [, second] = await launched(lasso, 2);
+    expect(second!.argv[2]).toContain(`Feedback on PR #8 (${PR8}), Round 2: 1 item.\n\nPR #8 (${PR8}), head branch feat-b, base branch main:\n1. [comment 801] comment by carol`);
+    expect(second!.argv[2]).not.toContain("comment 201");
+  });
+
+  it("drops a merged PR from polling and keeps running Rounds on the rest until every one has merged", async () => {
+    const { lasso, ticket } = await lassoWithTicket();
+    const seven: Scene = { ...green, tag: "seven" };
+    await setScenes(lasso, [[ticket.branch, seven], ["feat-b", eight]]);
+    expect((await checkNow(lasso)).changes).toEqual([{ ticket: ticket.id, summary: "PR #7 found" }]);
+    await link(lasso, ticket.id, PR8);
+    expect((await detailOf(lasso, ticket.id)).display).toEqual({ state: "quiet", label: "Quiet", why: "PR #7: checks green, nothing outstanding · PR #8: checks green, nothing outstanding" });
+
+    const merged7: Scene = { ...seven, state: "MERGED" };
+    const asked8: Scene = { ...eight, tag: "asked8", comments: [{ id: 801, author: "bob", body: "Rename this.", at: T1 }] };
+    const replied8: Scene = { ...asked8, tag: "replied8", comments: [...asked8.comments!, { id: 802, author: "lasso-bot", body: `Renamed.\n${marker(ticket.id, 1)}`, at: T2 }] };
+    await setScenes(lasso, [[ticket.branch, merged7], ["feat-b", asked8]]);
+    await lasso.runner.script({ stdout: claudeFixture("success.json"), commands: swapTo(lasso, await scenesFile(lasso, "replied8", [[ticket.branch, merged7], ["feat-b", replied8]])) });
+    expect((await checkNow(lasso)).changes.map((c) => c.summary)).toEqual(["PR #7 merged", "PR #8: 1 new Feedback item: comment by bob", "started review Round 1"]);
+    const after = await settled(lasso, ticket.id);
+    expect(after.state).toBe("active");
+    expect(after.flag).toBeNull();
+    expect(after.display).toEqual({ state: "quiet", label: "Quiet", why: "PR #8: checks green, nothing outstanding" });
+
+    // PR #7 is read no more.
+    await lasso.tracker.clearCalls();
+    expect((await checkNow(lasso)).changes).toEqual([]);
+    expect((await lasso.tracker.calls()).some((c) => c.args.includes("n=7"))).toBe(false);
+
+    await setScenes(lasso, [[ticket.branch, merged7], ["feat-b", { ...replied8, state: "MERGED" }]]);
+    expect((await checkNow(lasso)).changes).toEqual([{ ticket: ticket.id, summary: "PR #8 merged; review finished" }]);
+    expect((await detailOf(lasso, ticket.id)).state).toBe("done");
+  });
+
+  it("Flags review.pr_closed naming the Owned PR that closed without merging", async () => {
+    const { lasso, ticket } = await lassoWithTicket();
+    await setScenes(lasso, [[ticket.branch, green], ["feat-b", { ...eight, state: "CLOSED" }]]);
+    await checkNow(lasso);
+    await link(lasso, ticket.id, PR8);
+    expect((await detailOf(lasso, ticket.id)).flag).toMatchObject({ reason: "review.pr_closed", detail: "PR #8 closed without merging" });
+    expect(await lasso.runner.calls()).toEqual([]);
+  });
+
+  it("judges a repeated failing check on each PR's own Rounds", async () => {
+    const { lasso, ticket } = await lassoWithTicket();
+    const failing: Scene = { tag: "failing", head: "aaaaaaa1", checks: [{ id: 900, name: "test", status: "completed", conclusion: "failure", at: T1 }] };
+    const fixed: Scene = { tag: "fixed", head: "bbbbbbb2", checks: [{ id: 901, name: "test", status: "completed", conclusion: "success", at: T2 }] };
+    await setScene(lasso, ticket.branch, failing);
+    await lasso.runner.script({ stdout: claudeFixture("success.json"), commands: swapTo(lasso, await sceneFile(lasso, ticket.branch, "fixed", fixed)) });
+    await checkNow(lasso);
+    expect((await settled(lasso, ticket.id)).flag).toBeNull();
+
+    // PR #8's check named test fails for the first time on PR #8: Round 1's failure on PR #7 is not its history.
+    const failing8: Scene = { ...eight, tag: "failing8", checks: [{ id: 950, name: "test", status: "completed", conclusion: "failure", at: T2 }] };
+    const pushed8: Scene = { ...eight, tag: "pushed8", head: "ddddddd4", checks: [{ id: 951, name: "test", status: "completed", conclusion: "failure", at: T3 }] };
+    await setScenes(lasso, [[ticket.branch, fixed], ["feat-b", failing8]]);
+    await lasso.runner.script({ stdout: claudeFixture("success.json"), commands: swapTo(lasso, await scenesFile(lasso, "pushed8", [[ticket.branch, fixed], ["feat-b", pushed8]])) });
+    await link(lasso, ticket.id, PR8);
+    const second = await settled(lasso, ticket.id, 2);
+    expect(second.session).toMatchObject({ round: 2 });
+    expect(second.flag).toBeNull();
+
+    // Failing again on PR #8 after PR #8's Round does Flag.
+    expect((await checkNow(lasso)).changes).toEqual([{ ticket: ticket.id, summary: "Flagged: check test failed again on PR #8 after Round 2" }]);
+    expect((await detailOf(lasso, ticket.id)).flag).toMatchObject({ reason: "review.check_repeat" });
+  });
+
+  it("records a PR linked after Review has ended, and never polls it", async () => {
+    const { lasso, ticket } = await lassoWithTicket();
+    const merged7: Scene = { ...green, state: "MERGED" };
+    await setScene(lasso, ticket.branch, merged7);
+    expect((await checkNow(lasso)).changes.map((c) => c.summary)).toEqual(["PR #7 found", "PR #7 merged; review finished"]);
+
+    await setScenes(lasso, [[ticket.branch, merged7], ["feat-b", { ...eight, comments: [{ id: 801, author: "carol", body: "One more thing.", at: T1 }] }]]);
+    await lasso.api(`/api/tickets/${ticket.id}/prs`, { method: "POST", body: JSON.stringify({ pr: PR8 }) });
+    await lasso.tracker.clearCalls();
+    expect((await checkNow(lasso)).changes).toEqual([]);
+    expect((await lasso.tracker.calls()).some((c) => c.args.includes("n=8"))).toBe(false);
+    const d = await detailOf(lasso, ticket.id);
+    expect(d.state).toBe("done");
+    expect(d.prs.map((p) => [p.role, p.url])).toEqual([["owned", PR_URL], ["owned", PR8]]);
+    expect(await lasso.runner.calls()).toEqual([]);
   });
 });
 

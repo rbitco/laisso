@@ -43,17 +43,25 @@ function storeAt(file: string, schema: number): void {
   db.close();
 }
 
-/** A store one migration behind: the last migration (PR links) undone, so each Ticket holds its one PR again. */
+/** A store one migration behind: the last migration (each Feedback item's PR) undone. */
 function storeOneBehind(file: string): DatabaseSync {
   new Store(file).close();
   const db = new DatabaseSync(file);
   db.exec("PRAGMA journal_mode = WAL");
+  db.exec(`ALTER TABLE feedback_item DROP COLUMN pr;`);
+  db.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run(String(SCHEMA_VERSION - 1));
+  return db;
+}
+
+/** A store from before PR links: the last two migrations undone, so each Ticket holds its one PR again. */
+function storeBeforeLinks(file: string): DatabaseSync {
+  const db = storeOneBehind(file);
   db.exec(`DROP TABLE ticket_prs;
            ALTER TABLE tickets ADD COLUMN pr TEXT;
            ALTER TABLE tickets ADD COLUMN feedback_watermark TEXT;
            ALTER TABLE tickets ADD COLUMN feedback_due TEXT;
            ALTER TABLE tickets ADD COLUMN pr_status TEXT;`);
-  db.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run(String(SCHEMA_VERSION - 1));
+  db.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run(String(SCHEMA_VERSION - 2));
   return db;
 }
 
@@ -108,8 +116,8 @@ describe("the store backup before migrating", () => {
     const db = new DatabaseSync(copy);
     try {
       expect(db.prepare(`SELECT pipeline FROM pipeline_versions`).all()).toEqual([{ pipeline: "work" }]);
-      const columns = (db.prepare(`PRAGMA table_info(tickets)`).all() as Array<{ name: string }>).map((c) => c.name);
-      expect(columns).toContain("pr");
+      const columns = (db.prepare(`PRAGMA table_info(feedback_item)`).all() as Array<{ name: string }>).map((c) => c.name);
+      expect(columns).not.toContain("pr");
     } finally {
       db.close();
     }
@@ -119,7 +127,7 @@ describe("the store backup before migrating", () => {
   it("moves each Ticket's PR into an Owned link from its branch, with its status, watermark and pending Round, and drops the old columns", async () => {
     const dir = await tempDir();
     const file = path.join(dir, "lasso.db");
-    const old = storeOneBehind(file);
+    const old = storeBeforeLinks(file);
     const status = JSON.stringify({ number: 7, url: PR, state: "OPEN", checks: "green", fresh: 1, outstanding: 1, at: "2026-10-13T10:00:00Z" });
     const due = JSON.stringify({ pr: { number: 7, url: PR }, headSha: "aaaaaaa1", items: [], watermark: "2026-10-13T10:00:00Z" });
     const insert = old.prepare(`INSERT INTO tickets (id, repo, origin, title, pipeline, stage, state, branch, worktree, pr, pr_status, feedback_watermark, feedback_due, created_at, updated_at)
@@ -136,6 +144,23 @@ describe("the store backup before migrating", () => {
       expect(links.links("02T")).toEqual([]);
       const columns = (store.db.prepare(`PRAGMA table_info(tickets)`).all() as Array<{ name: string }>).map((c) => c.name);
       expect(columns.filter((c) => ["pr", "pr_status", "feedback_watermark", "feedback_due"].includes(c))).toEqual([]);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("names the PR each Feedback item was on: its Ticket's one PR", async () => {
+    const dir = await tempDir();
+    const file = path.join(dir, "lasso.db");
+    const old = storeBeforeLinks(file);
+    old.exec(`INSERT INTO tickets (id, repo, origin, title, pipeline, stage, state, branch, worktree, pr, created_at, updated_at)
+              VALUES ('01T', 'r', 'prompt', 't', 'work', 'review', 'active', 'b', 'w', '${PR}', '2026-10-13', '2026-10-13');
+              INSERT INTO sessions (id, ticket, stage, ordinal, stage_snapshot, mode, started_by, started_at) VALUES ('s1', '01T', 'review', 1, '{}', 'headless', 'auto', '2026-10-13');
+              INSERT INTO feedback_item (session, kind, source_id, summary, at) VALUES ('s1', 'comment', '201', 'comment by bob', '2026-10-13');`);
+    old.close();
+    const store = new Store(file);
+    try {
+      expect(store.db.prepare(`SELECT pr FROM feedback_item`).all()).toEqual([{ pr: PR }]);
     } finally {
       store.close();
     }

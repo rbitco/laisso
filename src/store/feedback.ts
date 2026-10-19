@@ -16,6 +16,8 @@ export interface FeedbackRow {
   head: string | null;
   body: string | null;
   log: string | null;
+  /** The URL of the PR the item is on. */
+  pr: string | null;
   /** How Lasso saw it addressed after the Round, or null while it stands. */
   addressed: string | null;
 }
@@ -33,9 +35,9 @@ export class Feedback {
   /** The snapshot a Round starts with: one row per item, in the order the prompt lists them. */
   insert(session: string, items: FeedbackItem[]): FeedbackRow[] {
     const stmt = this.db.prepare(
-      `INSERT INTO feedback_item (session, kind, source_id, name, url, summary, path, line, at, head, body, log) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO feedback_item (session, kind, source_id, name, url, summary, path, line, at, head, body, log, pr) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
-    for (const item of items) stmt.run(session, item.kind, item.id, item.name, item.url, item.summary, item.path, item.line, item.at, item.head, item.body, item.log);
+    for (const item of items) stmt.run(session, item.kind, item.id, item.name, item.url, item.summary, item.path, item.line, item.at, item.head, item.body, item.log, item.pr);
     this.announce(`SELECT ticket FROM sessions WHERE id = ?`, session);
     return this.forSession(session);
   }
@@ -66,5 +68,5 @@ export class Feedback {
 
 /** A stored row back as the item a retry re-runs. */
 export function itemOf(row: FeedbackRow): FeedbackItem {
-  return { kind: row.kind, id: row.source_id, name: row.name, url: row.url, summary: row.summary, path: row.path, line: row.line, at: row.at, head: row.head, body: row.body, log: row.log };
+  return { kind: row.kind, id: row.source_id, name: row.name, url: row.url, summary: row.summary, path: row.path, line: row.line, at: row.at, head: row.head, body: row.body, log: row.log, pr: row.pr };
 }

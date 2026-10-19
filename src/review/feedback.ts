@@ -25,6 +25,8 @@ export interface FeedbackItem {
   body: string | null;
   /** The failed step's log, sliced, for a check. */
   log: string | null;
+  /** The URL of the PR the item is on; null on an item recorded before a Ticket could have several PRs. */
+  pr: string | null;
 }
 
 export interface PrComment {
@@ -136,7 +138,7 @@ export function outstanding(facts: PrFacts, own: OwnMark): FeedbackItem[] {
   const items: FeedbackItem[] = [];
   for (const check of facts.checks) {
     if (!checkFailed(check)) continue;
-    items.push({ kind: "check", id: check.id, name: check.name, url: check.url, summary: `check ${check.name} failed`, path: null, line: null, at: check.at, head: facts.headSha, body: null, log: null });
+    items.push({ kind: "check", id: check.id, name: check.name, url: check.url, summary: `check ${check.name} failed`, path: null, line: null, at: check.at, head: facts.headSha, body: null, log: null, pr: facts.url });
   }
   for (const thread of facts.threads) {
     if (thread.isResolved) continue;
@@ -145,16 +147,16 @@ export function outstanding(facts: PrFacts, own: OwnMark): FeedbackItem[] {
     const first = asked[0]!;
     const last = asked[asked.length - 1]!;
     const where = thread.path ? `${thread.path}${thread.line !== null ? `:${thread.line}` : ""}` : "the diff";
-    items.push({ kind: "thread", id: thread.id, name: null, url: last.url ?? first.url, summary: `thread on ${where} by ${first.author}`, path: thread.path, line: thread.line, at: last.updatedAt, head: null, body: asked.map((c) => `${c.author}: ${c.body.trim()}`).join("\n\n"), log: null });
+    items.push({ kind: "thread", id: thread.id, name: null, url: last.url ?? first.url, summary: `thread on ${where} by ${first.author}`, path: thread.path, line: thread.line, at: last.updatedAt, head: null, body: asked.map((c) => `${c.author}: ${c.body.trim()}`).join("\n\n"), log: null, pr: facts.url });
   }
   const replies = repliesTo(facts.comments, own);
   for (const comment of facts.comments) {
     if (own(comment.body) || replies.has(comment.id)) continue;
-    items.push({ kind: "comment", id: comment.id, name: null, url: comment.url, summary: `comment by ${comment.author}`, path: null, line: null, at: comment.updatedAt, head: null, body: comment.body.trim(), log: null });
+    items.push({ kind: "comment", id: comment.id, name: null, url: comment.url, summary: `comment by ${comment.author}`, path: null, line: null, at: comment.updatedAt, head: null, body: comment.body.trim(), log: null, pr: facts.url });
   }
   if (facts.reviewDecision === "CHANGES_REQUESTED") {
     const review = [...facts.reviews].reverse().find((r) => r.state === "CHANGES_REQUESTED");
-    if (review) items.push({ kind: "verdict", id: review.id, name: null, url: review.url, summary: `changes requested by ${review.author}`, path: null, line: null, at: review.submittedAt, head: null, body: review.body.trim() || null, log: null });
+    if (review) items.push({ kind: "verdict", id: review.id, name: null, url: review.url, summary: `changes requested by ${review.author}`, path: null, line: null, at: review.submittedAt, head: null, body: review.body.trim() || null, log: null, pr: facts.url });
   }
   return items;
 }
@@ -259,15 +261,32 @@ export function logSlice(text: string, maxLines = 80): string {
   return lines.slice(Math.max(start, end - maxLines), end).join("\n").trim();
 }
 
-/** The Feedback section of a Round's prompt: every item with its id, kind, place and text, and the marker to post. */
-export function renderFeedback(items: FeedbackItem[], pr: { number: number; url: string }, round: number, mark: string): string {
-  const lines = [`Feedback on PR #${pr.number} (${pr.url}), Round ${round}: ${items.length} item${items.length === 1 ? "" : "s"}.`, ""];
-  items.forEach((item, i) => {
-    const where = item.path ? ` at ${item.path}${item.line !== null ? `:${item.line}` : ""}` : "";
-    lines.push(`${i + 1}. [${item.kind} ${item.id}] ${item.summary}${where}${item.url ? ` ${item.url}` : ""}`);
-    if (item.body) lines.push(...item.body.split("\n").map((l) => `   > ${l}`));
-    if (item.log) lines.push("   log:", ...item.log.split("\n").map((l) => `   | ${l}`));
-  });
+/** One PR's part of a Round: the PR, with the branches the Runner switches to and rebases onto, and its items. */
+export interface PrFeedback {
+  pr: { number: number; url: string; head: string | null; base: string | null };
+  items: FeedbackItem[];
+}
+
+/**
+ * The Feedback section of a Round's prompt: a heading per PR with its head and
+ * base branch, then every item with its id, kind, place and text, numbered
+ * across PRs, and the marker to post.
+ */
+export function renderFeedback(prs: PrFeedback[], round: number, mark: string): string {
+  const count = prs.reduce((n, p) => n + p.items.length, 0);
+  const total = `${count} item${count === 1 ? "" : "s"}`;
+  const lines = [prs.length === 1 ? `Feedback on PR #${prs[0]!.pr.number} (${prs[0]!.pr.url}), Round ${round}: ${total}.` : `Feedback on ${prs.length} PRs, Round ${round}: ${total}.`];
+  let n = 0;
+  for (const { pr, items } of prs) {
+    const branches = [pr.head ? `head branch ${pr.head}` : null, pr.base ? `base branch ${pr.base}` : null].filter(Boolean).join(", ");
+    lines.push("", `PR #${pr.number} (${pr.url})${branches ? `, ${branches}` : ""}:`);
+    for (const item of items) {
+      const where = item.path ? ` at ${item.path}${item.line !== null ? `:${item.line}` : ""}` : "";
+      lines.push(`${++n}. [${item.kind} ${item.id}] ${item.summary}${where}${item.url ? ` ${item.url}` : ""}`);
+      if (item.body) lines.push(...item.body.split("\n").map((l) => `   > ${l}`));
+      if (item.log) lines.push("   log:", ...item.log.split("\n").map((l) => `   | ${l}`));
+    }
+  }
   lines.push("", `Reply to each comment separately, and end every comment you post on the PR with this marker, on its own line: ${mark}`);
   return lines.join("\n");
 }
