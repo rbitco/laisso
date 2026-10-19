@@ -172,6 +172,7 @@ _Avoid_: poll, refresh, sync, heartbeat
 
 **PR List**:
 A named list of pull requests found by one GitHub search, shown on the
-Pull Requests page. It shows PRs whether or not Lasso made them; a PR that
-is a Ticket's Owned PR links to that Ticket. A PR List only shows; it never acts.
+Pull Requests page. It shows PRs whether or not Lasso made them; a PR
+links to the Ticket that owns it and to any Tickets that reference it. A PR
+List only shows; it never acts.
 _Avoid_: column, widget, lane, section, saved search
