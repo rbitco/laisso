@@ -36,6 +36,7 @@ import { VersionCheck, npmLatest } from "./version-check.ts";
 import { ActionChecks } from "../artifact/action-check.ts";
 import { PrLists } from "../prs/lists.ts";
 import { githubRepos } from "../prs/origins.ts";
+import type { GitHubRepo } from "../prs/query.ts";
 import { ghSearch } from "../prs/search.ts";
 import { parseDuration } from "../duration.ts";
 
@@ -102,7 +103,16 @@ export async function serve(opts: ServeOptions): Promise<number> {
   versions.pinUnpinned(tickets, home.pipelinesDir);
   const sessions = new Sessions(store.db, ticketChanged);
   const feedback = new Feedback(store.db, ticketChanged);
-  const links = new PrLinks(store.db, ticketChanged);
+  // Each repo's GitHub owner/name, read from its checkout's origin. The read is async and PrLinks asks synchronously,
+  // so PrLinks sees what the last read found: every repo at startup, and the Ticket's repo again before each link.
+  const origins = new Map<string, GitHubRepo>();
+  const githubOf = async (repo: string): Promise<GitHubRepo | null> => {
+    const found = config.repos[repo] ? ((await githubRepos({ [repo]: config.repos[repo] }))[repo] ?? null) : null;
+    if (found) origins.set(repo, found);
+    else origins.delete(repo);
+    return found;
+  };
+  const links = new PrLinks(store.db, ticketChanged, (repo) => origins.get(repo) ?? null);
   const notifier = createNotifier({ config: config.notifications, log, baseUrl: `http://localhost:${config.port}` });
   const mirror = new Mirror({
     config,
@@ -179,7 +189,7 @@ export async function serve(opts: ServeOptions): Promise<number> {
     }
   };
   const versionCheck = new VersionCheck({ running: pkg.version, onDisk, latest: npmLatest, log, changed: () => changes.emit({ kind: "version" }) });
-  const app = createApp({ config, home, tick, tickets, versions, sessions, feedback, links, runs, progress, terminal, exits, overrides, budgets, queue, changes, prLists, dashboard, version: pkg.version, missingTools, versionNotice: () => versionCheck.current() });
+  const app = createApp({ config, home, tick, tickets, versions, sessions, feedback, links, prs, githubOf, runs, progress, terminal, exits, overrides, budgets, queue, changes, prLists, dashboard, version: pkg.version, missingTools, versionNotice: () => versionCheck.current() });
 
   if (defaults.wroteConfig) log.info("config.written", { file: home.configFile });
   if (defaults.wrotePipeline) log.info("pipeline.written", { name: "default" });
@@ -210,6 +220,8 @@ export async function serve(opts: ServeOptions): Promise<number> {
   const exited = new Promise<number>((resolve) => (resolveExit = resolve));
   let shuttingDown = false;
   const startup = (async () => {
+    // Origins are read alongside, not awaited: a slow git must not hold back the startup tick.
+    for (const repo of Object.keys(config.repos)) void githubOf(repo).catch(() => undefined);
     await runs.reconcile();
     if (shuttingDown) return;
     actions.reconcile();

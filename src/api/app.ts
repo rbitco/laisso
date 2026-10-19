@@ -5,11 +5,13 @@ import { ConfigError, patchConfigText, writeProfileText, deleteProfileText, repo
 import type { PrLists } from "../prs/lists.ts";
 import type { LassoHome } from "../server/home.ts";
 import type { Tick } from "../server/tick.ts";
-import { parseName, type Tickets, type TicketRow } from "../store/tickets.ts";
+import { parseName, ticketLabel, type Tickets, type TicketRow } from "../store/tickets.ts";
 import type { PipelineVersions } from "../store/versions.ts";
 import type { Sessions } from "../store/sessions.ts";
 import type { Feedback } from "../store/feedback.ts";
-import type { PrLinks } from "../store/links.ts";
+import type { PrLinks, PrRole } from "../store/links.ts";
+import { parsePrRef, parsePrUrl, PullRequestError, type PullRequests } from "../review/github.ts";
+import type { GitHubRepo } from "../prs/query.ts";
 import type { Runs } from "../session/runs.ts";
 import { RunError } from "../session/runs.ts";
 import { ArtifactWarning, TriggerError, type Progress } from "../session/progress.ts";
@@ -22,7 +24,7 @@ import { Intake, IntakeError, type IntakeRequest } from "../intake/intake.ts";
 import { PipelineError, type Pipeline } from "../pipeline/load.ts";
 import { PipelineFiles } from "../pipeline/files.ts";
 import type { Dashboard } from "../dashboard/page.ts";
-import { ticketView, ticketDetail, sessionView, sortForLedger, pipelineListing, pipelineFileView, pipelineVersionView, actionListings, type LiveVersionView, type ViewContext, type IntakeResult, type ConfigFile, type PrListsYaml, type Health, type MissingTool, type VersionView } from "./views.ts";
+import { ticketView, ticketDetail, sessionView, prView, sortForLedger, pipelineListing, pipelineFileView, pipelineVersionView, actionListings, type LiveVersionView, type ViewContext, type IntakeResult, type ConfigFile, type PrListsYaml, type Health, type MissingTool, type VersionView } from "./views.ts";
 import { readFileSync } from "node:fs";
 import { isPlainObject } from "../fields.ts";
 import { replaceFile } from "../atomic-write.ts";
@@ -37,6 +39,10 @@ export interface AppDeps {
   sessions: Sessions;
   feedback: Feedback;
   links: PrLinks;
+  /** gh, for the one lookup that confirms a PR before it is linked. */
+  prs: PullRequests;
+  /** The GitHub owner/name of a repo in config.yaml, read from its checkout's origin; null when it has none. */
+  githubOf: (repo: string) => Promise<GitHubRepo | null>;
   runs: Runs;
   progress: Progress;
   terminal: Terminal;
@@ -230,6 +236,54 @@ export function createApp(deps: AppDeps): Hono {
     const ticket = deps.tickets.find(c.req.param("id"));
     if (!ticket) return c.json({ error: `no Ticket matches ${c.req.param("id")}` }, 404);
     return c.json(ticketDetail(deps.overrides.clear(ticket, c.req.param("stage")), viewContext()));
+  });
+
+  // A Ticket's PR links (LASSO-164), what `lasso pr` drives. A PR is given as a URL, owner/repo#N, #N or N; the bare
+  // forms are in the Ticket's repo. A link or unlink on an active Ticket kicks a Tick so the PR is polled at once;
+  // on a done Ticket it is only recorded. A request carrying a Session id (x-lasso-session) links as the agent.
+  const prsRoute = "/api/tickets/:id/prs";
+  app.get(prsRoute, (c) => {
+    const ticket = deps.tickets.find(c.req.param("id"));
+    if (!ticket) return c.json({ error: `no Ticket matches ${c.req.param("id")}` }, 404);
+    return c.json(deps.links.links(ticket.id).map(prView));
+  });
+  app.post(prsRoute, async (c) => {
+    const ticket = deps.tickets.find(c.req.param("id"));
+    if (!ticket) return c.json({ error: `no Ticket matches ${c.req.param("id")}` }, 404);
+    const body = ((await c.req.json().catch(() => null)) ?? {}) as { pr?: unknown; role?: unknown };
+    const role: PrRole | null = body.role === undefined ? "owned" : body.role === "owned" || body.role === "referenced" ? body.role : null;
+    if (!role) return c.json({ error: "role must be owned or referenced" }, 400);
+    const ref = parsePrRef(typeof body.pr === "string" ? body.pr : "", await deps.githubOf(ticket.repo));
+    if ("problem" in ref) return c.json({ error: ref.problem }, 400);
+    let found;
+    try {
+      found = await deps.prs.lookup(ref);
+    } catch (error) {
+      if (error instanceof PullRequestError) return c.json({ error: error.message }, 400);
+      throw error;
+    }
+    const linked = deps.links.link(ticket, found.url, role, c.req.header("x-lasso-session") ? "agent" : "human");
+    if ("refused" in linked) return c.json({ error: linked.refused }, 409);
+    const link = deps.links.update(ticket.id, found.url, { title: found.title, state: found.state, head: found.head, base: found.base, author: found.author })!;
+    if (ticket.state === "active") deps.tick.kick("pr-link");
+    return c.json(prView(link));
+  });
+  app.delete(prsRoute, async (c) => {
+    const ticket = deps.tickets.find(c.req.param("id"));
+    if (!ticket) return c.json({ error: `no Ticket matches ${c.req.param("id")}` }, 404);
+    const body = ((await c.req.json().catch(() => null)) ?? {}) as { pr?: unknown };
+    const ref = parsePrRef(typeof body.pr === "string" ? body.pr : "", await deps.githubOf(ticket.repo));
+    if ("problem" in ref) return c.json({ error: ref.problem }, 400);
+    // Matched by repo and number, not the URL's spelling: what was linked is GitHub's URL, what is given may differ in case.
+    const same = (url: string) => {
+      const linked = parsePrUrl(url);
+      return linked !== null && linked.number === ref.number && `${linked.owner}/${linked.repo}`.toLowerCase() === `${ref.owner}/${ref.repo}`.toLowerCase();
+    };
+    const link = deps.links.links(ticket.id).find((l) => same(l.url));
+    if (!link) return c.json({ error: `${ref.owner}/${ref.repo}#${ref.number} is not linked to ${ticketLabel(ticket)}` }, 404);
+    deps.links.unlink(ticket.id, link.url);
+    if (ticket.state === "active") deps.tick.kick("pr-link");
+    return c.json(prView(link));
   });
 
   // A Session of a Ticket, or the 404 that says which is unknown.

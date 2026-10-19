@@ -1,6 +1,7 @@
 import { runTool, failureReason, type ToolResult } from "../tracker/exec.ts";
 import type { Logger } from "../server/log.ts";
 import type { PrFacts, PrComment, ReviewThread, PrReview, CheckRun, PrState } from "./feedback.ts";
+import type { GitHubRepo } from "../prs/query.ts";
 
 export class PullRequestError extends Error {}
 
@@ -23,6 +24,37 @@ const PR_URL = /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/;
 export function parsePrUrl(url: string): PrRef | null {
   const m = PR_URL.exec(url);
   return m ? { owner: m[1]!, repo: m[2]!, number: Number(m[3]), url } : null;
+}
+
+const PR_LINK = /^https?:\/\/(?:www\.)?github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/(\d+)(?:[/?#].*)?$/i;
+const PR_SHORT = /^(?:([\w.-]+)\/([\w.-]+))?#(\d+)$/;
+const PR_NUMBER = /^()()(\d+)$/;
+
+/**
+ * A PR as a human gives it: a full URL (a tab or anchor of the PR included),
+ * `owner/repo#N`, `#N` or `N`. The bare forms are in `home`, the Ticket's
+ * GitHub repo. The ref's url is the canonical https://github.com/owner/repo/pull/N.
+ */
+export function parsePrRef(input: string, home: GitHubRepo | null): PrRef | { problem: string } {
+  const text = input.trim();
+  const m = PR_LINK.exec(text) ?? PR_SHORT.exec(text) ?? PR_NUMBER.exec(text);
+  if (!m) return { problem: `${text || "nothing"} is not a PR: give its URL, owner/repo#N, #N or N` };
+  const [owner, repo] = m[1] ? [m[1], m[2]!] : home ? [home.owner, home.name] : [null, null];
+  if (!owner || !repo) return { problem: `${text} needs a repo: the Ticket's repo has no GitHub origin, so give owner/repo#N or the URL` };
+  const number = Number(m[3]);
+  return { owner, repo, number, url: `https://github.com/${owner}/${repo}/pull/${number}` };
+}
+
+/** What one lookup of a PR says: the facts a link keeps beside its URL. */
+export interface PrLookup {
+  /** The PR's URL as GitHub gives it, which is the one a link stores. */
+  url: string;
+  number: number;
+  title: string;
+  state: PrState;
+  head: string | null;
+  base: string | null;
+  author: string | null;
 }
 
 const QUERY = `query($owner:String!,$name:String!,$n:Int!,$after:String){
@@ -72,6 +104,23 @@ export class PullRequests {
     }
     const parsed = json<{ url?: unknown; state?: unknown }>(r, "gh pr view");
     return parsed.state === "OPEN" && typeof parsed.url === "string" ? parsePrUrl(parsed.url) : null;
+  }
+
+  /** One read of a PR: that it exists, its URL as GitHub has it, and the facts a link keeps. Throws with gh's reason when it can't be read. */
+  async lookup(ref: PrRef): Promise<PrLookup> {
+    const r = await runTool("gh", ["pr", "view", ref.url, "--json", "number,url,title,state,headRefName,baseRefName,author"]);
+    if (r.code !== 0) throw new PullRequestError(`${ref.owner}/${ref.repo}#${ref.number}: ${failureReason("gh", r)}`);
+    const pr = json<Record<string, unknown>>(r, "gh pr view");
+    const login = (pr.author as { login?: unknown } | null)?.login;
+    return {
+      url: str(pr.url, ref.url),
+      number: typeof pr.number === "number" ? pr.number : ref.number,
+      title: str(pr.title, ""),
+      state: str(pr.state, "OPEN") as PrState,
+      head: typeof pr.headRefName === "string" ? pr.headRefName : null,
+      base: typeof pr.baseRefName === "string" ? pr.baseRefName : null,
+      author: typeof login === "string" ? login : null,
+    };
   }
 
   /** Close the PR with a comment (Abandon, ADR 0007). */

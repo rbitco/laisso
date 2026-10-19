@@ -3,6 +3,7 @@ import { serve } from "../server/serve.ts";
 import { status } from "./status.ts";
 import { add } from "./add.ts";
 import { check } from "./check.ts";
+import { pr as prCommand } from "./pr.ts";
 import { doctor } from "./doctor.ts";
 import { skill } from "./skill.ts";
 
@@ -13,6 +14,9 @@ const USAGE = `usage:
   lasso add <ref | prompt>  intake a tracker reference or a prompt as a Ticket
   lasso status [ticket]     print the Ledger, or one Ticket's detail
   lasso check [ticket]      run a tick now and print what changed
+  lasso pr link <pr> [ticket]    link a PR to a Ticket (URL, owner/repo#N, #N or N)
+  lasso pr unlink <pr> [ticket]  unlink a PR; the Tick won't link it again
+  lasso pr list [ticket]         list a Ticket's PRs; the Ticket defaults to $LASSO_TICKET
   lasso doctor              list the tools Lasso needs, whether each is found and logged in
   lasso skill install       copy the Lasso skill to where Claude Code and Codex look for skills
 options:
@@ -22,6 +26,7 @@ options:
   --yes            add: accept the suggestions without asking
   --repo <name>    add: the repo to intake into
   --pipeline <n>   add: the Pipeline to run
+  --referenced     pr link: link for context only, not as the Ticket's own work
   --dry-run        skill install: print what would be written, write nothing`;
 
 export async function main(argv: string[]): Promise<number> {
@@ -36,6 +41,7 @@ export async function main(argv: string[]): Promise<number> {
       yes: { type: "boolean", short: "y", default: false },
       repo: { type: "string" },
       pipeline: { type: "string" },
+      referenced: { type: "boolean", default: false },
       "dry-run": { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
     },
@@ -66,6 +72,12 @@ export async function main(argv: string[]): Promise<number> {
       return status({ portFlag, json: Boolean(values.json), all: Boolean(values.all), ticket: rest[0] });
     case "check":
       return check({ portFlag, json: Boolean(values.json), ticket: rest[0] });
+    case "pr": {
+      // list takes only the Ticket; link and unlink take the PR first.
+      const [action, ...args] = rest;
+      const [pr, ticket] = action === "list" ? [undefined, args[0]] : args;
+      return prCommand({ portFlag, action, pr, ticket, referenced: Boolean(values.referenced), json: Boolean(values.json) });
+    }
     case "doctor":
       return doctor({ json: Boolean(values.json) });
     case "skill":

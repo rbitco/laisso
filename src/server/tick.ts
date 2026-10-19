@@ -17,8 +17,8 @@ export interface TickStatus {
   running: boolean;
 }
 
-/** What started a tick; the log records it. A Session ending kicks one so the next Stage starts at once. */
-export type Trigger = "timer" | "check-now" | "startup" | "start" | "session-end";
+/** What started a tick; the log records it. A Session ending kicks one so the next Stage starts at once, and so does linking or unlinking a PR. */
+export type Trigger = "timer" | "check-now" | "startup" | "start" | "session-end" | "pr-link";
 
 /**
  * The global tick: the one clock Lasso runs on. Every poll of a PR, every
