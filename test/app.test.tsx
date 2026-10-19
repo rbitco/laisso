@@ -68,7 +68,7 @@ const REVIEWERS: Reviewer[] = [
 /** Two PR Lists: Mine cut short at its limit of one, Review requested whole. */
 const PR_LISTS: PrListsView = {
   lists: [
-    { name: "Mine", query: "is:open author:@me", search: "is:pr is:open author:@me repo:rbitco/lasso sort:updated-desc", url: "https://github.com/pulls?q=mine", limit: 1, total: 4, fetchedAt: ago(30), fetching: false, error: null, hidden: false, rows: [{ title: "Tick grace when the laptop sleeps", repo: "rbitco/lasso", number: 101, url: "https://github.com/rbitco/lasso/pull/101", author: "matt", updatedAt: ago(45 * 60), verdict: { word: "Checks failing", reason: "a required check failed", tone: "crit" }, checks: { passed: 7, failing: 2 }, reviewers: REVIEWERS, ticket: null }] },
+    { name: "Mine", query: "is:open author:@me", search: "is:pr is:open author:@me repo:rbitco/lasso sort:updated-desc", url: "https://github.com/pulls?q=mine", limit: 1, total: 4, fetchedAt: ago(30), fetching: false, error: null, hidden: false, rows: [{ title: "Tick grace when the laptop sleeps", repo: "rbitco/lasso", number: 101, url: "https://github.com/rbitco/lasso/pull/101", author: "matt", updatedAt: ago(45 * 60), verdict: { word: "Checks failing", reason: "a required check failed", tone: "crit" }, checks: { passed: 7, failing: 2 }, reviewers: REVIEWERS, ticket: null, refs: [] }] },
     { name: "Review requested", query: "is:open review-requested:@me", search: "is:pr is:open review-requested:@me repo:rbitco/lasso sort:updated-desc", url: "https://github.com/pulls?q=review", limit: 25, total: 0, fetchedAt: ago(30), fetching: false, error: null, hidden: false, rows: [] },
   ],
   layout: "stacked",
@@ -728,6 +728,30 @@ describe("the Pull Requests page", () => {
     expect([pr.getAttribute("href"), pr.getAttribute("target")]).toEqual(["https://github.com/rbitco/lasso/pull/102", "_blank"]);
     await userEvent.setup().click(open(withTicket!));
     expect(location.hash).toBe("#A");
+  });
+
+  it("follows a PR's Ticket with a ref: chip for each Ticket that references it, each linking to its Ticket", async () => {
+    const lasso = fakeLasso();
+    const [mine] = PR_LISTS.lists;
+    const plain = mine!.rows[0]!;
+    const refs = [{ id: "B", ref: "APP-B", stage: "implement", flag: null }, { id: "C", ref: "APP-C", stage: "done", flag: null }];
+    const owned = { ...plain, number: 102, url: "https://github.com/rbitco/lasso/pull/102", ticket: { id: "A", ref: "APP-A", stage: "review", flag: null }, refs };
+    const onlyRefs = { ...plain, refs: refs.slice(0, 1) };
+    lasso.state.prLists = { lists: [{ ...mine!, total: 2, rows: [owned, onlyRefs] }], layout: "stacked", pausedUntil: null, ghProblem: null, example: null };
+    location.hash = "#prs";
+    await new Promise((r) => setTimeout(r, 10));
+    render(<App />);
+    await screen.findByText("2 of 2");
+    const cells = [...document.querySelectorAll<HTMLElement>('[data-role="pr-ticket"]')];
+    const chips = (cell: HTMLElement) => [...cell.querySelectorAll<HTMLAnchorElement>('[data-role="pr-ref"]')].map((a) => [a.textContent, a.getAttribute("href")]);
+    expect(cells[0]!.querySelector(".owner b")!.textContent).toBe("APP-A");
+    expect(chips(cells[0]!)).toEqual([["ref: APP-B implement", "#B"], ["ref: APP-C done", "#C"]]);
+    // Only references: no owner chip, and the row's title still opens the PR on GitHub.
+    expect(cells[1]!.querySelector(".owner")).toBeNull();
+    expect(chips(cells[1]!)).toEqual([["ref: APP-B implement", "#B"]]);
+    expect(document.querySelectorAll<HTMLAnchorElement>('[data-role="pr-open"]')[1]!.getAttribute("target")).toBe("_blank");
+    await userEvent.setup().click(cells[1]!.querySelector<HTMLAnchorElement>('[data-role="pr-ref"]')!);
+    expect(location.hash).toBe("#B");
   });
 
   /** Renders the Pull Requests page over `view` and waits for its first read. */

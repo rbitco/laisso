@@ -156,7 +156,11 @@ export async function serve(opts: ServeOptions): Promise<number> {
   const prLists = new PrLists({
     lists: () => Object.entries(config.pr_lists).map(([name, list]) => ({ name, ...list })),
     repos: () => githubRepos(config.repos),
-    tickets: () => tickets.list({ all: true }).map((t) => ({ ...t, owned: links.links(t.id).flatMap((l) => (l.role === "owned" ? [l.url] : [])) })),
+    tickets: () =>
+      tickets.list({ all: true }).map((t) => {
+        const live = links.links(t.id);
+        return { ...t, owned: live.flatMap((l) => (l.role === "owned" ? [l.url] : [])), referenced: live.flatMap((l) => (l.role === "referenced" ? [l.url] : [])) };
+      }),
     search: ghSearch(),
     tickMs: () => config.tick * 1000,
     refreshMs: () => parseDuration(config.pr_list_refresh),

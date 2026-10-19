@@ -674,6 +674,13 @@ button.quiet { background: transparent; }
 /* The Ticket cell shares its class with the Tickets page's card, so it sheds that card's box and grid. */
 .pr-row .ticket { display: flex; align-items: baseline; gap: 6px; justify-self: end; min-width: 0; padding: 0; border: 0; border-radius: 0; background: none; cursor: inherit; grid-template-columns: none; grid-template-areas: none; }
 .pr-row .ticket b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--accent); font-size: 13px; font-weight: 600; }
+.pr-row .ticket { flex-wrap: wrap; justify-content: flex-end; }
+.pr-row .ticket .owner { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+/* A Ticket that references the PR: a smaller, muted chip that opens it, above the title's link. */
+.pr-row .ticket a.ref { position: relative; z-index: 1; display: flex; align-items: baseline; gap: 4px; min-width: 0; color: var(--muted); font-size: 11.5px; text-decoration: none; }
+.pr-row .ticket a.ref b { color: var(--muted); font-size: 11.5px; font-weight: 500; }
+.pr-row .ticket a.ref .sub { font-size: 11px; }
+.pr-row .ticket a.ref:hover b, .pr-row .ticket a.ref:focus-visible b { color: var(--accent); }
 .pr-verdict { justify-self: start; padding: 3px 10px; border-radius: 999px; font-size: 12.5px; white-space: nowrap; }
 .pr-verdict.crit { background: var(--crit-bg); color: var(--crit); }
 .pr-verdict.amber { background: var(--amber-bg); color: var(--amber); }
@@ -725,6 +732,7 @@ button.quiet { background: transparent; }
   .pr-row { grid-template-columns: 136px minmax(0, 1fr) 140px 132px auto 140px; grid-template-areas: "pill main rv ck where ticket"; gap: 4px 16px; padding: 12px 16px; }
   .pr-row .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .pr-row .ticket { display: grid; gap: 2px; justify-self: stretch; }
+  .pr-row .ticket .owner { display: grid; gap: 2px; }
   .pr-row .rv-av { width: 32px; height: 32px; }
   .pr-row.placeholder { min-height: 60px; }
 }

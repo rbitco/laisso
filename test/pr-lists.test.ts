@@ -470,6 +470,7 @@ describe("a PR row", () => {
       checks: {},
       reviewers: [],
       ticket: null,
+      refs: [],
     });
     expect(prRow({})).toBeNull();
     expect(prRow(pr({ author: null }))!.author).toBe("ghost");
@@ -644,7 +645,7 @@ describe("a PR row's Ticket", () => {
     ...fields,
   });
   type Row = Parameters<typeof ticketForPr>[0];
-  const row = (fields: Partial<Row> = {}): Row => ({ id: ID, name: null, reference: "LASSO-7", stage: "review", state: "active", flagged_at: null, flag_reason: null, owned: [], branch: "lasso-7-pr-page", ...fields });
+  const row = (fields: Partial<Row> = {}): Row => ({ id: ID, name: null, reference: "LASSO-7", stage: "review", state: "active", flagged_at: null, flag_reason: null, owned: [], referenced: [], branch: "lasso-7-pr-page", ...fields });
   const one = (fields: Partial<Row> = {}, github: GitHubRepo | null = LASSO) => ticketForPr(row(fields), github)!;
   const ticketOf = (pr: PrNode, ...tickets: TicketForPr[]) => prRow(pr, ticketMatcher(tickets))!.ticket;
 
@@ -683,6 +684,53 @@ describe("a PR row's Ticket", () => {
     expect(flagged.verdict).toEqual({ word: "Checks running", reason: "waiting on CI · Flagged: review.unaddressed", tone: "run" });
     // A Flag that has been cleared leaves its reason behind, which is not shown.
     expect(prRow(node(), ticketMatcher([one({ flag_reason: "review.unaddressed" })]))!.verdict.reason).toBe("waiting on CI");
+  });
+
+  describe("ref: chips", () => {
+    const PR = "https://github.com/rbitco/lasso/pull/7";
+    const rowOf = (...tickets: TicketForPr[]) => prRow(node(), ticketMatcher(tickets))!;
+
+    it("follows the owner's chip with one for each Ticket that references the PR", () => {
+      const owner = one({ id: "OWNER", reference: "LASSO-7", owned: [PR] });
+      const first = one({ id: "REF1", reference: "LASSO-8", branch: "other", stage: "implement", referenced: ["https://GitHub.com/rbitco/Lasso/pull/7/"] });
+      const second = one({ id: "REF2", reference: "LASSO-9", branch: "another", state: "done", referenced: [PR] });
+      const row = rowOf(first, owner, second);
+      expect(row.ticket).toEqual({ id: "OWNER", ref: "LASSO-7", stage: "review", flag: null });
+      expect(row.refs).toEqual([
+        { id: "REF1", ref: "LASSO-8", stage: "implement", flag: null },
+        { id: "REF2", ref: "LASSO-9", stage: "done", flag: null },
+      ]);
+    });
+
+    it("never shows an Abandoned Ticket that references the PR", () => {
+      expect(ticketForPr(row({ id: "GONE", branch: "other", state: "abandoned", referenced: [PR] }), LASSO)).toBeNull();
+      expect(rowOf(one({ owned: [PR] })).refs).toEqual([]);
+    });
+
+    it("shows only ref: chips on a PR with no owner", () => {
+      const row = rowOf(one({ id: "REF1", reference: "LASSO-8", branch: "other", referenced: [PR] }), one({ id: "ELSE", branch: "other", referenced: ["https://github.com/rbitco/lasso/pull/8"] }));
+      expect(row.ticket).toBeNull();
+      expect(row.refs.map((r) => r.id)).toEqual(["REF1"]);
+    });
+
+    it("are read from the Tickets' Referenced links at each read of the cache", async () => {
+      const cache = new PrLists({
+        lists: () => [{ name: "Mine", query: "is:open", limit: 25 }],
+        repos: async () => ({ lasso: LASSO }),
+        tickets: () => [
+          { ...row({ id: "REF", reference: "LASSO-8", branch: "other", referenced: [PR] }), repo: "lasso" } as TicketRow & TicketWithOwned,
+          { ...row({ id: "GONE", reference: "LASSO-9", branch: "other", state: "abandoned", referenced: [PR] }), repo: "lasso" } as TicketRow & TicketWithOwned,
+        ],
+        search: async () => ({ ok: true, total: 1, nodes: [node()], rateLimit: null }),
+        tickMs: () => 60_000,
+        refreshMs: () => 300_000,
+      });
+      await cache.read();
+      await cache.settle();
+      const [read] = (await cache.read()).lists[0]!.rows;
+      expect(read!.ticket).toBeNull();
+      expect(read!.refs).toEqual([{ id: "REF", ref: "LASSO-8", stage: "review", flag: null }]);
+    });
   });
 
   it("is matched at each read of the cache, so a Ticket's changes show without a fetch", async () => {

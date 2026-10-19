@@ -370,7 +370,7 @@ function Picture({ src, initials }: { src: string; initials: string }) {
 
 /**
  * One PR: its verdict, its title over the verdict's reason, its reviewers, its checks, where it is on GitHub, who
- * opened it and when it last moved, then its Ticket and Stage. The title is the row's link, stretched over the whole
+ * opened it and when it last moved, then its Ticket and Stage, then a "ref:" chip for each Ticket that references it. The title is the row's link, stretched over the whole
  * row: to the Ticket page, or to the PR on GitHub in a new tab when Lasso has no Ticket for it. The reviewers and the
  * "repo #n" link sit above it, so their clicks stay theirs.
  */
@@ -408,11 +408,16 @@ function Row({ row }: { row: PrRow }) {
       </span>
       <span className="ticket" data-role="pr-ticket">
         {t && (
-          <>
+          <span className="owner">
             <b title="Lasso Ticket">{t.ref}</b>
             <span className="sub">{t.stage}</span>
-          </>
+          </span>
         )}
+        {row.refs.map((r) => (
+          <a key={r.id} className="ref" href={`#${r.id}`} data-role="pr-ref" title={`Open ${r.ref}, which references this PR`}>
+            ref: <b>{r.ref}</b> <span className="sub">{r.stage}</span>
+          </a>
+        ))}
       </span>
     </div>
   );
