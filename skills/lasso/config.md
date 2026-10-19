@@ -27,6 +27,8 @@ Unknown top-level keys are ignored.
 | `pr_lists` | `Mine`, `Review requested` | see [PR Lists](#pr-lists); leaving the key out entirely brings back these two |
 | `pr_list_refresh` | `5m` | duration, at least `tick`: how often the PR Lists refresh while the Pull Requests page is open |
 | `pr_page_layout` | `stacked` | `stacked` or `side-by-side`: the Pull Requests page's layout until a browser picks its own with the page's switch |
+| `review.ignore_authors` | `[]` | list of GitHub logins whose PR comments are never Feedback; see [Review](#review) |
+| `review.ignore_self` | `false` | `true` or `false`: also ignore the login `gh` is authenticated as; see [Review](#review) |
 
 A duration is hours, minutes and seconds in that order, each optional:
 `30m`, `90s`, `2h`, `1h30m`. Names (profiles, Actions) are lowercase
@@ -60,6 +62,7 @@ user picks; that name is what `lasso add --repo` and the dashboard show.
 | `actions` | this repo's own Actions; one named like a global Action replaces it for this repo's Tickets |
 | `profiles` | this repo's own Agent Profiles; see [profiles.md](profiles.md#per-repo-profiles) |
 | `default_profile` | the profile this repo's Stages run under when neither Stage nor Pipeline names one |
+| `review` | this repo's own `ignore_authors` and `ignore_self`; each one set here replaces the global one for this repo's Tickets, and one left out keeps the global one |
 
 The repo needs its tracker CLI installed and logged in: `acli` for JIRA,
 `gh` for GitHub (`lasso doctor` checks both). A JIRA key can only be intaken
@@ -179,6 +182,8 @@ The dashboard's Pull Requests page shows one PR List per entry under
 | --- | --- |
 | `query` | GitHub search syntax. `is:pr` is added; a query with `is:issue` is an error. It is scoped to the configured repos' GitHub origins unless it names `repo:`, `org:` or `user:`. |
 | `limit` | PRs shown, 1 to 100. Default `25`. |
+| `search` | `legacy` (the default) or `advanced`. `advanced` runs GitHub's advanced search, where `AND`, `OR` and parentheses work; under `legacy` they are plain words. Lasso wraps an advanced query in parentheses and adds the repo scope as one `OR` group, so the query's own `OR`s stay its own. |
+| `hide_when_empty` | `true` or `false`, default `false`. `true` leaves the list off the page while its last search succeeded with no PRs; the page names hidden lists in a note. It still shows while its first search loads, after a failed search (with the error), and when it cannot search. It comes back on the first refresh that finds PRs. |
 
 Writing `pr_lists` replaces the two defaults whole; `pr_lists: {}` shows no
 lists. While any list is configured, `gh` is a needed tool, logged in, even
@@ -191,8 +196,46 @@ pr_lists:
   Team reviews:
     query: is:open team-review-requested:acme/web-platform org:acme
     limit: 50
+  Needs attention:
+    query: is:open (author:@me OR assignee:@me) (-status:success OR -review:approved)
+    search: advanced
+  Pending train:
+    query: is:open assignee:@me status:success review:approved
+    hide_when_empty: true
 pr_list_refresh: 10m
 pr_page_layout: side-by-side
+```
+
+## Review
+
+A repeating Stage takes every unresolved review thread and PR comment as
+Feedback, whoever wrote it, except the Runner's own marked replies. So a
+note or an answer the PR's author leaves by hand starts a Round. List the
+logins whose comments should never count:
+
+| Field | Rule |
+| --- | --- |
+| `ignore_authors` | GitHub logins, matched without regard to case |
+| `ignore_self` | `true` also ignores the login `gh` is authenticated as, read once when Lasso starts. Safe: the Runner's replies are told apart by their marker, not their author. |
+
+An ignored author's top-level comment is dropped. A review thread is
+dropped when all its comments, the Runner's aside, are by ignored authors;
+once anyone else comments in it, it is Feedback and its Round reads the
+whole thread, ignored comments included. Failed checks and a
+changes-requested verdict count whoever is involved. A repo may set either
+key under `repos.<name>.review`.
+
+```yaml lasso-config
+review:
+  ignore_authors: [dependabot]
+  ignore_self: true
+repos:
+  web:
+    tracker: github
+    project: acme/web
+    path: ~/code/web
+    review:
+      ignore_self: false
 ```
 
 ## Terminals
@@ -221,7 +264,7 @@ where human Stages open, as Lasso started from that shell would choose.
 | `actions`, `profiles`, `default_profile` (global or a repo's), `terminal` | at the next Session or action Stage that starts; no restart |
 | `concurrency` | at the next Tick |
 | Pipeline files | at the next Intake; Tickets already under way keep their Version |
-| `repos` (added, removed, or changed `tracker`/`project`/`path`/`pipeline`), `budget`, `retention`, `branch_prefix`, `notifications`, `pr_lists`, `pr_list_refresh`, `pr_page_layout` | after a restart, or after the next save from the dashboard's Config page, which rereads the whole file |
+| `repos` (added, removed, or changed `tracker`/`project`/`path`/`pipeline`), `budget`, `retention`, `branch_prefix`, `notifications`, `pr_lists`, `pr_list_refresh`, `pr_page_layout`, `review` (global or a repo's) | after a restart, or after the next save from the dashboard's Config page, which rereads the whole file |
 | `port`, `tick` | after a restart only |
 
 Restart means stopping the foreground `lasso` process (Ctrl-C) and starting

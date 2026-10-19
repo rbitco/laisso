@@ -29,7 +29,7 @@ than `open` or `closed` is a Pipeline mistake, not a tracker one: see
 The exits, in the dashboard and the API: **Retry** (a fresh Session of the
 current Stage), **Resume** (re-enter the held Session where the Runner
 allows), **Extend** (raise the Ticket's own Budget), **Mark done** (accept
-and advance), **Skip** (drop the Stage and advance), **Take over in
+and advance), **Skip** (drop the Stage and advance; also offered on a Stage that has not started, see [pipelines.md](pipelines.md#runner-stage)), **Take over in
 terminal** (re-enter the Session in a terminal and work the Stage as a human
 Stage, until Hand back returns it to Lasso), **Abandon** (final; the Ticket cannot be reopened, though its issue
 can be intaken again). Retry and Resume count against attempts. Fixing config.yaml or a Pipeline does not

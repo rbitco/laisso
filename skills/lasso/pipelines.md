@@ -84,13 +84,23 @@ While the Ticket holds after `plan`, **Open plan in terminal** re-enters the
 draft's session to read or revise it (Lasso keeps no Session row for that
 window), and **Start implement** is the approval.
 
+**Skip** passes over a Stage without running it: the current Stage while it
+has not started (no Session of it yet), a held Ticket's next Stage, a human
+or taken-over Stage, or a Flagged one. The Ticket advances as if the Stage
+had finished, so a held Ticket after `plan` with Skip pressed goes on to the
+Stage after `implement`. The Stage shows as skipped on the Ticket page and
+in `lasso status`. A Stage with a Session running or already run cannot be
+skipped this way; Flag it or let it finish.
+
 ### Repeating Stage (`repeat: feedback`)
 
 Each Tick Lasso polls the Ticket's PR with `gh`. New Feedback (failed
 checks, review threads, comments, a changes-requested verdict) starts a
 Round: a Session whose prompt lists what to address and the marker
 (`<!-- lasso:<ticket>:<stage>:round-<n> -->`) the Runner must end each PR
-comment with. A thread counts as addressed once it has a marked reply and
+comment with. Comments by the logins under `review.ignore_authors`, or by
+the `gh` user with `review.ignore_self`, are not Feedback (see
+[config.md](config.md#review)). A thread counts as addressed once it has a marked reply and
 is resolved. The Stage finishes when the PR merges; `budget.rounds` caps the
 Rounds. The prompt should tell the Runner to reply with the marker, push,
 and resolve what it fixed, as the default Pipeline's `review` Stage does.
