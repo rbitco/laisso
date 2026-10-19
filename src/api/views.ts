@@ -8,7 +8,10 @@ import { resumeRefusal, ticketProfile } from "../session/overrides.ts";
 import type { BudgetView } from "../budget/budget.ts";
 import { adapterFor } from "../runner/adapters.ts";
 import type { FeedbackRow } from "../store/feedback.ts";
-import { quietWhy } from "../review/review.ts";
+import { quietWhy, type PrStatus } from "../review/review.ts";
+import { parsePrUrl } from "../review/github.ts";
+import type { PrState } from "../review/feedback.ts";
+import { roundDue, type PrLinkRow, type PrRole, type PrSource } from "../store/links.ts";
 import type { VersionNotice } from "../version-notice.ts";
 
 /** /api/health: which Lasso answered. The version and Lasso home tell an installed Lasso from a dev clone's. */
@@ -93,7 +96,8 @@ export interface TicketView {
   stage: StageView;
   state: TicketRow["state"];
   flag: { at: string; reason: string; detail: string | null } | null;
-  pr: string | null;
+  /** The Ticket's linked PRs, in the order they were linked; empty when it has none. */
+  prs: PrView[];
   display: { state: DisplayState; label: string; why: string };
   /** Place in the line for a headless slot when Queued, else null. */
   queue: number | null;
@@ -109,6 +113,25 @@ export interface TicketView {
   createdAt: string;
   updatedAt: string;
   url: string;
+}
+
+/** One PR linked to a Ticket, as the last read of it saw it. */
+export interface PrView {
+  url: string;
+  number: number;
+  /** Empty until Lasso has read the PR. */
+  title: string;
+  role: PrRole;
+  source: PrSource;
+  /** Null until Lasso has read the PR. */
+  state: PrState | null;
+  /** The head and base branch names, and who opened the PR; null until read. */
+  head: string | null;
+  base: string | null;
+  author: string | null;
+  /** Feedback items standing on the PR when last polled. */
+  feedback: number;
+  checks: PrStatus["checks"];
 }
 
 /** One Feedback item a Round was told about, and how it was addressed once the Round ended. */
@@ -183,6 +206,8 @@ export interface ViewContext {
   sessionsFor(ticket: TicketRow): SessionRow[];
   /** A Round's Feedback snapshot as recorded. */
   feedbackFor(session: SessionRow): FeedbackRow[];
+  /** The Ticket's live PR links, in the order they were added. */
+  linksFor(ticket: TicketRow): PrLinkRow[];
   budgetFor(ticket: TicketRow, pipeline: Pipeline | null, stage: Stage | null, rows: SessionRow[]): BudgetView;
   driftFor(ticket: TicketRow): Drift | null;
   /** The Ticket's place in the line for a headless slot, 1 first, or null when it is not in line. */
@@ -323,10 +348,11 @@ export function ticketView(ticket: TicketRow, ctx: ViewContext): TicketView {
   const stage = index >= 0 ? pipeline!.stages[index]! : null;
   const human = stage?.kind === "runner" && stage.human;
   const rows = ctx.sessionsFor(ticket);
+  const links = ctx.linksFor(ticket);
   const queue = ctx.queuePosition(ticket);
   const budget = ctx.budgetFor(ticket, pipeline, stage, rows);
   const takenOver = stage?.kind === "runner" && !stage.human && rows.some((r) => r.mode === "terminal" && r.ended_at === null && r.stage === stage.name);
-  const display = displayState(ticket, stage, rows[0] ?? null, queue, budget.rounds.limit, takenOver);
+  const display = displayState(ticket, links, stage, rows[0] ?? null, queue, budget.rounds.limit, takenOver);
   const resume = stage?.kind === "runner" ? (last: SessionRow) => resumeRefusal(stage.name, last, ticketProfile(ctx.profiles, ticket, pipeline!, stage)) : () => null;
   const finished = index > 0 ? pipeline!.stages[index - 1]! : null;
   const draft = ticket.holding_since && finished?.kind === "runner" && !finished.human && resumableHeadless(rows, finished.name) ? finished.name : null;
@@ -358,7 +384,7 @@ export function ticketView(ticket: TicketRow, ctx: ViewContext): TicketView {
     },
     state: ticket.state,
     flag: ticket.flagged_at ? { at: ticket.flagged_at, reason: ticket.flag_reason ?? "", detail: ticket.flag_detail } : null,
-    pr: ticket.pr,
+    prs: links.map(prView),
     display: { ...display, label: DISPLAY_LABEL[display.state] },
     queue,
     triggers,
@@ -424,7 +450,25 @@ export function sessionView(row: SessionRow, now: number = Date.now(), feedback:
   };
 }
 
-function displayState(ticket: TicketRow, stage: Stage | null, latest: SessionRow | null, queue: number | null, rounds: number, takenOver = false): { state: DisplayState; why: string } {
+/** A link as the API shows it: the number from its URL, and its state, Feedback and checks from the last poll. */
+export function prView(link: PrLinkRow): PrView {
+  const status = link.status ? (JSON.parse(link.status) as PrStatus) : null;
+  return {
+    url: link.url,
+    number: parsePrUrl(link.url)?.number ?? 0,
+    title: link.title ?? "",
+    role: link.role,
+    source: link.source,
+    state: link.state ?? status?.state ?? null,
+    head: link.head,
+    base: link.base,
+    author: link.author,
+    feedback: status?.outstanding ?? 0,
+    checks: status?.checks ?? "none",
+  };
+}
+
+function displayState(ticket: TicketRow, links: PrLinkRow[], stage: Stage | null, latest: SessionRow | null, queue: number | null, rounds: number, takenOver = false): { state: DisplayState; why: string } {
   const human = stage?.kind === "runner" && stage.human;
   const name = stage ? stageLabel(stage) : ticket.stage;
   if (ticket.state === "done") return { state: "done", why: "done" };
@@ -440,7 +484,7 @@ function displayState(ticket: TicketRow, stage: Stage | null, latest: SessionRow
   }
   if (queue !== null) return { state: "queued", why: `${queue} in line; ${name} starts when a slot frees` };
   // A repeating Stage with no Round due waits on its PR: quiet (spec: Review loop).
-  if (stage?.kind === "runner" && stage.repeat && !ticket.feedback_due) return { state: "quiet", why: quietWhy(ticket, name) };
+  if (stage?.kind === "runner" && stage.repeat && !roundDue(links)) return { state: "quiet", why: quietWhy(ticket, links, name) };
   return { state: "ready", why: `${name} starts on the next tick` };
 }
 

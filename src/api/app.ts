@@ -9,6 +9,7 @@ import { parseName, type Tickets, type TicketRow } from "../store/tickets.ts";
 import type { PipelineVersions } from "../store/versions.ts";
 import type { Sessions } from "../store/sessions.ts";
 import type { Feedback } from "../store/feedback.ts";
+import type { PrLinks } from "../store/links.ts";
 import type { Runs } from "../session/runs.ts";
 import { RunError } from "../session/runs.ts";
 import { ArtifactWarning, TriggerError, type Progress } from "../session/progress.ts";
@@ -35,6 +36,7 @@ export interface AppDeps {
   versions: PipelineVersions;
   sessions: Sessions;
   feedback: Feedback;
+  links: PrLinks;
   runs: Runs;
   progress: Progress;
   terminal: Terminal;
@@ -75,6 +77,7 @@ export function createApp(deps: AppDeps): Hono {
     driftFor: (ticket: TicketRow) => deps.versions.drift(ticket, deps.home.pipelinesDir),
     sessionsFor: (ticket: TicketRow) => deps.sessions.forTicket(ticket.id),
     feedbackFor: (session) => deps.feedback.forSession(session.id),
+    linksFor: (ticket) => deps.links.links(ticket.id),
     budgetFor: (ticket, pipeline, stage, rows) => deps.budgets.view(ticket, pipeline, stage, rows),
   };
   /** The view context for one request: queue positions and config.yaml are read once for every Ticket it renders. */

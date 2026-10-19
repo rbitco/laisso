@@ -10,6 +10,7 @@ import { showNotice } from "../notice.tsx";
 import { pipelineHref } from "../pipelines/href.ts";
 import { ticketHref, type Selection } from "../route.ts";
 import { BudgetEditor, Gauges } from "./Budget.tsx";
+import { PrCount, PrPanel } from "./PullRequests.tsx";
 import { Flow, Timeline } from "./Flow.tsx";
 import { SessionPane, sessionLabel, worktreeGone } from "./SessionPane.tsx";
 import { shownSession, type Shown } from "./selection.ts";
@@ -135,12 +136,6 @@ function Sidebar({ list, current }: { list: TicketView[]; current: string }) {
   );
 }
 
-/** "PR #85" for a pull request's URL; plain "PR" for a link Lasso cannot read a number from. */
-function prLabel(url: string): string {
-  const number = /\/pull\/(\d+)/.exec(url)?.[1];
-  return number ? `PR #${number}` : "PR";
-}
-
 /** The name, edited in place: Enter or Save keeps it, Escape or Cancel leaves it, and an empty name clears it. */
 function NameEditor({ ticket: t, done, refresh }: { ticket: TicketDetail; done: () => void; refresh: () => Promise<void> }) {
   const [value, setValue] = useState(t.name ?? "");
@@ -206,6 +201,7 @@ function TicketBody({ ticket: t, select, refresh }: { ticket: TicketDetail; sele
           </dl>
         </div>
         <div className="stack">
+          <PrPanel ticket={t} />
           <div className="panel">
             <h3>Budget</h3>
             <Gauges budget={t.budget} onOpen={() => setEditing(true)} />
@@ -252,7 +248,7 @@ function Viewing({ ticket: t, shown, back }: { ticket: TicketDetail; shown: Show
 }
 
 /**
- * The name and reference, repo, branch and PR link over the title and why; the pill, then the levers unless the Flag
+ * The name and reference, repo, branch and PR count over the title and why; the pill, then the levers unless the Flag
  * box has them. Rename edits the name in place.
  */
 function TitleBar({ ticket: t, refresh, children }: { ticket: TicketDetail; refresh: () => Promise<void>; children: ReactNode }) {
@@ -273,14 +269,7 @@ function TitleBar({ ticket: t, refresh, children }: { ticket: TicketDetail; refr
           )}
           {t.name && !naming && " · "}
           <span>{id + " · " + t.repo + " · " + t.branch}</span>
-          {t.pr && (
-            <>
-              {" · "}
-              <a href={t.pr} target="_blank" rel="noopener" data-role="pr-link">
-                {prLabel(t.pr)}
-              </a>
-            </>
-          )}
+          <PrCount ticket={t} />
           {!naming && (
             <>
               {" · "}

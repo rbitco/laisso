@@ -1,6 +1,6 @@
 import { buildSearch, type GitHubRepo, type SearchSyntax } from "./query.ts";
 import type { TicketRow } from "../store/tickets.ts";
-import { prRow, ticketForPr, ticketMatcher, type PrNode, type PrRow, type TicketForPr } from "./rows.ts";
+import { prRow, ticketForPr, ticketMatcher, type PrNode, type PrRow, type TicketForPr, type TicketWithOwned } from "./rows.ts";
 import type { PrSearchClient, SearchProblem } from "./search.ts";
 import type { PrPageLayout } from "../server/config.ts";
 
@@ -80,7 +80,7 @@ export interface PrListsDeps {
   /** The GitHub owner/name of each configured repo, by its name in config.yaml, for scoping and Ticket matching. */
   repos: () => Promise<Record<string, GitHubRepo>>;
   /** Lasso's Tickets as they are now, matched to the rows at each read; none when left out. */
-  tickets?: () => TicketRow[];
+  tickets?: () => Array<TicketRow & TicketWithOwned>;
   search: PrSearchClient;
   /** The Tick's length in ms: the page is open while it has read within two of them, and opening it refreshes lists older than one. */
   tickMs: () => number;

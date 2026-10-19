@@ -27,7 +27,7 @@ export function parsePrUrl(url: string): PrRef | null {
 
 const QUERY = `query($owner:String!,$name:String!,$n:Int!,$after:String){
   repository(owner:$owner,name:$name){ pullRequest(number:$n){
-    number url state headRefOid reviewDecision
+    number url state title headRefName baseRefName author{login} headRefOid reviewDecision
     reviewCount: reviews { totalCount }
     reviews(last:20){ nodes{ databaseId state body submittedAt url author{login} } }
     reviewThreads(first:100,after:$after){ pageInfo{ hasNextPage endCursor } nodes{ id isResolved isOutdated path line
@@ -131,7 +131,7 @@ export class PullRequests {
   }
 
   /** The GraphQL half alone: state, head, decision, reviews and every thread (paged, so a thread past the first hundred is never taken for gone). */
-  async head(ref: PrRef): Promise<Pick<PrFacts, "state" | "headSha" | "reviewDecision" | "reviewCount" | "reviews" | "threads">> {
+  async head(ref: PrRef): Promise<Pick<PrFacts, "state" | "title" | "headRef" | "baseRef" | "author" | "headSha" | "reviewDecision" | "reviewCount" | "reviews" | "threads">> {
     const first = await this.page(ref, null);
     const threads = [...first.threads];
     let page = first;
@@ -139,10 +139,10 @@ export class PullRequests {
       page = await this.page(ref, page.next);
       threads.push(...page.threads);
     }
-    return { state: first.state, headSha: first.headSha, reviewDecision: first.reviewDecision, reviewCount: first.reviewCount, reviews: first.reviews, threads };
+    return { state: first.state, title: first.title, headRef: first.headRef, baseRef: first.baseRef, author: first.author, headSha: first.headSha, reviewDecision: first.reviewDecision, reviewCount: first.reviewCount, reviews: first.reviews, threads };
   }
 
-  private async page(ref: PrRef, after: string | null): Promise<Pick<PrFacts, "state" | "headSha" | "reviewDecision" | "reviewCount" | "reviews" | "threads"> & { next: string | null }> {
+  private async page(ref: PrRef, after: string | null): Promise<Pick<PrFacts, "state" | "title" | "headRef" | "baseRef" | "author" | "headSha" | "reviewDecision" | "reviewCount" | "reviews" | "threads"> & { next: string | null }> {
     const cursor = after ? ["-F", `after=${after}`] : [];
     const r = await runTool("gh", ["api", "graphql", "-F", `owner=${ref.owner}`, "-F", `name=${ref.repo}`, "-F", `n=${ref.number}`, ...cursor, "-f", `query=${QUERY}`]);
     if (r.code !== 0) throw new PullRequestError(`PR #${ref.number}: ${failureReason("gh", r)}`);
@@ -153,6 +153,10 @@ export class PullRequests {
     const info = (pr.reviewThreads as { pageInfo?: { hasNextPage?: unknown; endCursor?: unknown } } | undefined)?.pageInfo;
     return {
       state: str(pr.state, "OPEN") as PrState,
+      title: str(pr.title, ""),
+      headRef: typeof pr.headRefName === "string" ? pr.headRefName : null,
+      baseRef: typeof pr.baseRefName === "string" ? pr.baseRefName : null,
+      author: typeof (pr.author as { login?: unknown } | null)?.login === "string" ? (pr.author as { login: string }).login : null,
       headSha: str(pr.headRefOid, ""),
       reviewDecision: typeof pr.reviewDecision === "string" && pr.reviewDecision ? pr.reviewDecision : null,
       reviewCount: Number((pr.reviewCount as { totalCount?: unknown } | undefined)?.totalCount ?? 0),

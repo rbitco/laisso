@@ -157,6 +157,7 @@ describe("lasso add", () => {
     const detail = await runCli(["status", id], lasso);
     expect(detail.stdout).toContain("grill");
     expect(detail.stdout).toContain("worktree");
+    expect(detail.stdout).toContain("prs:       none");
     expect(detail.stdout).toMatch(/budget:\s+rounds 0\/5 · attempts 0\/2 · wall 0s\/30m · spend \$0\.00\/\$25/);
     const asJson = JSON.parse((await runCli(["status", id, "--json"], lasso)).stdout) as TicketDetail;
     expect(asJson.id).toBe(id);

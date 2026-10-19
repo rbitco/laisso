@@ -31,7 +31,7 @@ function view(id: string, over: Partial<TicketView> = {}): TicketView {
     id, shortId: id.slice(-8), title: `Ticket ${id}`, reference: `APP-${id}`, name: null, label: `APP-${id}`, origin: "tracker", body: null, repo: "app", branch: `app-${id}`, worktree: `/wt/${id}`, check: null,
     pipeline: "default", pipelineVersion: 1,
     stage: { name: "implement", kind: "runner", label: "implement", human: false, index: 1, total: 2, repeat: false, override: null },
-    state: "active", flag: null, pr: null, display: { state: "quiet", label: "Quiet", why: "waiting on the next tick" }, queue: null, triggers: [], budget: BUDGET,
+    state: "active", flag: null, prs: [], display: { state: "quiet", label: "Quiet", why: "waiting on the next tick" }, queue: null, triggers: [], budget: BUDGET,
     stages: [
       { name: "plan", kind: "runner", label: "plan", human: false, skippedAt: null },
       { name: "implement", kind: "runner", label: "implement", human: false, skippedAt: null },
@@ -41,7 +41,7 @@ function view(id: string, over: Partial<TicketView> = {}): TicketView {
 }
 
 const flagged = () => view("A", { display: { state: "flagged", label: "Flagged", why: "attempts exhausted" }, triggers: [{ action: "retry", label: "Retry" }, { action: "abandon", label: "Abandon" }] });
-const review = () => view("B", { pr: "https://github.com/o/app/pull/2", stage: { name: "review", kind: "runner", label: "review", human: false, index: 1, total: 2, repeat: true, override: "codex" } });
+const review = () => view("B", { prs: [{ url: "https://github.com/o/app/pull/2", number: 2, title: "Dark mode", role: "owned", source: "branch", state: "OPEN", head: "app-B", base: "main", author: "me", feedback: 0, checks: "green" }], stage: { name: "review", kind: "runner", label: "review", human: false, index: 1, total: 2, repeat: true, override: "codex" } });
 const done = () => view("C", { state: "done", display: { state: "done", label: "Done", why: "merged" } });
 
 type Sent = { method: string; route: string };

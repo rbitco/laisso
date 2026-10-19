@@ -3,6 +3,7 @@ import { actionsFor, currentConfig, type Config } from "../server/config.ts";
 import type { LassoHome } from "../server/home.ts";
 import type { Logger } from "../server/log.ts";
 import type { Tickets, TicketRow } from "../store/tickets.ts";
+import type { PrLinks } from "../store/links.ts";
 import { actionEnv, lastLine, missingParams, runCommand, type RunningCommand } from "../session/command.ts";
 import type { ActionProbe, ArtifactVerdict } from "./check.ts";
 
@@ -10,6 +11,7 @@ export interface ActionChecksDeps {
   config: Config;
   home: LassoHome;
   tickets: Tickets;
+  links: PrLinks;
   log: Logger;
 }
 
@@ -65,7 +67,7 @@ export class ActionChecks {
     const missing = missingParams(action, params);
     if (missing.length) return cannot(`${name} needs ${missing.map((p) => `with.${p}`).join(", ")}`);
     if (!existsSync(ticket.worktree)) return cannot(`the worktree ${ticket.worktree} is missing`);
-    const command = runCommand(action, ticket.worktree, actionEnv(this.deps.config, ticket, stage, "", params));
+    const command = runCommand(action, ticket.worktree, actionEnv(this.deps.config, ticket, this.deps.links.links(ticket.id), stage, "", params));
     this.live.add(command);
     const { code, killed, spawnError, tail } = await command.done.finally(() => this.live.delete(command));
     const last = lastLine(tail);

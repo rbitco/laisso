@@ -69,14 +69,17 @@ export interface PrTicket {
   flag: string | null;
 }
 
-/** A Ticket as PR matching sees it: what a row shows, and the PR URL, GitHub repo and branch it can match on. */
+/** A Ticket as PR matching sees it: what a row shows, and the Owned PR URLs, GitHub repo and branch it can match on. */
 export interface TicketForPr extends PrTicket {
-  pr: string | null;
+  owned: string[];
   /** The GitHub owner/name of the Ticket's repo origin; null when it is not on github.com. */
   github: GitHubRepo | null;
   branch: string;
   active: boolean;
 }
+
+/** A Ticket row with the URLs of its Owned PR links: what PR matching reads. */
+export type TicketWithOwned = Pick<TicketRow, "id" | "name" | "reference" | "stage" | "state" | "flagged_at" | "flag_reason" | "branch"> & { owned: string[] };
 
 /** Finds the Ticket for a PR by its URL, or by its repo and head branch; null when there is none. */
 export type TicketMatch = (pr: { url: string; repo: string; branch: string | null }) => PrTicket | null;
@@ -85,14 +88,14 @@ export type TicketMatch = (pr: { url: string; repo: string; branch: string | nul
  * A Ticket as PR matching sees it, or null for an Abandoned Ticket, which never claims a PR. A done Ticket still
  * does, so a merged PR on a list of closed PRs keeps its link.
  */
-export function ticketForPr(ticket: Pick<TicketRow, "id" | "name" | "reference" | "stage" | "state" | "flagged_at" | "flag_reason" | "pr" | "branch">, github: GitHubRepo | null): TicketForPr | null {
+export function ticketForPr(ticket: TicketWithOwned, github: GitHubRepo | null): TicketForPr | null {
   if (ticket.state === "abandoned") return null;
   return {
     id: ticket.id,
     ref: ticketLabel(ticket),
     stage: ticket.state === "done" ? "done" : ticket.stage,
     flag: ticket.flagged_at ? ticket.flag_reason || "flagged" : null,
-    pr: ticket.pr,
+    owned: ticket.owned,
     github,
     branch: ticket.branch,
     active: ticket.state === "active",
@@ -105,7 +108,7 @@ const urlKey = (url: string) => url.trim().replace(/\/+$/, "").toLowerCase();
 const branchKey = (repo: string, branch: string) => `${repo.toLowerCase()}\n${branch}`;
 
 /**
- * Matches PRs to these Tickets: by PR URL first, then by GitHub repo and head branch. When more than one Ticket
+ * Matches PRs to these Tickets: by Owned PR URL first, then by GitHub repo and head branch. When more than one Ticket
  * matches the same way, an active one wins over a done one, then the first given.
  */
 export function ticketMatcher(tickets: TicketForPr[]): TicketMatch {
@@ -116,7 +119,7 @@ export function ticketMatcher(tickets: TicketForPr[]): TicketMatch {
     if (!had || (t.active && !had.active)) map.set(key, t);
   };
   for (const t of tickets) {
-    if (t.pr) keep(byUrl, urlKey(t.pr), t);
+    for (const url of t.owned) keep(byUrl, urlKey(url), t);
     if (t.github && t.branch) keep(byBranch, branchKey(`${t.github.owner}/${t.github.name}`, t.branch), t);
   }
   return ({ url, repo, branch }) => {

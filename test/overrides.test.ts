@@ -145,7 +145,7 @@ describe("a per-Ticket profile override", () => {
     await round(2);
     await override(lasso, ticket.id, "review", null);
     const d = await round(3);
-    expect(d.pr).toBe(PR_URL);
+    expect(d.prs.map((p) => [p.role, p.source, p.url])).toEqual([["owned", "branch", PR_URL]]);
     expect(d.sessions.map((s) => [s.round, s.profile!.name])).toEqual([[3, "claude-opus"], [2, "claude-fable"], [1, "claude-fable"]]);
     expect((await launched(lasso, 3)).map((c) => modelOf(c.argv))).toEqual(["fable", "fable", "opus"]);
   });

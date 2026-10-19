@@ -10,6 +10,7 @@ import { Store, StoreTooNew } from "../store/store.ts";
 import { Tickets } from "../store/tickets.ts";
 import { Sessions } from "../store/sessions.ts";
 import { Feedback } from "../store/feedback.ts";
+import { PrLinks } from "../store/links.ts";
 import { PullRequests } from "../review/github.ts";
 import { Review } from "../review/review.ts";
 import { Runs } from "../session/runs.ts";
@@ -101,6 +102,7 @@ export async function serve(opts: ServeOptions): Promise<number> {
   versions.pinUnpinned(tickets, home.pipelinesDir);
   const sessions = new Sessions(store.db, ticketChanged);
   const feedback = new Feedback(store.db, ticketChanged);
+  const links = new PrLinks(store.db, ticketChanged);
   const notifier = createNotifier({ config: config.notifications, log, baseUrl: `http://localhost:${config.port}` });
   const mirror = new Mirror({
     config,
@@ -115,17 +117,17 @@ export async function serve(opts: ServeOptions): Promise<number> {
     },
   });
   const prs = new PullRequests(log);
-  const teardown = new Teardown({ config, home, tickets, log, prs });
-  const checks = new ActionChecks({ config, home, tickets, log });
-  const progress: Progress = new Progress({ home, tickets, versions, sessions, log, notifier, mirror, prProbe: (ticket) => () => review.probe(ticket), actionProbe: (ticket, stage) => checks.probe(ticket, stage), teardown });
+  const teardown = new Teardown({ config, home, tickets, links, log, prs });
+  const checks = new ActionChecks({ config, home, tickets, links, log });
+  const progress: Progress = new Progress({ home, tickets, versions, sessions, links, log, notifier, mirror, prProbe: (ticket) => () => review.probe(ticket), actionProbe: (ticket, stage) => checks.probe(ticket, stage), teardown });
   // review: is read from the live config per Ticket, so a Config page save applies on the next poll; the gh login is read once.
   const ignored = async (ticket: TicketRow) => {
     const rules = reviewFor(config, ticket.repo);
     return ignoring(rules.ignore_self ? [...rules.ignore_authors, await prs.viewer()] : rules.ignore_authors);
   };
-  const review: Review = new Review({ tickets, sessions, feedback, progress, prs, checks, log, ignored });
+  const review: Review = new Review({ tickets, sessions, feedback, links, progress, prs, checks, log, ignored });
   const terminal = new Terminal({ config, home, sessions, log, flag: (ticket, reason, detail) => progress.flag(ticket, reason, detail) });
-  const budgets = new Budgets({ config, sessions });
+  const budgets = new Budgets({ config, sessions, links });
   const queue = new Queue({ home, tickets, sessions, progress, log, cap: config.concurrency });
   const runs = new Runs({ config, home, tickets, sessions, log, progress, budgets, queue, review, checks, stdoutWritten: (ticket, session) => changes.emit({ kind: "stdout", ticket, session }), ended: () => tick.kick("session-end") });
   const actions = new Actions({
@@ -133,6 +135,7 @@ export async function serve(opts: ServeOptions): Promise<number> {
     home,
     tickets,
     sessions,
+    links,
     log,
     progress,
     stdoutWritten: (ticket, session) => changes.emit({ kind: "stdout", ticket, session }),
@@ -143,7 +146,7 @@ export async function serve(opts: ServeOptions): Promise<number> {
   const prLists = new PrLists({
     lists: () => Object.entries(config.pr_lists).map(([name, list]) => ({ name, ...list })),
     repos: () => githubRepos(config.repos),
-    tickets: () => tickets.list({ all: true }),
+    tickets: () => tickets.list({ all: true }).map((t) => ({ ...t, owned: links.links(t.id).flatMap((l) => (l.role === "owned" ? [l.url] : [])) })),
     search: ghSearch(),
     tickMs: () => config.tick * 1000,
     refreshMs: () => parseDuration(config.pr_list_refresh),
@@ -176,7 +179,7 @@ export async function serve(opts: ServeOptions): Promise<number> {
     }
   };
   const versionCheck = new VersionCheck({ running: pkg.version, onDisk, latest: npmLatest, log, changed: () => changes.emit({ kind: "version" }) });
-  const app = createApp({ config, home, tick, tickets, versions, sessions, feedback, runs, progress, terminal, exits, overrides, budgets, queue, changes, prLists, dashboard, version: pkg.version, missingTools, versionNotice: () => versionCheck.current() });
+  const app = createApp({ config, home, tick, tickets, versions, sessions, feedback, links, runs, progress, terminal, exits, overrides, budgets, queue, changes, prLists, dashboard, version: pkg.version, missingTools, versionNotice: () => versionCheck.current() });
 
   if (defaults.wroteConfig) log.info("config.written", { file: home.configFile });
   if (defaults.wrotePipeline) log.info("pipeline.written", { name: "default" });

@@ -54,7 +54,8 @@ describe("the Review loop", () => {
     const first = await checkNow(lasso);
     expect(first.changes).toEqual([{ ticket: ticket.id, summary: "PR #7 found" }]);
     const d = await detailOf(lasso, ticket.id);
-    expect(d.pr).toBe(PR_URL);
+    expect(d.prs.map((p) => [p.role, p.source, p.url])).toEqual([["owned", "branch", PR_URL]]);
+    expect((await runCli(["status", ticket.id], lasso)).stdout).toContain(`prs:\n  owned       ${PR_URL}\n`);
     expect(d.display).toEqual({ state: "quiet", label: "Quiet", why: "PR #7: checks green, nothing outstanding" });
     expect(d.sessions).toEqual([]);
 
@@ -125,7 +126,7 @@ describe("the Review loop", () => {
     expect(d.flag).toBeNull();
     expect(d.display).toEqual({ state: "quiet", label: "Quiet", why: "PR #7: checks running" });
     expect(d.budget.rounds).toEqual({ used: 1, limit: 5, source: "global" });
-    expect(d.pr).toBe(PR_URL);
+    expect(d.prs.map((p) => [p.role, p.source, p.url])).toEqual([["owned", "branch", PR_URL]]);
     expect(d.budget.attempts).toEqual({ used: 1, limit: 2, source: "global" });
 
     // The Round's own marked comments are not Feedback: the next tick finds nothing new.

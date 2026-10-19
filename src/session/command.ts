@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { parseDuration } from "../duration.ts";
 import type { ActionConfig, Config } from "../server/config.ts";
 import type { TicketRow } from "../store/tickets.ts";
+import { ownedOf, type PrLinkRow } from "../store/links.ts";
 
 const KILL_GRACE_MS = 5000;
 /** How much of a command's latest output is kept in memory to find its last line. */
@@ -63,8 +64,8 @@ export function runCommand(action: ActionConfig, cwd: string, env: Record<string
   return { kill, done };
 }
 
-/** What an Action's command is told (ADR 0010): the Ticket's details, as a Runner Session gets them and more, and one LASSO_<PARAM> per param. */
-export function actionEnv(config: Config, ticket: TicketRow, stage: string, sessionId: string, params: Record<string, string>): Record<string, string> {
+/** What an Action's command is told (ADR 0010): the Ticket's details, as a Runner Session gets them and more, and one LASSO_<PARAM> per param. LASSO_PR is the Owned PR Review works. */
+export function actionEnv(config: Config, ticket: TicketRow, links: PrLinkRow[], stage: string, sessionId: string, params: Record<string, string>): Record<string, string> {
   const repo = config.repos[ticket.repo];
   return {
     LASSO_TICKET: ticket.id,
@@ -76,7 +77,7 @@ export function actionEnv(config: Config, ticket: TicketRow, stage: string, sess
     LASSO_TITLE: ticket.title,
     LASSO_TRACKER: repo?.tracker ?? "",
     LASSO_PROJECT: repo?.project ?? "",
-    LASSO_PR: ticket.pr ?? "",
+    LASSO_PR: ownedOf(links)?.url ?? "",
     LASSO_WORKTREE: ticket.worktree,
     LASSO_PIPELINE: ticket.pipeline,
     ...Object.fromEntries(Object.entries(params).map(([key, value]) => [`LASSO_${key.toUpperCase()}`, value])),

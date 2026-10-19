@@ -197,7 +197,7 @@ describe("the Metro drawings from API data", () => {
     expect(svg).toContain(">1 of 5 Rounds</text>");
     expect(svg).toContain(">1 Round</text>");
     const rows = await lasso.api<TicketView[]>("/api/tickets");
-    expect(rows[0]!.pr).toBe("https://github.com/owner/app/pull/7");
+    expect(rows[0]!.prs.map((p) => p.url)).toEqual(["https://github.com/owner/app/pull/7"]);
     expect(quickAction(rows[0]!)).toEqual({ action: "check", label: "Check PR now" });
 
     // A station click filters the timeline to that Stage; no station shows every Session, action ones included.

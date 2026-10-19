@@ -72,6 +72,11 @@ export interface PrFacts {
   number: number;
   url: string;
   state: PrState;
+  title: string;
+  /** The head and base branch names, and who opened the PR; null when GitHub did not say. */
+  headRef: string | null;
+  baseRef: string | null;
+  author: string | null;
   headSha: string;
   reviewDecision: string | null;
   reviewCount: number;

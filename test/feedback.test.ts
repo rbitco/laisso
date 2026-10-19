@@ -8,7 +8,7 @@ const mark = marker("01ABC", "review", 1);
 const at = (m: number) => `2026-09-27T10:${String(m).padStart(2, "0")}:00Z`;
 
 const facts = (over: Partial<PrFacts> = {}): PrFacts => ({
-  owner: "o", repo: "r", number: 7, url: "https://github.com/o/r/pull/7", state: "OPEN", headSha: "aaaaaaa1",
+  owner: "o", repo: "r", number: 7, url: "https://github.com/o/r/pull/7", state: "OPEN", title: "Add dark mode", headRef: "b", baseRef: "main", author: "me", headSha: "aaaaaaa1",
   reviewDecision: null, reviewCount: 0, reviews: [], threads: [], comments: [], inline: [], checks: [],
   ...over,
 });

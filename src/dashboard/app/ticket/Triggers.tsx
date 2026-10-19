@@ -93,7 +93,7 @@ export function Triggers({ ticket: t, onExtend, refresh }: { ticket: TicketDetai
         lever(trigger.action, trigger.action === "abandon" && armed ? "Abandon for sure?" : trigger.label, PRIMARY.has(trigger.action), () => press(trigger), { unavailable: trigger.unavailable }),
       )}
       {/* Check PR now belongs to the repeating Stage: a tick there fetches Feedback and opens a Round (spec: the title bar). */}
-      {t.state === "active" && t.pr && t.stage.repeat && lever("check", "Check PR now", false, () => void pull("check"), { role: "check-pr" })}
+      {t.state === "active" && t.prs.some((p) => p.role === "owned") && t.stage.repeat && lever("check", "Check PR now", false, () => void pull("check"), { role: "check-pr" })}
       {t.flag && stageProfile && t.triggers.some((x) => x.action === "retry") && lever("retry-with", "retry with…", false, retryWith, { role: "retry-with" })}
       {t.triggers
         .filter((x) => x.unavailable)

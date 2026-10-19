@@ -3,6 +3,7 @@ import type { Logger } from "../server/log.ts";
 import type { Tickets, TicketRow } from "../store/tickets.ts";
 import type { PipelineVersions } from "../store/versions.ts";
 import type { Sessions, EndedReason } from "../store/sessions.ts";
+import { roundDue, type PrLinks } from "../store/links.ts";
 import type { Notifier } from "../notify/notifier.ts";
 import { type ActionStage, type Pipeline, type RunnerStage, type Stage } from "../pipeline/load.ts";
 import type { Mirror } from "../tracker/mirror.ts";
@@ -34,6 +35,8 @@ export interface ProgressDeps {
   tickets: Tickets;
   versions: PipelineVersions;
   sessions: Sessions;
+  /** The Ticket's PR links, where a Round due to start is kept. */
+  links: PrLinks;
   log: Logger;
   notifier: Notifier;
   mirror: Mirror;
@@ -78,7 +81,7 @@ export class Progress {
     const current = this.current(ticket);
     if ("problem" in current) return current;
     if (current.stage.kind !== "runner" || current.stage.human) return null;
-    if (current.stage.repeat && !ticket.feedback_due && !this.roundToRerun(ticket, current.stage)) return null;
+    if (current.stage.repeat && !roundDue(this.deps.links.links(ticket.id)) &&!this.roundToRerun(ticket, current.stage)) return null;
     return { pipeline: current.pipeline, stage: current.stage };
   }
 

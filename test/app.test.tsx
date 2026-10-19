@@ -44,7 +44,7 @@ function ticket(id: string): TicketDetail {
     id, shortId: id.slice(-8), title: `Ticket ${id}`, reference: `APP-${id}`, name: null, label: `APP-${id}`, origin: "tracker", body: null, repo: "app", branch: `app-${id}`, worktree: `/wt/${id}`, check: null,
     pipeline: "default", pipelineVersion: 2,
     stage: { name: "plan", kind: "runner", label: "plan", human: false, index: 0, total: 1, repeat: false, override: null },
-    state: "active", flag: null, pr: null, display: { state: "quiet", label: "Quiet", why: "waiting" }, queue: null, triggers: [], budget: BUDGET,
+    state: "active", flag: null, prs: [], display: { state: "quiet", label: "Quiet", why: "waiting" }, queue: null, triggers: [], budget: BUDGET,
     stages: [{ name: "plan", kind: "runner", label: "plan", human: false, skippedAt: null }],
     mirrorPending: false, createdAt: ago(60), updatedAt: ago(5), url: `http://lasso/#${id}`,
     session: null, sessions: [], pipelineDrift: "same", profiles: [],

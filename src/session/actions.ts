@@ -8,6 +8,7 @@ import type { Logger } from "../server/log.ts";
 import type { TickChange } from "../server/tick.ts";
 import type { Tickets, TicketRow } from "../store/tickets.ts";
 import type { Sessions } from "../store/sessions.ts";
+import type { PrLinks } from "../store/links.ts";
 import type { ActionStage } from "../pipeline/load.ts";
 import type { Progress } from "./progress.ts";
 import { actionLine, LatestMessageTracker } from "./latest-message.ts";
@@ -17,6 +18,7 @@ export interface ActionsDeps {
   home: LassoHome;
   tickets: Tickets;
   sessions: Sessions;
+  links: PrLinks;
   log: Logger;
   progress: Progress;
   /** Hears each chunk of a command's output once it is on disk, as Runs' stdoutWritten does. */
@@ -95,7 +97,7 @@ export class Actions {
       return `started ${stage.name}`;
     }
     const messages = new LatestMessageTracker(actionLine);
-    const command = runCommand(action, ticket.worktree, actionEnv(this.deps.config, ticket, stage.name, row.id, stage.with), (chunk) => {
+    const command = runCommand(action, ticket.worktree, actionEnv(this.deps.config, ticket, this.deps.links.links(ticket.id), stage.name, row.id, stage.with), (chunk) => {
       writeSync(fd, chunk);
       this.deps.stdoutWritten?.(ticket.id, id);
       const message = messages.feed(chunk);

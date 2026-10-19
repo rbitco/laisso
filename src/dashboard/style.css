@@ -572,6 +572,20 @@ button.quiet { background: transparent; }
 .sp-row.cur .sp-stage { color: var(--accent); font-weight: 600; }
 .sp-name { font-weight: 600; font-size: 13px; overflow-wrap: anywhere; }
 .sp-line { font: 11px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+/* A Ticket's Pull requests panel: role, then the PR and its branch, then its state word. */
+.tprs { display: grid; }
+.tpr { display: grid; grid-template-columns: 6.5em minmax(0, 1fr) auto; column-gap: 10px; align-items: baseline; padding: 6px 0; border-top: 1px solid var(--line); font-size: 13px; }
+.tpr:first-child { border-top: 0; }
+.tpr .role { font-size: 12px; color: var(--muted); }
+.tpr .what { overflow-wrap: anywhere; }
+.tpr .what a { color: var(--accent); text-decoration: none; }
+.tpr .what a:hover { text-decoration: underline; }
+.tpr .sub { display: block; font-size: 12px; color: var(--muted); }
+.tpr .state { font-size: 12px; white-space: nowrap; }
+.tpr .state.good { color: var(--good); }
+.tpr .state.crit { color: var(--crit); }
+.tpr .state.run { color: var(--run); }
+.tpr .state.muted { color: var(--muted); }
 .triggers .why { flex-basis: 100%; }
 
 /* Pull Requests: the PR Lists stacked or side by side, each a heading over its rows. */

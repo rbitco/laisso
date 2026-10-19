@@ -102,11 +102,11 @@ export function sessionsForStage(sessions: SessionView[], stage: string | null):
   return stage ? sessions.filter((s) => s.stage === stage) : sessions;
 }
 
-/** The one quick action a Ledger row offers: the attention trigger, else Check PR now at a repeating Stage with a PR. */
+/** The one quick action a Ledger row offers: the attention trigger, else Check PR now at a repeating Stage with an Owned PR. */
 export function quickAction(t: TicketView): { action: Trigger["action"] | "check"; label: string } | null {
   const primary = t.triggers.find((x) => x.action === "retry" || x.action === "start" || x.action === "terminal");
   if (primary) return primary;
-  if (t.state === "active" && t.pr && t.stage.repeat) return { action: "check", label: "Check PR now" };
+  if (t.state === "active" && t.prs.some((p) => p.role === "owned") && t.stage.repeat) return { action: "check", label: "Check PR now" };
   return null;
 }
 

@@ -228,6 +228,35 @@ const MIGRATIONS: Array<(db: DatabaseSync) => void> = [
   (db) => {
     db.exec(`ALTER TABLE tickets ADD COLUMN skipped_stages TEXT;`);
   },
+  // PR links (LASSO-172): a Ticket's PRs in a table, each with its own Review state; the Ticket's one PR becomes its first Owned link.
+  (db) => {
+    db.exec(`
+      CREATE TABLE ticket_prs (
+        ticket TEXT NOT NULL REFERENCES tickets (id),
+        url TEXT NOT NULL,
+        role TEXT NOT NULL CHECK (role IN ('owned', 'referenced')),
+        source TEXT NOT NULL CHECK (source IN ('branch', 'human', 'agent')),
+        added_at TEXT NOT NULL,
+        unlinked_at TEXT,
+        title TEXT,
+        head TEXT,
+        base TEXT,
+        author TEXT,
+        state TEXT,
+        status TEXT,
+        feedback_watermark TEXT,
+        feedback_due TEXT,
+        PRIMARY KEY (ticket, url)
+      );
+      CREATE INDEX ticket_prs_url ON ticket_prs (url);
+      INSERT INTO ticket_prs (ticket, url, role, source, added_at, state, status, feedback_watermark, feedback_due)
+        SELECT id, pr, 'owned', 'branch', created_at, json_extract(pr_status, '$.state'), pr_status, feedback_watermark, feedback_due FROM tickets WHERE pr IS NOT NULL;
+      ALTER TABLE tickets DROP COLUMN pr;
+      ALTER TABLE tickets DROP COLUMN pr_status;
+      ALTER TABLE tickets DROP COLUMN feedback_watermark;
+      ALTER TABLE tickets DROP COLUMN feedback_due;
+    `);
+  },
 ];
 
 /** The schema version this Lasso migrates a store up to. */

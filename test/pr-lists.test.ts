@@ -3,7 +3,7 @@ import { buildSearch, searchUrl, NO_GITHUB_REPOS, type GitHubRepo } from "../src
 import { parseGitHubRemote } from "../src/prs/origins.ts";
 import { PrLists, type PrListSetting } from "../src/prs/lists.ts";
 import type { PrSearchClient, SearchResult } from "../src/prs/search.ts";
-import { prRow, teamInitials, ticketForPr, ticketMatcher, type PrNode, type TicketForPr, type Verdict } from "../src/prs/rows.ts";
+import { prRow, teamInitials, ticketForPr, ticketMatcher, type PrNode, type TicketForPr, type TicketWithOwned, type Verdict } from "../src/prs/rows.ts";
 import { checksLabel } from "../src/dashboard/app/prs/PrsPage.tsx";
 import type { TicketRow } from "../src/store/tickets.ts";
 import type { PrPageLayout } from "../src/server/config.ts";
@@ -644,13 +644,13 @@ describe("a PR row's Ticket", () => {
     ...fields,
   });
   type Row = Parameters<typeof ticketForPr>[0];
-  const row = (fields: Partial<Row> = {}): Row => ({ id: ID, name: null, reference: "LASSO-7", stage: "review", state: "active", flagged_at: null, flag_reason: null, pr: null, branch: "lasso-7-pr-page", ...fields });
+  const row = (fields: Partial<Row> = {}): Row => ({ id: ID, name: null, reference: "LASSO-7", stage: "review", state: "active", flagged_at: null, flag_reason: null, owned: [], branch: "lasso-7-pr-page", ...fields });
   const one = (fields: Partial<Row> = {}, github: GitHubRepo | null = LASSO) => ticketForPr(row(fields), github)!;
   const ticketOf = (pr: PrNode, ...tickets: TicketForPr[]) => prRow(pr, ticketMatcher(tickets))!.ticket;
 
   it("matches by PR URL, ignoring case and trailing slashes", () => {
-    expect(ticketOf(node(), one({ pr: "https://GitHub.com/rbitco/Lasso/pull/7/", branch: "something-else" }, null))).toEqual({ id: ID, ref: "LASSO-7", stage: "review", flag: null });
-    expect(ticketOf(node(), one({ pr: "https://github.com/rbitco/lasso/pull/8", branch: "something-else" }))).toBeNull();
+    expect(ticketOf(node(), one({ owned: ["https://GitHub.com/rbitco/Lasso/pull/7/"], branch: "something-else" }, null))).toEqual({ id: ID, ref: "LASSO-7", stage: "review", flag: null });
+    expect(ticketOf(node(), one({ owned: ["https://github.com/rbitco/lasso/pull/8"], branch: "something-else" }))).toBeNull();
   });
 
   it("matches by GitHub repo and head branch when no Ticket has the PR's URL", () => {
@@ -663,7 +663,7 @@ describe("a PR row's Ticket", () => {
 
   it("prefers a URL match over a branch match, and an active Ticket over a done one", () => {
     const byBranch = one({ id: "BRANCH", reference: "LASSO-1" });
-    const byUrl = one({ id: "URL", reference: "LASSO-2", branch: "other", pr: "https://github.com/rbitco/lasso/pull/7" });
+    const byUrl = one({ id: "URL", reference: "LASSO-2", branch: "other", owned: ["https://github.com/rbitco/lasso/pull/7"] });
     expect(ticketOf(node(), byBranch, byUrl)?.id).toBe("URL");
     const done = one({ id: "DONE", state: "done" });
     expect(ticketOf(node(), done, one({ id: "ACTIVE" }))?.id).toBe("ACTIVE");
@@ -686,7 +686,7 @@ describe("a PR row's Ticket", () => {
   });
 
   it("is matched at each read of the cache, so a Ticket's changes show without a fetch", async () => {
-    let tickets: TicketRow[] = [];
+    let tickets: Array<TicketRow & TicketWithOwned> = [];
     let fetches = 0;
     const cache = new PrLists({
       lists: () => [{ name: "Mine", query: "is:open", limit: 25 }],
@@ -703,7 +703,7 @@ describe("a PR row's Ticket", () => {
     await cache.settle();
     expect((await cache.read()).lists[0]!.rows[0]!.ticket).toBeNull();
     // A Ticket in a repo with no GitHub origin can't match by branch.
-    tickets = [{ ...row({ id: "ELSEWHERE" }), repo: "elsewhere" } as TicketRow, { ...row({ stage: "implement" }), repo: "lasso" } as TicketRow];
+    tickets = [{ ...row({ id: "ELSEWHERE" }), repo: "elsewhere" } as TicketRow & TicketWithOwned, { ...row({ stage: "implement" }), repo: "lasso" } as TicketRow & TicketWithOwned];
     expect((await cache.read()).lists[0]!.rows[0]!.ticket).toMatchObject({ id: ID, stage: "implement" });
     expect(fetches).toBe(1);
   });

@@ -64,7 +64,7 @@ function renderDetail(t: TicketDetail): string {
     `worktree:  ${t.worktree}`,
     `pipeline:  ${t.pipeline}${t.pipelineVersion === null ? "" : " v" + t.pipelineVersion}`,
     `stage:     ${t.stage.label} (${t.stage.index + 1} of ${t.stage.total})`,
-    `pr:        ${t.pr ?? "none"}`,
+    ...prBlock(t),
     `budget:    ${budgetLine(t)}`,
     `url:       ${t.url}`,
     "",
@@ -80,6 +80,13 @@ function renderDetail(t: TicketDetail): string {
   }
   if (t.sessions.length) lines.push("", "sessions:", ...t.sessions.map((s) => `  ${sessionLine(s)}`));
   return lines.join("\n");
+}
+
+/** The Ticket's PRs, one line each with its role and URL, Owned first; one line saying none when it has none. */
+function prBlock(t: TicketView): string[] {
+  if (!t.prs.length) return ["prs:       none"];
+  const ordered = [...t.prs.filter((p) => p.role === "owned"), ...t.prs.filter((p) => p.role === "referenced")];
+  return ["prs:", ...ordered.map((p) => `  ${p.role.padEnd(10)}  ${p.url}`)];
 }
 
 /** The four gauges in words; a starred one is set on the Ticket itself. */

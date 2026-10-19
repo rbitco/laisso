@@ -8,6 +8,7 @@ import type { Tickets, TicketRow } from "../store/tickets.ts";
 import { Git } from "../git.ts";
 import { expandHome } from "../intake/intake.ts";
 import type { PullRequests } from "../review/github.ts";
+import type { PrLinks } from "../store/links.ts";
 
 export const WIP_MESSAGE = "wip: abandoned in Lasso";
 
@@ -15,6 +16,7 @@ export interface TeardownDeps {
   config: Config;
   home: LassoHome;
   tickets: Tickets;
+  links: PrLinks;
   log: Logger;
   prs: PullRequests;
 }
@@ -62,8 +64,13 @@ export class Teardown {
       });
     }
     await this.step(ticket, "pr", async () => {
-      const ref = await this.deps.prs.open(ticket);
-      if (!ref) return;
+      // The one open Owned PR; a Ticket that never linked one has the PR on its branch closed, unless a human unlinked it.
+      const { links } = this.deps;
+      const owned = links.links(ticket.id).filter((l) => l.role === "owned");
+      const open = links.ownedOpen(ticket.id)[0];
+      if (owned.length && !open) return;
+      const ref = await this.deps.prs.open({ branch: ticket.branch, worktree: ticket.worktree, pr: open?.url ?? null });
+      if (!ref || (!open && links.unlinked(ticket.id, ref.url))) return;
       await this.deps.prs.close(ref, `Abandoned in Lasso. The branch \`${ticket.branch}\` is kept.\n\n<!-- lasso:${ticket.id}:abandoned -->`);
       this.deps.log.info("ticket.pr_closed", { ticket: ticket.id, pr: ref.url });
     });

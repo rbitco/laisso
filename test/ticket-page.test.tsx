@@ -4,7 +4,7 @@ import { render, screen, cleanup, act, waitFor, within } from "@testing-library/
 import { userEvent } from "@testing-library/user-event";
 import { DEFAULT_CONFIG, type Config } from "../src/server/config.ts";
 import type { BudgetView } from "../src/budget/budget.ts";
-import type { ConfigFile, PipelineListing, SessionView, StageProfileView, TicketDetail } from "../src/api/views.ts";
+import type { ConfigFile, PipelineListing, PrView, SessionView, StageProfileView, TicketDetail } from "../src/api/views.ts";
 import { TicketPage } from "../src/dashboard/app/ticket/TicketPage.tsx";
 import { closeProfileDrawer, ProfileDrawerHost } from "../src/dashboard/app/profiles/drawer.tsx";
 import { events } from "../src/dashboard/app/events.ts";
@@ -49,13 +49,17 @@ const profile = (stage: string, name: string, overridden = false): StageProfileV
   stage, profile: name, from: overridden ? "override" : "default", overridden, headless: { runner: "claude", model: "opus" }, human: { runner: "claude", model: "opus" }, problem: null,
 });
 
+const pr = (number: number, over: Partial<PrView> = {}): PrView => ({
+  url: `https://github.com/o/app/pull/${number}`, number, title: `PR ${number}`, role: "owned", source: "branch", state: "OPEN", head: `app-${number}`, base: "main", author: "me", feedback: 0, checks: "green", ...over,
+});
+
 function ticket(id: string, over: Partial<TicketDetail> = {}): TicketDetail {
   const s = session({ ticket: id });
   return {
     id, shortId: id.slice(-8), title: `Ticket ${id}`, reference: `APP-${id}`, name: null, label: `APP-${id}`, origin: "tracker", body: null, repo: "app", branch: `app-${id}`, worktree: `/wt/${id}`, check: null,
     pipeline: "default", pipelineVersion: 2,
     stage: { name: "implement", kind: "runner", label: "implement", human: false, index: 1, total: 2, repeat: false, override: null },
-    state: "active", flag: null, pr: null, display: { state: "quiet", label: "Quiet", why: "waiting on the next tick" }, queue: null,
+    state: "active", flag: null, prs: [], display: { state: "quiet", label: "Quiet", why: "waiting on the next tick" }, queue: null,
     triggers: [
       { action: "done", label: "Mark done" },
       { action: "extend", label: "Extend" },
@@ -190,11 +194,10 @@ afterEach(() => {
 
 describe("a Ticket's page", () => {
   it("shows the title bar, the flow, the latest Session, the Pipeline Version, the gauges, the timeline and the sidebar", async () => {
-    fakeLasso([ticket("A", { pr: "https://github.com/o/app/pull/7", pipelineDrift: "changed" }), ticket("B")]);
+    fakeLasso([ticket("A", { prs: [pr(7)], pipelineDrift: "changed" }), ticket("B")]);
     await showPage("A");
     const bar = document.querySelector<HTMLElement>('[data-role="titlebar"]')!;
-    expect(bar.querySelector(".eyebrow")!.textContent).toBe("APP-A · app · app-A · PR #7 · Name");
-    expect(within(bar).getByRole("link", { name: "PR #7" }).getAttribute("href")).toBe("https://github.com/o/app/pull/7");
+    expect(bar.querySelector(".eyebrow")!.textContent).toBe("APP-A · app · app-A · 1 Owned PR · 0 Referenced · Name");
     expect(within(bar).getByText("Quiet").className).toBe("pill quiet");
     expect(within(triggers()).getAllByRole("button").map((b) => b.textContent)).toEqual(["Mark done", "Extend", "Abandon"]);
     expect(screen.getByRole("img", { name: "Stage flow for APP-A" })).toBeTruthy();
@@ -607,10 +610,48 @@ describe("the Ticket's exits", () => {
   });
 
   it("shows Check PR now at a repeating Stage with a PR, which runs a tick", async () => {
-    const lasso = fakeLasso([ticket("A", { pr: "https://github.com/o/app/pull/7", stage: { ...ticket("A").stage, repeat: true } })]);
+    const lasso = fakeLasso([ticket("A", { prs: [pr(7)], stage: { ...ticket("A").stage, repeat: true } })]);
     await showPage("A");
     await userEvent.setup().click(within(triggers()).getByRole("button", { name: "Check PR now" }));
     await waitFor(() => expect(lasso.sent).toEqual([{ method: "POST", route: "/api/check-now", body: null }]));
+  });
+});
+
+describe("a Ticket's PRs", () => {
+  const panel = () => document.querySelector<HTMLElement>('[data-role="pr-panel"]');
+
+  it("counts them in the title bar, which scrolls to the Pull requests panel above Budget: Owned first, then Referenced", async () => {
+    const prs = [
+      pr(12, { role: "referenced", source: "human", title: "Token refresh", head: "alice/token", author: "alice" }),
+      pr(7, { title: "Core change", feedback: 3, checks: "failing" }),
+      pr(9, { title: "Split migration", source: "agent", head: "app-A-migration", state: "MERGED" }),
+    ];
+    fakeLasso([ticket("A", { prs })]);
+    await showPage("A");
+    const count = within(document.querySelector<HTMLElement>('[data-role="titlebar"]')!).getByRole("link", { name: "2 Owned PRs · 1 Referenced" });
+    const scrolled = vi.fn();
+    panel()!.scrollIntoView = scrolled;
+    await userEvent.setup().click(count);
+    expect(scrolled).toHaveBeenCalledOnce();
+
+    const rows = [...panel()!.querySelectorAll<HTMLElement>('[data-role="pr-link-row"]')];
+    expect(rows.map((r) => [...r.children].map((c) => c.textContent))).toEqual([
+      ["Owned", "#7 Core changeapp-7 · linked by branch", "3 Feedback"],
+      ["", "#9 Split migrationapp-A-migration · linked by agent", "merged"],
+      ["Referenced", "#12 Token refreshalice/token · alice's", "open"],
+    ]);
+    expect(within(rows[2]!).getByRole("link", { name: "#12" }).getAttribute("href")).toBe("https://github.com/o/app/pull/12");
+    expect(panel()!.textContent).toContain("Link or unlink with lasso pr link / unlink");
+    expect(panel()!.querySelector("button")).toBeNull();
+    // The panel sits in the right column, above Budget.
+    expect(panel()!.nextElementSibling!.querySelector("h3")!.textContent).toBe("Budget");
+  });
+
+  it("shows neither the count nor the panel when the Ticket has none", async () => {
+    fakeLasso([ticket("A")]);
+    await showPage("A");
+    expect(document.querySelector('[data-role="pr-count"]')).toBeNull();
+    expect(panel()).toBeNull();
   });
 });
 
