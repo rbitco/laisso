@@ -545,24 +545,66 @@ describe("keeping up with Lasso", () => {
 });
 
 describe("the Ticket's exits", () => {
-  it("asks for a second press before Abandon, and forgets it after a while", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    try {
-      const lasso = fakeLasso([ticket("A")]);
-      await showPage("A");
-      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-      await user.click(within(triggers()).getByRole("button", { name: "Abandon" }));
-      expect(lasso.sent).toEqual([]);
-      expect(within(triggers()).getByRole("button", { name: "Abandon for sure?" })).toBeTruthy();
-      act(() => void vi.advanceTimersByTime(4000));
-      await user.click(within(triggers()).getByRole("button", { name: "Abandon" }));
-      expect(lasso.sent).toEqual([]);
-      await user.click(within(triggers()).getByRole("button", { name: "Abandon for sure?" }));
-      await waitFor(() => expect(lasso.sent).toEqual([{ method: "POST", route: "/api/tickets/A/abandon", body: {} }]));
-      await waitFor(() => expect(detailReads(lasso, "A")).toBe(2));
-    } finally {
-      vi.useRealTimers();
-    }
+  const abandonPop = () => screen.queryByRole("dialog", { name: "Abandon this Ticket?" });
+
+  it("opens a popover on Abandon listing only the open Owned PRs, all ticked, and sends the ticked ones", async () => {
+    const prs = [
+      pr(7, { title: "Add the column" }),
+      pr(8, { title: "Use the column" }),
+      pr(9, { state: "MERGED" }),
+      pr(10, { state: "CLOSED" }),
+      pr(11, { role: "referenced", source: "human", url: "https://github.com/them/lib/pull/11" }),
+    ];
+    const lasso = fakeLasso([ticket("A", { prs })]);
+    await showPage("A");
+    const user = userEvent.setup();
+    await user.click(within(triggers()).getByRole("button", { name: "Abandon" }));
+    expect(lasso.sent).toEqual([]);
+    const pop = abandonPop()!;
+    expect(within(pop).getByText("The branch is kept. Ticked PRs are closed with a comment.")).toBeTruthy();
+    const boxes = within(pop).getAllByRole("checkbox");
+    expect(boxes.map((b) => b.closest("label")!.textContent)).toEqual(["Close PR #7 Add the column", "Close PR #8 Use the column"]);
+    expect(boxes.map((b) => (b as HTMLInputElement).checked)).toEqual([true, true]);
+    expect(within(pop).getByRole("button", { name: "Abandon, close 2" })).toBeTruthy();
+
+    await user.click(within(pop).getByRole("checkbox", { name: "Close PR #8 Use the column" }));
+    await user.click(within(pop).getByRole("button", { name: "Abandon, close 1" }));
+    await waitFor(() => expect(lasso.sent).toEqual([{ method: "POST", route: "/api/tickets/A/abandon", body: { close: [pr(7).url] } }]));
+    await waitFor(() => expect(detailReads(lasso, "A")).toBe(2));
+    expect(abandonPop()).toBeNull();
+  });
+
+  it("closes the Abandon popover on Cancel, Escape, or a click outside, without abandoning", async () => {
+    const lasso = fakeLasso([ticket("A", { prs: [pr(7)] })]);
+    await showPage("A");
+    const user = userEvent.setup();
+    const lever = () => within(triggers()).getByRole("button", { name: "Abandon" });
+    await user.click(lever());
+    await user.click(within(abandonPop()!).getByRole("button", { name: "Cancel" }));
+    expect(abandonPop()).toBeNull();
+    await user.click(lever());
+    await user.keyboard("{Escape}");
+    expect(abandonPop()).toBeNull();
+    await user.click(lever());
+    await user.click(screen.getByRole("heading", { level: 2, name: "Ticket A" }));
+    expect(abandonPop()).toBeNull();
+    // Ticking a box does not count as outside.
+    await user.click(lever());
+    await user.click(within(abandonPop()!).getByRole("checkbox"));
+    expect(within(abandonPop()!).getByRole("button", { name: "Abandon, close 0" })).toBeTruthy();
+    expect(lasso.sent).toEqual([]);
+  });
+
+  it("offers the same popover without PR choices when no Owned PR is open", async () => {
+    const lasso = fakeLasso([ticket("A", { prs: [pr(9, { state: "MERGED" }), pr(11, { role: "referenced" })] })]);
+    await showPage("A");
+    const user = userEvent.setup();
+    await user.click(within(triggers()).getByRole("button", { name: "Abandon" }));
+    const pop = abandonPop()!;
+    expect(within(pop).queryAllByRole("checkbox")).toEqual([]);
+    expect(within(pop).getAllByRole("button").map((b) => b.textContent)).toEqual(["Cancel", "Abandon"]);
+    await user.click(within(pop).getByRole("button", { name: "Abandon" }));
+    await waitFor(() => expect(lasso.sent).toEqual([{ method: "POST", route: "/api/tickets/A/abandon", body: { close: [] } }]));
   });
 
   it("offers Advance anyway when Mark done finds the artifact missing, and sends it with override", async () => {

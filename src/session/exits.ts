@@ -184,11 +184,17 @@ export class Exits {
     return updated;
   }
 
-  /** Abandon: the state change, then every running Session of the Ticket is killed with that reason, then the worktree is torn down (ADR 0007). */
-  async abandon(ticket: TicketRow): Promise<TicketRow> {
+  /**
+   * Abandon: the state change, then every running Session of the Ticket is killed with that reason, then the worktree is
+   * torn down (ADR 0007). `close` is the list of PR URLs to close, as the human ticked them; absent, every open Owned PR is.
+   */
+  async abandon(ticket: TicketRow, close?: unknown): Promise<TicketRow> {
+    if (close !== undefined && close !== null && !(Array.isArray(close) && close.every((u) => typeof u === "string"))) {
+      throw new TriggerError("close must be a list of PR URLs");
+    }
     const abandoned = await this.deps.progress.abandon(ticket);
     await this.deps.runs.killFor(ticket.id, "abandon");
-    await this.deps.teardown.abandon(abandoned);
+    await this.deps.teardown.abandon(abandoned, (close as string[] | null | undefined) ?? undefined);
     return this.deps.tickets.get(abandoned.id)!;
   }
 

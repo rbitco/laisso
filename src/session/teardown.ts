@@ -27,8 +27,8 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  * A Ticket's end of life (ADR 0007): what only Lasso needed goes, what a
  * human might still want stays. Done removes the worktree and the local
  * branch, since the PR is merged. Abandon first commits and pushes whatever
- * the Runner left, keeps the branch as the salvage point, and closes an
- * open PR with a marked comment. The per-Ticket directory outlives both
+ * the Runner left, keeps the branch as the salvage point, and closes the
+ * open Owned PRs the human chose, each with a marked comment. The per-Ticket directory outlives both
  * until the retention sweep. Labels are the mirror's to clear, and the
  * tracker's status is never touched. Nothing here throws: a step that fails
  * is logged and the Ticket ends anyway.
@@ -49,11 +49,14 @@ export class Teardown {
   }
 
   /**
-   * Abandon: WIP commit, push where the branch has a remote, close an open PR, then the worktree
-   * goes and the branch stays. The PR is closed whatever became of the commit; only the worktree
-   * removal depends on it, since uncommitted work is never discarded.
+   * Abandon: WIP commit, push where the branch has a remote, close the chosen open Owned PRs, then the worktree
+   * goes and the branch stays. `close` lists the PR URLs the human ticked; only those that are open Owned PRs of
+   * the Ticket are closed, so a Referenced, merged or unticked PR is never touched. Without a list, every open
+   * Owned PR is closed, and a Ticket that never linked one has the PR on its branch closed, unless a human
+   * unlinked it. The PRs are closed whatever became of the commit; only the worktree removal depends on it,
+   * since uncommitted work is never discarded.
    */
-  async abandon(ticket: TicketRow): Promise<void> {
+  async abandon(ticket: TicketRow, close?: readonly string[]): Promise<void> {
     const git = this.gitFor(ticket);
     if (!git) return;
     const committed = await this.step(ticket, "wip", () => git.commitAll(ticket.worktree, WIP_MESSAGE));
@@ -63,17 +66,10 @@ export class Teardown {
         if (await git.remoteBranchExists(ticket.branch)) await git.push(ticket.worktree, ticket.branch);
       });
     }
-    await this.step(ticket, "pr", async () => {
-      // The one open Owned PR; a Ticket that never linked one has the PR on its branch closed, unless a human unlinked it.
-      const { links } = this.deps;
-      const owned = links.links(ticket.id).filter((l) => l.role === "owned");
-      const open = links.ownedOpen(ticket.id)[0];
-      if (owned.length && !open) return;
-      const ref = await this.deps.prs.open({ branch: ticket.branch, worktree: ticket.worktree, pr: open?.url ?? null });
-      if (!ref || (!open && links.unlinked(ticket.id, ref.url))) return;
-      await this.deps.prs.close(ref, `Abandoned in Lasso. The branch \`${ticket.branch}\` is kept.\n\n<!-- lasso:${ticket.id}:abandoned -->`);
-      this.deps.log.info("ticket.pr_closed", { ticket: ticket.id, pr: ref.url });
-    });
+    const { links } = this.deps;
+    const open = links.ownedOpen(ticket.id);
+    for (const link of close ? open.filter((l) => close.includes(l.url)) : open) await this.closePr(ticket, link.url, link.head ?? ticket.branch);
+    if (!close && !links.links(ticket.id).some((l) => l.role === "owned")) await this.closePr(ticket, null, ticket.branch);
     if (committed !== null) await this.step(ticket, "worktree", () => git.removeWorktree(ticket.worktree));
   }
 
@@ -111,6 +107,19 @@ export class Teardown {
       changes.push({ ticket: ticket.id, summary: `directory swept, ${config.retention} days after ${ticket.state}` });
     }
     return changes;
+  }
+
+  /**
+   * Close one PR if it is open right now, with the marked comment naming its own head branch as kept (ADR 0007).
+   * A null URL means the PR on the Ticket's branch, which a human's unlink keeps Lasso's hands off.
+   */
+  private async closePr(ticket: TicketRow, url: string | null, head: string): Promise<void> {
+    await this.step(ticket, "pr", async () => {
+      const ref = await this.deps.prs.open({ branch: ticket.branch, worktree: ticket.worktree, pr: url });
+      if (!ref || (!url && this.deps.links.unlinked(ticket.id, ref.url))) return;
+      await this.deps.prs.close(ref, `Abandoned in Lasso. The branch \`${head}\` is kept.\n\n<!-- lasso:${ticket.id}:abandoned -->`);
+      this.deps.log.info("ticket.pr_closed", { ticket: ticket.id, pr: ref.url });
+    });
   }
 
   private gitFor(ticket: TicketRow): Git | null {

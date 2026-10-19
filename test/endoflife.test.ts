@@ -1,6 +1,9 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { PrLinks } from "../src/store/links.ts";
+import { Tickets } from "../src/store/tickets.ts";
 import { startLassoWithRepos, waitFor, claudeFixture, type Lasso, type LassoConfig, type RepoSpec } from "./harness.ts";
 import type { TicketDetail, IntakeResult, TicketView } from "../src/api/views.ts";
 import type { TickChange } from "../src/server/tick.ts";
@@ -115,6 +118,44 @@ describe("end of life", () => {
     await waitFor(async () => (repos.app.git(["log", "-1", "--format=%s", clean.branch]) === "work" ? true : null), "the Runner to commit");
     await pull(lasso, clean.id, "abandon");
     expect(repos.app.git(["log", "-1", "--format=%s", clean.branch])).toBe("work");
+  });
+
+  it("Abandon closes only the ticked open Owned PRs, each naming its own head branch, and leaves the rest for another Ticket", async () => {
+    const { lasso, ticket } = await lassoWithTicket();
+    const url = (n: number, repo = "owner/app") => `https://github.com/${repo}/pull/${n}`;
+    // Two ticked open Owned PRs, one unticked, one merged, and a Referenced PR from another repo, all on the request but the unticked one.
+    const links: Array<[number, string, string, string, string]> = [
+      [7, url(7), "owned", "OPEN", "split-schema"],
+      [8, url(8), "owned", "OPEN", "split-feature"],
+      [12, url(12), "owned", "OPEN", "split-extra"],
+      [9, url(9), "owned", "MERGED", "split-done"],
+      [10, url(10, "them/lib"), "referenced", "OPEN", "their-branch"],
+    ];
+    const db = new DatabaseSync(path.join(lasso.home, "lasso.db"));
+    const insert = db.prepare(`INSERT INTO ticket_prs (ticket, url, role, source, added_at, title, head, base, state) VALUES (?, ?, ?, 'human', ?, ?, ?, 'main', ?)`);
+    links.forEach(([n, u, role, state, head], i) => insert.run(ticket.id, u, role, `2026-10-19T10:00:0${i}Z`, `PR ${n}`, head, state));
+    db.close();
+    for (const [n, u] of links) await lasso.tracker.reply({ tool: "gh", match: ["pr view", u], stdout: JSON.stringify({ number: n, url: u, state: "OPEN" }) });
+    await lasso.tracker.reply({ tool: "gh", match: ["pr close"], stdout: "" });
+
+    const close = [url(7), url(8), url(9), url(10, "them/lib"), url(99)];
+    const abandoned = await lasso.api<TicketDetail>(`/api/tickets/${ticket.id}/abandon`, { method: "POST", body: JSON.stringify({ close }) });
+    expect(abandoned.state).toBe("abandoned");
+    const gh = await ghCalls(lasso);
+    expect(gh.map((c) => c.split(" --comment ")[0])).toEqual([`pr view ${url(7)} --json number,url,state`, `pr close ${url(7)}`, `pr view ${url(8)} --json number,url,state`, `pr close ${url(8)}`]);
+    expect(gh[1]).toContain("The branch `split-schema` is kept.");
+    expect(gh[3]).toContain("The branch `split-feature` is kept.");
+    for (const c of [gh[1], gh[3]]) expect(c).toContain(`<!-- lasso:${ticket.id}:abandoned -->`);
+
+    // The unticked PR is free for another Ticket to own.
+    const next = await lasso.api<IntakeResult>("/api/tickets", { method: "POST", body: JSON.stringify({ input: "Finish the split", repo: "app", pipeline: "one" }) });
+    const store = new DatabaseSync(path.join(lasso.home, "lasso.db"));
+    try {
+      const prLinks = new PrLinks(store);
+      expect(prLinks.link(new Tickets(store).get(next.id)!, url(12), "owned", "human")).toEqual({ link: expect.objectContaining({ role: "owned", url: url(12) }) });
+    } finally {
+      store.close();
+    }
   });
 
   it("re-intake of an Abandoned reference makes a new Ticket on the kept branch", async () => {

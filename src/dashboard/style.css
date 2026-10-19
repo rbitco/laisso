@@ -251,6 +251,14 @@ main { padding: 16px; }
 .name-editor input { width: min(320px, 70vw); padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: inherit; font: inherit; font-size: 13px; }
 .titlebar .right { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .triggers { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+/* Abandon opens a popover under its lever: what is kept, and which open Owned PRs to close. */
+.triggers .abandon { position: relative; }
+.abandon-pop { position: absolute; z-index: 20; right: 0; top: calc(100% + 6px); width: 300px; display: grid; gap: 6px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow); color: var(--muted); font-size: 12px; line-height: 1.4; }
+/* In the Flag box the levers sit at the left, so the popover opens rightwards. */
+.flagbox .abandon-pop { right: auto; left: 0; max-width: calc(100vw - 32px); }
+.abandon-pop strong { color: var(--ink); font-size: 13px; font-weight: 600; }
+.abandon-pop label { display: flex; gap: 6px; align-items: center; color: var(--ink); }
+.abandon-pop .abandon-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
 .override { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; color: var(--crit); }
 .override button { border-color: var(--crit); background: transparent; color: var(--crit); }
 .flow { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px 6px; overflow-x: auto; }

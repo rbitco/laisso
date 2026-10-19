@@ -210,7 +210,8 @@ export function createApp(deps: AppDeps): Hono {
   trigger("retry", (ticket, body) => deps.exits.retry(ticket, body.profile));
   trigger("resume", (ticket) => deps.exits.resume(ticket));
   trigger("extend", (ticket, body) => deps.exits.extend(ticket, body as ExtendRequest));
-  trigger("abandon", (ticket) => deps.exits.abandon(ticket));
+  // Abandon with { close: [PR URL…] } closes only those of the Ticket's open Owned PRs; without it, all of them (LASSO-169).
+  trigger("abandon", (ticket, body) => deps.exits.abandon(ticket, body.close));
   // A human steps into a headless Stage's Session in a terminal and hands it back, or reads the draft a gate holds before Start.
   trigger("takeover", (ticket) => deps.exits.takeOver(ticket));
   trigger("handback", (ticket) => deps.exits.handBack(ticket));

@@ -1,32 +1,28 @@
-import { useEffect, useState } from "react";
+import { useRef, useState } from "react";
 import type { TicketDetail, Trigger } from "../../../api/views.ts";
 import { showNotice } from "../notice.tsx";
 import { openProfileDrawer } from "../profiles/drawer.tsx";
+import { AbandonPopover } from "./Abandon.tsx";
 import { message, pullTrigger, type ArtifactProblem } from "./ticket.ts";
-
-/** How long Abandon waits for its second press. */
-const ARMED_MS = 4000;
 
 const PRIMARY = new Set<string>(["terminal", "start", "retry"]);
 
 /**
  * The levers on a Ticket. Mark done met with a missing artifact offers to advance anyway, inline; Extend opens the
- * Budget editor; Abandon asks for a second press; Check PR now runs a tick. `refresh` follows a pull that went through.
+ * Budget editor; Abandon opens a popover to choose which open Owned PRs it closes; Check PR now runs a tick. `refresh`
+ * follows a pull that went through.
  */
 export function Triggers({ ticket: t, onExtend, refresh }: { ticket: TicketDetail; onExtend: () => void; refresh: () => Promise<void> }) {
   // The lever being pulled; every lever waits on it.
   const [busy, setBusy] = useState<string | null>(null);
-  const [armed, setArmed] = useState(false);
+  const [abandoning, setAbandoning] = useState(false);
+  // The Abandon lever and its popover: a click outside both closes the popover.
+  const abandonBox = useRef<HTMLDivElement>(null);
   const [problem, setProblem] = useState<{ action: string; problem: ArtifactProblem } | null>(null);
-  useEffect(() => {
-    if (!armed) return;
-    const timer = setTimeout(() => setArmed(false), ARMED_MS);
-    return () => clearTimeout(timer);
-  }, [armed]);
 
   const pull = async (action: string, body: object = {}) => {
     setBusy(action);
-    setArmed(false);
+    setAbandoning(false);
     try {
       const refused = await pullTrigger(t.id, action, body);
       if (refused) {
@@ -45,8 +41,7 @@ export function Triggers({ ticket: t, onExtend, refresh }: { ticket: TicketDetai
   const press = (trigger: Trigger) => {
     if (trigger.action === "extend") onExtend();
     else if (trigger.action !== "abandon") void pull(trigger.action);
-    else if (armed) void pull("abandon");
-    else setArmed(true);
+    else setAbandoning((a) => !a);
   };
 
   const lever = (action: string, label: string, primary: boolean, onClick: () => void, extra: { role?: string; unavailable?: string } = {}) => (
@@ -88,10 +83,17 @@ export function Triggers({ ticket: t, onExtend, refresh }: { ticket: TicketDetai
 
   return (
     <div className="triggers" data-role="triggers">
-      {t.triggers.map((trigger) =>
+      {t.triggers.map((trigger) => {
         // A lever on show that cannot be pulled (Resume on another Runner) stays disabled and says why below.
-        lever(trigger.action, trigger.action === "abandon" && armed ? "Abandon for sure?" : trigger.label, PRIMARY.has(trigger.action), () => press(trigger), { unavailable: trigger.unavailable }),
-      )}
+        const button = lever(trigger.action, trigger.label, PRIMARY.has(trigger.action), () => press(trigger), { unavailable: trigger.unavailable });
+        if (trigger.action !== "abandon") return button;
+        return (
+          <div key="abandon" className="abandon" ref={abandonBox}>
+            {button}
+            {abandoning && <AbandonPopover prs={t.prs} within={abandonBox} busy={busy !== null} onConfirm={(close) => void pull("abandon", { close })} onClose={() => setAbandoning(false)} />}
+          </div>
+        );
+      })}
       {/* Check PR now belongs to the repeating Stage: a tick there fetches Feedback and opens a Round (spec: the title bar). */}
       {t.state === "active" && t.prs.some((p) => p.role === "owned") && t.stage.repeat && lever("check", "Check PR now", false, () => void pull("check"), { role: "check-pr" })}
       {t.flag && stageProfile && t.triggers.some((x) => x.action === "retry") && lever("retry-with", "retry with…", false, retryWith, { role: "retry-with" })}

@@ -210,7 +210,9 @@ the local branch and clears every `lasso:*` label; the tracker's status
 stays where the Pipeline left it. Abandon kills the Ticket's headless
 Sessions, commits anything uncommitted as `wip: abandoned in Lasso` and
 pushes it when the branch has a remote, removes the worktree, keeps the
-branch, and closes an open PR with a marked comment. There is no
+branch, and closes the open Owned PRs you tick in its popover, each with
+a marked comment naming its head branch as kept. Unticked, merged and
+Referenced PRs are left alone. There is no
 Reopen: intaking the same issue again makes a new Ticket on the kept
 branch. The per-Ticket directory under `~/.lasso/tickets/` outlives
 both until the tick sweeps it `retention` days later (default 30);
