@@ -7,6 +7,7 @@ import type { Progress } from "../session/progress.ts";
 import type { Verdict } from "../session/runs.ts";
 import { actionArtifact, type RunnerStage } from "../pipeline/load.ts";
 import type { ActionChecks } from "../artifact/action-check.ts";
+import type { OwnedPr } from "../artifact/check.ts";
 import { checkFor } from "../store/tickets.ts";
 import { ownedOf, type PrLinkFacts, type PrLinks, type PrLinkRow } from "../store/links.ts";
 import { parsePrUrl, type PullRequests, type PrRef } from "./github.ts";
@@ -261,14 +262,18 @@ export class Review {
     return "wait";
   }
 
-  /** The PR as an artifact check sees it: state and whether anyone has reviewed. */
-  async probe(ticket: TicketRow): Promise<{ number: number; state: PrFacts["state"]; reviewed: boolean } | null> {
-    const owned = await this.owned(ticket);
-    if (!owned) return null;
-    const { ref } = owned;
-    const head = await this.deps.prs.head(ref);
-    this.deps.links.update(ticket.id, ref.url, aboutOf(head));
-    return { number: ref.number, state: head.state, reviewed: head.reviewCount > 0 || head.threads.length > 0 };
+  /** Every Owned PR as an artifact check sees it: state and whether anyone has reviewed. Referenced PRs never count. */
+  async probe(ticket: TicketRow): Promise<OwnedPr[]> {
+    // Finds and links the branch PR when the Ticket has no Owned PR yet.
+    if (!(await this.owned(ticket))) return [];
+    const refs = this.deps.links.links(ticket.id).filter((l) => l.role === "owned").map((l) => parsePrUrl(l.url)).filter((r): r is PrRef => r !== null);
+    return Promise.all(
+      refs.map(async (ref) => {
+        const head = await this.deps.prs.head(ref);
+        this.deps.links.update(ticket.id, ref.url, aboutOf(head));
+        return { number: ref.number, state: head.state, reviewed: head.reviewCount > 0 || head.threads.length > 0 };
+      }),
+    );
   }
 
   /** Failed checks get their log sliced into the snapshot once; a log already fetched for the same run is kept. */

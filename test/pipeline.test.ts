@@ -167,4 +167,12 @@ describe("the default Pipeline", () => {
       ["review", null],
     ]);
   });
+
+  it("has code-review post one review on each Owned PR, not just the branch (LASSO-166)", () => {
+    const stage = parsePipeline("default", DEFAULT_PIPELINE_YAML).stages.find((s) => s.kind === "runner" && s.name === "code-review");
+    const prompt = stage?.kind === "runner" ? stage.prompt : null;
+    expect(prompt).toContain("Review each Owned PR");
+    expect(prompt).toContain("one PR review per Owned PR");
+    expect(prompt).not.toContain("this branch");
+  });
 });

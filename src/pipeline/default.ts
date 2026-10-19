@@ -48,9 +48,10 @@ stages:
     skills: [code-review]
     artifact: pr-review
     prompt: |
-      Review this branch against main with code-review. Post the findings
-      as one PR review with inline comments, each carrying Lasso's Stage
-      marker, so the Review Stage addresses them as Feedback.
+      Review each Owned PR of this Ticket ("lasso pr list" names them)
+      against its base with code-review. Post one PR review per Owned PR
+      with inline comments, each carrying Lasso's Stage marker, so the
+      Review Stage addresses them as Feedback. Leave Referenced PRs alone.
 
   - action: tracker.transition
     with: { status: In Review }

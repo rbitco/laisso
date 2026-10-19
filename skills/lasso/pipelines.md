@@ -140,9 +140,11 @@ stages:
 | Artifact | Present when |
 | --- | --- |
 | `commits-on-branch` | the branch has commits beyond `origin/<default branch>` |
-| `pr-exists` | the branch has a PR (read with `gh`) |
-| `pr-review` | the branch's PR has a review |
-| `pr-merged` | the branch's PR is merged |
+| `pr-exists` | the Ticket has at least one Owned PR (the branch's PR is linked as Owned when it has none; read with `gh`) |
+| `pr-review` | every open Owned PR has a review |
+| `pr-merged` | every Owned PR has merged |
+
+The `pr-*` Artifacts never count Referenced PRs. When one is not met, its message names each Owned PR that falls short, such as `nobody has reviewed PR #12, #15` or `PR #12, #15 not merged`.
 | `file <path>` | `<path>` exists in the worktree; relative, no `..` |
 | `tracker-spec`, `tracker-comment` | accepted, but **this Lasso cannot check them yet**: a headless Stage declaring one is Flagged `artifact.missing` ("cannot be checked yet") every time, and Mark done on a human Stage always warns. Leave them off headless Stages. |
 

@@ -16,10 +16,31 @@ export type ActionProbe = (action: string, params: Record<string, string>) => Pr
 
 const NO_ACTIONS: ActionProbe = async (action) => ({ present: false, detail: `${action} cannot be run here`, broken: true });
 
-/** The Ticket's PR as the pr-* artifacts need it, read on demand; null when the branch has none. */
-export type PrProbe = () => Promise<{ number: number; state: "OPEN" | "CLOSED" | "MERGED"; reviewed: boolean } | null>;
+/** One Owned PR as the pr-* artifacts need it. */
+export interface OwnedPr {
+  number: number;
+  state: "OPEN" | "CLOSED" | "MERGED";
+  reviewed: boolean;
+}
 
-const NO_PR: PrProbe = async () => null;
+/** The Ticket's Owned PRs, read on demand; empty when it has none. Referenced PRs never count. */
+export type PrProbe = () => Promise<OwnedPr[]>;
+
+const NO_PR: PrProbe = async () => [];
+
+/** "PR #12, #15": the PRs a pr-* message names. */
+function named(prs: OwnedPr[]): string {
+  return `PR ${prs.map((p) => `#${p.number}`).join(", ")}`;
+}
+
+/** The pr-* artifacts over every Owned PR: pr-exists needs one, pr-review a review on each open one, pr-merged every one merged. */
+function judgePrs(artifact: "pr-exists" | "pr-review" | "pr-merged", owned: OwnedPr[]): ArtifactVerdict {
+  if (!owned.length) return { present: false, detail: "no Owned PR for the Ticket" };
+  if (artifact === "pr-exists") return { present: true, detail: null };
+  const short = artifact === "pr-review" ? owned.filter((p) => p.state === "OPEN" && !p.reviewed) : owned.filter((p) => p.state !== "MERGED");
+  if (!short.length) return { present: true, detail: null };
+  return { present: false, detail: artifact === "pr-review" ? `nobody has reviewed ${named(short)}` : `${named(short)} not merged` };
+}
 
 /**
  * Is the Stage's declared artifact there? Lasso decides done from this and
@@ -31,11 +52,7 @@ export async function checkArtifact(artifact: string | null, worktree: string, p
   const action = actionArtifact(artifact);
   if (action !== null) return check(action, params);
   if (artifact === "pr-exists" || artifact === "pr-review" || artifact === "pr-merged") {
-    const found = await pr();
-    if (!found) return { present: false, detail: "no PR for the branch" };
-    if (artifact === "pr-exists") return { present: true, detail: null };
-    if (artifact === "pr-review") return found.reviewed ? { present: true, detail: null } : { present: false, detail: `nobody has reviewed PR #${found.number}` };
-    return found.state === "MERGED" ? { present: true, detail: null } : { present: false, detail: `PR #${found.number} is ${found.state.toLowerCase()}` };
+    return judgePrs(artifact, await pr());
   }
   const file = fileArtifact(artifact);
   if (file !== null) {
