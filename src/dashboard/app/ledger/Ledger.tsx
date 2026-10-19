@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
-import type { TicketView } from "../../../api/views.ts";
+import type { PrView, TicketView } from "../../../api/views.ts";
 import { ledgerStageText, metroTrack, quickAction, relative } from "../../metro.ts";
 import { useClock } from "../clock.ts";
 import { useEvents } from "../events.ts";
 import { showNotice } from "../notice.tsx";
 import { MiniRings } from "../ticket/Budget.tsx";
+import { prStateWord, prTone } from "../ticket/PullRequests.tsx";
 import { listTickets, message, pullTrigger } from "../ticket/ticket.ts";
 
 export interface LedgerProps {
@@ -59,8 +60,9 @@ export function Ledger({ all, visit }: LedgerProps) {
 }
 
 /**
- * A Ledger row: status pill, reference over repo, title over the why line, the mini Metro track with the Stage name,
- * four mini rings, last activity, and the one quick action (spec: Ledger). A click opens the Ticket.
+ * A Ledger row: status pill, reference over repo, title over the why line (led by a chip per Owned PR), the mini Metro
+ * track with the Stage name, four mini rings, last activity, and the one quick action (spec: Ledger). A click opens
+ * the Ticket.
  */
 function TicketRow({ ticket: t, onPulled }: { ticket: TicketView; onPulled: () => Promise<void> }) {
   return (
@@ -81,6 +83,11 @@ function TicketRow({ ticket: t, onPulled }: { ticket: TicketView; onPulled: () =
           {t.title}
         </div>
         <div className="why" data-role="why" title={t.display.why}>
+          {t.prs
+            .filter((p) => p.role === "owned")
+            .map((p) => (
+              <PrChip key={p.url} pr={p} />
+            ))}
           {t.display.why}
         </div>
       </div>
@@ -96,6 +103,16 @@ function TicketRow({ ticket: t, onPulled }: { ticket: TicketView; onPulled: () =
         <QuickAction ticket={t} onPulled={onPulled} />
       </div>
     </article>
+  );
+}
+
+/** An Owned PR on the why line: a dot in the PR's tone and its number, linking to GitHub without opening the Ticket. */
+function PrChip({ pr: p }: { pr: PrView }) {
+  return (
+    <a className="lpr" data-role="pr-chip" href={p.url} target="_blank" rel="noopener" title={[p.title, prStateWord(p)].filter(Boolean).join(" · ")} onClick={(ev) => ev.stopPropagation()}>
+      <span className={"dot " + prTone(p)} />
+      {"#" + p.number}
+    </a>
   );
 }
 

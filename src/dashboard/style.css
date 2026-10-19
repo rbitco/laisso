@@ -201,6 +201,13 @@ main { padding: 16px; }
 .ticket .why, .ticket .repo, .ticket .last { color: var(--muted); font-size: 12px; }
 .ticket .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ticket .why { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ticket .lpr { display: inline-flex; align-items: center; gap: 4px; margin-right: 4px; padding: 0 6px; border: 1px solid var(--line); border-radius: 999px; color: inherit; font-size: 11px; line-height: 16px; text-decoration: none; vertical-align: 1px; }
+.ticket .lpr:hover { border-color: var(--accent); color: var(--ink); }
+.ticket .lpr .dot { width: 7px; height: 7px; }
+.ticket .lpr .dot.good { background: var(--good); }
+.ticket .lpr .dot.crit { background: var(--crit); }
+.ticket .lpr .dot.run { background: var(--run); }
+.ticket .lpr .dot.muted { background: var(--muted); }
 .ticket .track { display: grid; gap: 2px; }
 .ticket .track svg { display: block; width: 100%; max-width: 132px; height: 18px; }
 .ticket .track .stage { display: block; color: var(--muted); font-size: 11px; }

@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, cleanup, act, waitFor, within } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import type { BudgetView } from "../src/budget/budget.ts";
-import type { TicketView } from "../src/api/views.ts";
+import type { PrView, TicketView } from "../src/api/views.ts";
 import { Ledger } from "../src/dashboard/app/ledger/Ledger.tsx";
 import { Notice, showNotice } from "../src/dashboard/app/notice.tsx";
 import { events } from "../src/dashboard/app/events.ts";
@@ -132,6 +132,32 @@ describe("the Ledger", () => {
     await screen.findByText("No Tickets yet. Paste a reference or a prompt above to start one.");
     view.rerender(<Ledger all={false} visit={2} />);
     await screen.findByText("No active Tickets. Paste a reference or a prompt above to start one.");
+  });
+
+  it("leads the why line with a chip per Owned PR, its dot toned by the PR's state, and leaves Referenced PRs off", async () => {
+    const pr = (number: number, over: Partial<PrView> = {}): PrView => ({ url: `https://github.com/o/app/pull/${number}`, number, title: `PR ${number}`, role: "owned", source: "branch", state: "OPEN", head: `h${number}`, base: "main", author: "me", feedback: 0, checks: "green", ...over });
+    fakeLasso([
+      view("A", { prs: [pr(1), pr(2, { state: "MERGED" }), pr(3, { role: "referenced", source: "human" })] }),
+      view("B", { prs: [pr(4, { state: "CLOSED" }), pr(5, { feedback: 2 }), pr(6, { checks: "failing" }), pr(7, { checks: "running" }), pr(8, { checks: "none" })] }),
+      view("C"),
+    ]);
+    render(<Ledger all={false} visit={1} />);
+    await screen.findByText("Ticket A");
+    const chips = (id: string) => [...row(id).querySelectorAll<HTMLAnchorElement>('[data-role="pr-chip"]')];
+    expect(chips("A").map((c) => [c.textContent, c.getAttribute("href"), c.getAttribute("title")])).toEqual([
+      ["#1", "https://github.com/o/app/pull/1", "PR 1 · checks green"],
+      ["#2", "https://github.com/o/app/pull/2", "PR 2 · merged"],
+    ]);
+    expect(role(row("A"), "why").textContent).toBe("#1#2waiting on the next tick");
+    const dots = (id: string) => chips(id).map((c) => c.querySelector(".dot")!.className);
+    expect(dots("A")).toEqual(["dot muted", "dot good"]);
+    expect(dots("B")).toEqual(["dot crit", "dot crit", "dot crit", "dot run", "dot muted"]);
+    // No Owned PR: the why text alone.
+    expect(chips("C")).toEqual([]);
+    expect(role(row("C"), "why").textContent).toBe("waiting on the next tick");
+    // A chip opens the PR, not the Ticket.
+    await userEvent.setup().click(chips("A")[0]!);
+    expect(location.hash).toBe("");
   });
 
   it("opens a Ticket on a click of its row", async () => {

@@ -15,7 +15,7 @@ export function prStateWord(p: PrView): string {
 }
 
 /** The tone a PR's state word takes, from the same reading. */
-function prTone(p: PrView): string {
+export function prTone(p: PrView): string {
   if (p.state === "MERGED") return "good";
   if (p.state === "CLOSED") return "crit";
   if (p.role === "referenced") return "muted";
