@@ -112,6 +112,11 @@ The command's environment is Lasso's own plus:
 Use these variables in `run`; Lasso does no template substitution, so
 quoting stays the shell's job.
 
+An Action can also be a Stage's artifact, run as a check: exit 0 is met,
+exit 1 is not met, anything else is a broken check. See
+[Check Actions](pipelines.md#check-actions). A check gets the same
+variables, with `LASSO_SESSION` empty. Write a check so it only looks.
+
 ```yaml lasso-config
 actions:
   notify:

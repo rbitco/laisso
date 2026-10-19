@@ -14,6 +14,7 @@ own log is `<Lasso home>/lasso.log` (one JSON line per event, e.g.
 | `budget.wall_time` | a headless Session ran past `wallTime` | raise the Stage's `budget.wallTime`, or Extend |
 | `budget.attempts` / `budget.rounds` / `budget.cost` | the Ticket used up its attempts, Rounds, or `spend` | Extend, or raise the Budget in the Pipeline or config.yaml |
 | `artifact.missing` | the Session succeeded but the Stage's artifact is not there | check the prompt produces it; `tracker-spec` and `tracker-comment` always land here (see [pipelines.md](pipelines.md#artifacts)) |
+| `artifact.error` | the Stage's [check Action](pipelines.md#check-actions) broke: it exited other than 0 or 1, timed out, or could not start (an Action missing for the repo, a param not supplied, the worktree gone) | run the Action's `run` by hand in the worktree with the `LASSO_*` variables set; fix it, then Retry, or Mark done |
 | `profile.missing` | the profile the Stage resolves to is not in config.yaml for this repo | define it, or point the Stage at one that exists |
 | `runner.unavailable` | the Runner could not start, often not on PATH | install it; `lasso doctor` names what is missing |
 | `pipeline.missing` | the Ticket's Pipeline cannot be loaded: its pinned Version is gone from the store, or a Ticket from before Versions has lost its Pipeline file or Stage | restore the Pipeline file for an unpinned Ticket; otherwise Skip or Abandon |

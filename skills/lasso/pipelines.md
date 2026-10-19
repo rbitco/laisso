@@ -40,7 +40,7 @@ names are lowercase letters, digits and hyphens, unique in the Pipeline.
 | `human` | `false` | `true` opens the Runner in a terminal for the human, who marks the Stage done from the dashboard |
 | `advance` | `true` | `false` holds the Ticket after this Stage until a human presses Start on the next one |
 | `artifact` | none | what must exist for the Stage to count as done; see [Artifacts](#artifacts) |
-| `repeat` | none | only `feedback`: the Review loop. Needs an `artifact` as its end condition, normally `pr-merged`. |
+| `repeat` | none | only `feedback`: the Review loop. Needs an `artifact` as its end condition: `pr-merged`, or a [check Action](#check-actions). |
 | `budget` | inherit | `rounds`, `attempts` (whole numbers, 0 or more), `wallTime` (duration). `spend` belongs on the Pipeline. |
 
 Any other field is an error; `runner` and `runnerOptions` are the old forms
@@ -101,7 +101,8 @@ Round: a Session whose prompt lists what to address and the marker
 comment with. Comments by the logins under `review.ignore_authors`, or by
 the `gh` user with `review.ignore_self`, are not Feedback (see
 [config.md](config.md#review)). A thread counts as addressed once it has a marked reply and
-is resolved. The Stage finishes when the PR merges; `budget.rounds` caps the
+is resolved. The Stage finishes when the PR merges, or, when its artifact is
+a [check Action](#check-actions), once that check is met; `budget.rounds` caps the
 Rounds. The prompt should tell the Runner to reply with the marker, push,
 and resolve what it fixed, as the default Pipeline's `review` Stage does.
 
@@ -142,8 +143,64 @@ stages:
 | `file <path>` | `<path>` exists in the worktree; relative, no `..` |
 | `tracker-spec`, `tracker-comment` | accepted, but **this Lasso cannot check them yet**: a headless Stage declaring one is Flagged `artifact.missing` ("cannot be checked yet") every time, and Mark done on a human Stage always warns. Leave them off headless Stages. |
 
+| `action <name>`, or `{ action: <name>, with: {...} }` | the [check Action](#check-actions) `<name>` from config.yaml exits 0 |
+
 Any other artifact is an error. A Stage with a `pr-*` artifact or
 `repeat: feedback` needs `gh`.
+
+### Check Actions
+
+A Stage's artifact may name an Action from config.yaml (the repo's own
+wins, as for action Stages). Lasso runs it in the Ticket's worktree, with
+the Action's `timeout`, wherever it would check an artifact: after a
+successful headless Session, and on Mark done. The exit code is the verdict:
+
+| Exit | Verdict | Headless Stage | Mark done on a human Stage |
+| --- | --- | --- | --- |
+| `0` | met | advances | finishes |
+| `1` | not met | Flagged `artifact.missing` | warns; can be overridden |
+| any other, a timeout, or it cannot start | broken | Flagged `artifact.error` | warns; can be overridden |
+
+The last line of output is the detail. Params go under `with:` on the
+artifact, and must be exactly the Action's `params`, as for an action
+Stage; the shorthand `action <name>` is for an Action with none. Lasso keeps
+only the latest result per Stage (no Session row), shown on the Ticket page.
+
+On a repeating Stage, a check Action is the end condition in place of the
+merge. It runs after each Round, and on each poll while the Ticket waits
+(so also on `lasso check` and Check now), before any new Round starts:
+
+- met: the Stage finishes, whatever Feedback is still standing;
+- not met, PR open: Rounds go on as Feedback arrives;
+- not met, PR merged: Flagged `artifact.missing`, as no more Feedback can come;
+- broken: Flagged `artifact.error`.
+
+It does not run while the Ticket is Flagged, before the branch has a PR, or
+while another check for the Ticket is running. A PR closed unmerged still
+Flags `review.pr_closed`.
+
+```yaml lasso-pipeline
+stages:
+  - name: implement
+    prompt: Implement the issue, push, and open a PR.
+    artifact: pr-exists
+  - name: review
+    prompt: Address the Feedback. Reply on each thread with the marker, push, and resolve what you fixed.
+    repeat: feedback
+    artifact:
+      action: ci-green
+      with: { workflow: test }
+```
+
+with, in config.yaml:
+
+```yaml lasso-config
+actions:
+  ci-green:
+    params: [workflow]
+    timeout: 2m
+    run: gh run list --branch "$LASSO_BRANCH" --workflow "$LASSO_WORKFLOW" --limit 1 --json conclusion --jq '.[0].conclusion' | grep -qx success
+```
 
 ## Budget
 
