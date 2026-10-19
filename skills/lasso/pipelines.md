@@ -2,8 +2,9 @@
 
 A Pipeline is one YAML file in `<Lasso home>/pipelines/`. Its name is the
 file name without `.yaml` (or `.yml`): lowercase letters, digits and
-hyphens, starting with a letter or digit. Lasso writes `default.yaml` on
-first start and never touches it again; edit it or add others freely.
+hyphens, starting with a letter or digit. Lasso writes `default.yaml` and
+`pr-review.yaml` on first start and never touches them again; edit them or
+add others freely.
 
 Editing a Pipeline never changes a Ticket already under way: Intake pins a
 frozen Version (v1, v2, ...) of the Pipeline, and the Ticket runs that
@@ -235,3 +236,15 @@ and its transitions use JIRA status names (see
 [config.md](config.md#trackertransition) for GitHub). Its skills (`grilling`,
 `to-spec`, `implement`, `code-review` and so on) must be installed for the
 Runner.
+
+## The pr-review Pipeline
+
+`pr-review.yaml` reviews someone else's PR. It runs only when chosen, as in
+`lasso add "<what to look for>" --pr owner/repo#N --pipeline pr-review`:
+`--pr` (repeatable) links each PR as Referenced, and without `--repo` the
+Ticket's repo is the configured one whose origin is the first PR's repo. The
+Ticket's branch starts at the head of the first Referenced PR in its repo.
+Its one headless Stage runs `code-review` over the Referenced PRs and writes
+the findings to `review-findings.md` in the worktree, its `file` Artifact.
+It has no tracker Actions and posts nothing to the PR: the human reads the
+findings and posts them.

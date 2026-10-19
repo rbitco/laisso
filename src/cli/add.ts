@@ -10,6 +10,8 @@ export interface AddOptions {
   json: boolean;
   repo?: string;
   pipeline?: string;
+  /** PRs to link as Referenced at Intake; without --repo, the first one's repo is the Ticket's. */
+  prs?: string[];
 }
 
 /** `lasso add`: server-side detection, one confirmation, then the new Ticket's id, name, and URL. */
@@ -18,7 +20,7 @@ export async function add(opts: AddOptions): Promise<number> {
   try {
     const input = opts.input.trim();
     if (!input) throw new Error("usage: lasso add <reference | prompt>");
-    const detection = await client.post<Detection>("/api/intake/detect", { input, repo: opts.repo });
+    const detection = await client.post<Detection>("/api/intake/detect", { input, repo: opts.repo, prs: opts.prs });
     const say = opts.json ? console.error : console.log;
     say(`${detection.kind}${detection.reference ? ` ${detection.reference}` : ""}: ${detection.title ?? input}`);
 
@@ -33,7 +35,7 @@ export async function add(opts: AddOptions): Promise<number> {
     say(`repo: ${repo}`);
     say(`pipeline: ${pipeline}`);
     // A reference's branch is only known once the repo is; ask again when the picker chose it.
-    const settled = detection.branch || !detection.reference ? detection : await client.post<Detection>("/api/intake/detect", { input, repo });
+    const settled = detection.branch || !detection.reference ? detection : await client.post<Detection>("/api/intake/detect", { input, repo, prs: opts.prs });
     if (settled.branch) say(`branch: ${settled.branch.name}`);
     for (const note of settled.notes) say(note);
 
@@ -45,7 +47,7 @@ export async function add(opts: AddOptions): Promise<number> {
       }
     }
 
-    const ticket = await client.post<IntakeResult>("/api/tickets", { input, repo, pipeline });
+    const ticket = await client.post<IntakeResult>("/api/tickets", { input, repo, pipeline, prs: opts.prs });
     if (opts.json) {
       console.log(JSON.stringify(ticket, null, 2));
       return 0;

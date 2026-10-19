@@ -12,6 +12,8 @@ export const DEFAULT_PORT = 7433;
 const USAGE = `usage:
   lasso                     start the Lasso process (dashboard, tick, Sessions)
   lasso add <ref | prompt>  intake a tracker reference or a prompt as a Ticket
+  lasso add <prompt> --pr <pr> --pipeline pr-review
+                            review a teammate's PR; the findings land in the worktree
   lasso status [ticket]     print the Ledger, or one Ticket's detail
   lasso check [ticket]      run a tick now and print what changed
   lasso pr link <pr> [ticket]    link a PR to a Ticket (URL, owner/repo#N, #N or N)
@@ -26,6 +28,7 @@ options:
   --yes            add: accept the suggestions without asking
   --repo <name>    add: the repo to intake into
   --pipeline <n>   add: the Pipeline to run
+  --pr <pr>        add: link a PR as Referenced (repeatable); without --repo, its repo is the Ticket's
   --referenced     pr link: link for context only, not as the Ticket's own work
   --dry-run        skill install: print what would be written, write nothing`;
 
@@ -41,6 +44,7 @@ export async function main(argv: string[]): Promise<number> {
       yes: { type: "boolean", short: "y", default: false },
       repo: { type: "string" },
       pipeline: { type: "string" },
+      pr: { type: "string", multiple: true },
       referenced: { type: "boolean", default: false },
       "dry-run": { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
@@ -67,6 +71,7 @@ export async function main(argv: string[]): Promise<number> {
         json: Boolean(values.json),
         repo: typeof values.repo === "string" ? values.repo : undefined,
         pipeline: typeof values.pipeline === "string" ? values.pipeline : undefined,
+        prs: Array.isArray(values.pr) ? values.pr.filter((p): p is string => typeof p === "string") : [],
       });
     case "status":
       return status({ portFlag, json: Boolean(values.json), all: Boolean(values.all), ticket: rest[0] });

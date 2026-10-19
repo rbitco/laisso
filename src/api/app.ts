@@ -69,7 +69,7 @@ const EVENT_KEEPALIVE_MS = 20_000;
 /** The one JSON API under /api. The dashboard page and the CLI are both clients of it. */
 export function createApp(deps: AppDeps): Hono {
   const app = new Hono();
-  const intake = new Intake({ config: deps.config, home: deps.home, tickets: deps.tickets, versions: deps.versions });
+  const intake = new Intake({ config: deps.config, home: deps.home, tickets: deps.tickets, versions: deps.versions, links: deps.links, prs: deps.prs, githubOf: deps.githubOf });
   const baseUrl = `http://localhost:${deps.config.port}`;
   const views: Omit<ViewContext, "queuePosition" | "profiles"> = {
     baseUrl,
@@ -154,9 +154,9 @@ export function createApp(deps: AppDeps): Hono {
   });
 
   app.post("/api/intake/detect", async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) as { input?: string; repo?: string };
+    const body = (await c.req.json().catch(() => ({}))) as { input?: string; repo?: string; prs?: unknown };
     if (!body.input?.trim()) return c.json({ error: "nothing to intake: paste a reference or type a prompt" }, 400);
-    return c.json(await intake.detect(body.input, body.repo));
+    return c.json(await intake.detect(body.input, body.repo, prList(body.prs)));
   });
 
   app.get("/api/tickets", (c) => {
@@ -167,7 +167,7 @@ export function createApp(deps: AppDeps): Hono {
 
   app.post("/api/tickets", async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as Partial<IntakeRequest>;
-    const { ticket, branchExisted } = await intake.admit({ input: body.input ?? "", repo: body.repo, pipeline: body.pipeline, name: body.name });
+    const { ticket, branchExisted } = await intake.admit({ input: body.input ?? "", repo: body.repo, pipeline: body.pipeline, name: body.name, prs: prList(body.prs) });
     await deps.progress.admitted(ticket);
     const result: IntakeResult = { ...ticketView(deps.tickets.get(ticket.id)!, viewContext()), branchExisted };
     return c.json(result, 201);
@@ -463,4 +463,9 @@ export function createApp(deps: AppDeps): Hono {
   app.notFound((c) => (c.req.path.startsWith("/api/") ? c.json({ error: "not found" }, 404) : c.text("not found", 404)));
 
   return app;
+}
+
+/** The PRs an intake request gives to link as Referenced: strings only, a missing or malformed field meaning none. */
+function prList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string" && v.trim() !== "") : [];
 }

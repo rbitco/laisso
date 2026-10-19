@@ -136,10 +136,10 @@ describe("saving Agent Profiles", () => {
     expect(isDefault.status).toBe(400);
     expect(((await isDefault.json()) as { error: string }).error).toBe("claude-opus is the default_profile; make another profile the default first");
 
-    // claude-fable is named by work/implement and by the shipped default Pipeline: the first delete lists them and waits for confirmation.
+    // claude-fable is named by work/implement and by the shipped Pipelines: the first delete lists them and waits for confirmation.
     const named = await raw(lasso, "/api/profiles/claude-fable", { method: "DELETE" });
     expect(named.status).toBe(409);
-    expect(await named.json()).toEqual({ error: "claude-fable is named by default/grill, default/plan, default/code-review, work/implement; their next Sessions are Flagged once it is gone", usedBy: ["default/grill", "default/plan", "default/code-review", "work/implement"], confirm: true });
+    expect(await named.json()).toEqual({ error: "claude-fable is named by default/grill, default/plan, default/code-review, pr-review/review-pr, work/implement; their next Sessions are Flagged once it is gone", usedBy: ["default/grill", "default/plan", "default/code-review", "pr-review/review-pr", "work/implement"], confirm: true });
     expect(await readFile(configPath(lasso), "utf8")).toBe(text);
 
     const confirmed = await lasso.api<ConfigFile>("/api/profiles/claude-fable?confirm=1", { method: "DELETE" });

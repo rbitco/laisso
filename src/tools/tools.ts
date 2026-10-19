@@ -2,9 +2,8 @@ import { accessSync, constants, statSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { profilesFor, type Config, type ProfileConfig } from "../server/config.ts";
-import type { LassoHome } from "../server/home.ts";
+import { SHIPPED_PIPELINES, type LassoHome } from "../server/home.ts";
 import { listPipelines, loadPipeline, parsePipeline, type Pipeline, type RunnerName } from "../pipeline/load.ts";
-import { DEFAULT_PIPELINE_YAML } from "../pipeline/default.ts";
 import { runTool, type ToolResult } from "../tracker/exec.ts";
 import { overridesOf, ticketLabel, type TicketRow } from "../store/tickets.ts";
 
@@ -198,11 +197,11 @@ export const runCommand: RunCommand = (command, args) => runTool(command, args);
 
 /**
  * The Pipelines in the Lasso home that load; a home with none yet gets the
- * default Pipeline, as Lasso writes it on first start.
+ * shipped Pipelines, as Lasso writes them on first start.
  */
 export function homePipelines(home: LassoHome): Pipeline[] {
   const names = listPipelines(home.pipelinesDir);
-  if (names.length === 0) return [parsePipeline("default", DEFAULT_PIPELINE_YAML)];
+  if (names.length === 0) return Object.entries(SHIPPED_PIPELINES).map(([name, yaml]) => parsePipeline(name, yaml));
   const pipelines: Pipeline[] = [];
   for (const name of names) {
     try {

@@ -13,7 +13,8 @@ export function parseGitHubRemote(url: string): GitHubRepo | null {
 
 /**
  * The GitHub owner/name of each configured repo, by its name in config.yaml,
- * read from its checkout's `git remote get-url origin`, in config order. A
+ * read from its checkout's origin URL as configured, in config order: before
+ * any insteadOf rewrite, which names a mirror or a transport, not the repo. A
  * repo whose origin is on another host, or that has no origin to read, is
  * left out.
  */
@@ -21,7 +22,7 @@ export async function githubRepos(repos: Record<string, Pick<RepoConfig, "path">
   const found = await Promise.all(
     Object.entries(repos).map(async ([name, repo]) => {
       if (!repo.path) return null;
-      const r = await run("git", ["remote", "get-url", "origin"], { cwd: expandHome(repo.path) });
+      const r = await run("git", ["config", "--get", "remote.origin.url"], { cwd: expandHome(repo.path) });
       const github = r.code === 0 ? parseGitHubRemote(r.stdout) : null;
       return github ? ([name, github] as const) : null;
     }),

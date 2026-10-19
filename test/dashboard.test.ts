@@ -384,7 +384,7 @@ stages:
     expect(usedByLine(profileUsers("codex-high", pipelines, config.default_profile))).toBe("inherited by named/implement, named/notes");
     expect(usedByLine(profileUsers("claude-haiku", pipelines, config.default_profile))).toBe("used by named/review");
     expect(usedByLine(profileUsers("claude-opus", pipelines, config.default_profile))).toBe("inherited by default/implement, default/review, three/implement, three/notes, three/review");
-    expect(usedByLine(profileUsers("claude-fable", pipelines, config.default_profile))).toBe("used by default/grill, default/plan, default/code-review");
+    expect(usedByLine(profileUsers("claude-fable", pipelines, config.default_profile))).toBe("used by default/grill, default/plan, default/code-review, pr-review/review-pr");
     expect(usedByLine(profileUsers("pi-gpt", pipelines, config.default_profile))).toBe("used by no Stages");
 
     // The known bad pair, per mode: Haiku runs headless in auto by default, and the human block asks for auto too.

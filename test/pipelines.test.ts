@@ -1,11 +1,13 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { startLassoWithRepos, startLasso, waitFor, claudeFixture, runCli, type Lasso } from "./harness.ts";
 import type { TicketDetail, IntakeResult } from "../src/api/views.ts";
 import type { PipelineFile, PipelineListing, ConfigFile, PipelineVersionView, ActionListing } from "../src/api/views.ts";
 import type { TickChange } from "../src/server/tick.ts";
 import { DEFAULT_CONFIG } from "../src/server/config.ts";
+import { PR_REVIEW_PIPELINE_YAML } from "../src/pipeline/pr-review.ts";
+import { checkActions, fileArtifact, parsePipeline } from "../src/pipeline/load.ts";
 import { addStage, draftOf, moveStage, paramsOf, pipelinePatch, removeStage, type RunnerDraft } from "../src/dashboard/app/pipelines/stages.ts";
 
 // Seam one: Pipelines and config are edited through the API the dashboard
@@ -49,8 +51,8 @@ describe("Pipeline files", () => {
   it("lists every Pipeline with its Stages and reads one with its text", async () => {
     const lasso = await lassoWith();
     const listing = await lasso.api<PipelineListing[]>("/api/pipelines");
-    expect(listing.map((p) => p.name)).toEqual(["default", "work"]);
-    expect(listing[1]).toMatchObject({ name: "work", problem: null, stages: [{ name: "implement", kind: "runner", label: "implement" }, { name: "notes", kind: "runner", label: "notes" }] });
+    expect(listing.map((p) => p.name)).toEqual(["default", "pr-review", "work"]);
+    expect(listing[2]).toMatchObject({ name: "work", problem: null, stages: [{ name: "implement", kind: "runner", label: "implement" }, { name: "notes", kind: "runner", label: "notes" }] });
     expect(listing[0]!.stages.map((s) => s.label)).toContain("In Progress");
 
     const file = await lasso.api<PipelineFile>("/api/pipelines/work");
@@ -268,7 +270,7 @@ stages:
     const created = await lasso.api<PipelineFile>("/api/pipelines/spike", { method: "PUT", body: json({ text }) });
     expect(created).toMatchObject({ name: "spike", text, pipeline: { profile: "pi", stages: [{ name: "only" }] } });
     expect(await pipelineText(lasso, "spike")).toBe(text);
-    expect((await lasso.api<PipelineListing[]>("/api/pipelines")).map((p) => p.name)).toEqual(["default", "spike", "work"]);
+    expect((await lasso.api<PipelineListing[]>("/api/pipelines")).map((p) => p.name)).toEqual(["default", "pr-review", "spike", "work"]);
 
     await expect(lasso.api("/api/pipelines/spike", { method: "PUT", body: json({ text: "stages: []\n" }) })).rejects.toThrow(/Pipeline spike has no stages/);
     await expect(lasso.api("/api/pipelines/Spike%20Two", { method: "PUT", body: json({ text }) })).rejects.toThrow(/Pipeline name must be lowercase letters, digits, and hyphens/);
@@ -282,7 +284,7 @@ stages:
     expect(replaced.pipeline!.stages[0]).toMatchObject({ artifact: "pr-exists" });
 
     await lasso.api("/api/pipelines/spike", { method: "DELETE" });
-    expect((await lasso.api<PipelineListing[]>("/api/pipelines")).map((p) => p.name)).toEqual(["default", "work"]);
+    expect((await lasso.api<PipelineListing[]>("/api/pipelines")).map((p) => p.name)).toEqual(["default", "pr-review", "work"]);
     expect((await lasso.api<Response>("/api/pipelines/spike", { method: "DELETE", raw: true })).status).toBe(404);
   });
 
@@ -588,5 +590,39 @@ stages:
     prompt: Review it.
     advance: false
 `);
+  });
+});
+
+// The pr-review Pipeline (LASSO-168): shipped beside default, for a Ticket that reviews a teammate's PR.
+describe("the pr-review Pipeline", () => {
+  it("is written on first run and left alone after, like default.yaml", async () => {
+    const lasso = await startLasso();
+    running.push(lasso);
+    expect(await pipelineText(lasso, "pr-review")).toBe(PR_REVIEW_PIPELINE_YAML);
+
+    await lasso.stop();
+    const edited = PR_REVIEW_PIPELINE_YAML + "# hand edit\n";
+    await writeFile(path.join(lasso.home, "pipelines", "pr-review.yaml"), edited);
+    const again = await startLasso({ home: lasso.home, pathDir: lasso.pathDir, port: lasso.port });
+    running.push(again);
+    expect(await pipelineText(again, "pr-review")).toBe(edited);
+  });
+
+  it("loads with one headless Stage that runs code-review to a file Artifact, and no tracker Actions", async () => {
+    const pipeline = parsePipeline("pr-review", PR_REVIEW_PIPELINE_YAML);
+    expect(() => checkActions(pipeline, {})).not.toThrow();
+    expect(pipeline.stages).toHaveLength(1);
+    const stage = pipeline.stages[0]!;
+    if (stage.kind !== "runner") throw new Error("pr-review's Stage is not a Runner Stage");
+    expect(stage).toMatchObject({ name: "review-pr", human: false, skills: ["code-review"], artifact: "file review-findings.md" });
+    expect(fileArtifact(stage.artifact!)).toBe("review-findings.md");
+    // It reads the Referenced PRs and posts nothing: the human does.
+    expect(stage.prompt).toContain("lasso pr list --json");
+    expect(stage.prompt).toContain("Do not post anything to any PR");
+
+    const lasso = await startLasso();
+    running.push(lasso);
+    const listed = (await lasso.api<PipelineListing[]>("/api/pipelines")).find((p) => p.name === "pr-review");
+    expect(listed).toMatchObject({ problem: null, stages: [{ name: "review-pr", kind: "runner" }] });
   });
 });

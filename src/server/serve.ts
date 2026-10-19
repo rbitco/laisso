@@ -196,7 +196,7 @@ export async function serve(opts: ServeOptions): Promise<number> {
   const app = createApp({ config, home, tick, tickets, versions, sessions, feedback, links, prs, githubOf, runs, progress, terminal, exits, overrides, budgets, queue, changes, prLists, dashboard, version: pkg.version, missingTools, versionNotice: () => versionCheck.current() });
 
   if (defaults.wroteConfig) log.info("config.written", { file: home.configFile });
-  if (defaults.wrotePipeline) log.info("pipeline.written", { name: "default" });
+  for (const name of defaults.wrotePipelines) log.info("pipeline.written", { name });
 
   const server = listen({ fetch: app.fetch, hostname: "127.0.0.1", port: config.port });
   try {

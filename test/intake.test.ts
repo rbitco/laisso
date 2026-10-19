@@ -2,9 +2,9 @@ import { describe, it, expect, afterEach } from "vitest";
 import { existsSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
-import { startLassoWithRepos, runCli, type Lasso, type LassoConfig } from "./harness.ts";
+import { startLassoWithRepos, runCli, type Lasso, type LassoConfig, type TempRepo, type TrackerReply } from "./harness.ts";
 import type { Detection } from "../src/intake/detect.ts";
-import type { TicketView, TicketDetail, IntakeResult } from "../src/api/views.ts";
+import type { TicketView, TicketDetail, IntakeResult, PrView } from "../src/api/views.ts";
 
 const running: Lasso[] = [];
 afterEach(async () => {
@@ -32,7 +32,7 @@ describe("intake of a prompt Ticket", () => {
     expect(d.kind).toBe("prompt");
     expect(d.reference).toBeNull();
     expect(d.repo).toEqual({ suggestion: "app", choices: ["app"] });
-    expect(d.pipeline).toEqual({ suggestion: "default", choices: ["default"], byRepo: { app: "default" } });
+    expect(d.pipeline).toEqual({ suggestion: "default", choices: ["default", "pr-review"], byRepo: { app: "default" } });
   });
 
   it("offers a picker with no suggestion when several repos exist", async () => {
@@ -47,7 +47,7 @@ describe("intake of a prompt Ticket", () => {
     const body = (repo?: string) => JSON.stringify({ input: "Fix the footer", repo });
     const open = await lasso.api<Detection>("/api/intake/detect", { method: "POST", body: body() });
     expect(open.pipeline.byRepo).toEqual({ app: "default", web: "fast" });
-    expect(open.pipeline.choices).toEqual(["default", "fast"]);
+    expect(open.pipeline.choices).toEqual(["default", "fast", "pr-review"]);
     const web = await lasso.api<Detection>("/api/intake/detect", { method: "POST", body: body("web") });
     expect(web.pipeline.suggestion).toBe("fast");
   });
@@ -195,5 +195,120 @@ describe("naming a Ticket", () => {
 
     const cleared = (await (await rename(lasso, t.id, "   ")).json()) as TicketDetail;
     expect(cleared).toMatchObject({ name: null, label: t.shortId });
+  });
+});
+
+// `lasso add <prompt> --pr <pr>` (LASSO-168): a Ticket that reviews a teammate's PR, linked as Referenced at Intake.
+describe("lasso add --pr", () => {
+  /** gh's answer to the lookup of one PR. */
+  const lookup = (url: string, title: string, head: string): TrackerReply => ({
+    tool: "gh",
+    match: ["pr view", url, "--json"],
+    stdout: JSON.stringify({ number: Number(url.split("/").at(-1)), url, title, state: "OPEN", headRefName: head, baseRefName: "main", author: { login: "alice" } }),
+  });
+
+  /**
+   * A teammate's PR #number on the repo's origin: a commit on its own branch that origin also keeps as
+   * refs/pull/N/head, as GitHub does. Returns the head commit.
+   */
+  const openPr = async (repo: TempRepo, number: number, head: string): Promise<string> => {
+    repo.git(["checkout", "-q", "-b", head]);
+    await writeFile(path.join(repo.path, `pr-${number}.txt`), `${head}\n`);
+    repo.git(["add", "."]);
+    repo.git(["commit", "-q", "-m", head]);
+    const sha = repo.git(["rev-parse", "HEAD"]);
+    repo.git(["push", "-q", "origin", `${head}:refs/pull/${number}/head`]);
+    repo.git(["checkout", "-q", "main"]);
+    return sha;
+  };
+
+  /** The repo's origin reads as github.com/owner/<name>, while git still fetches from the local bare origin. */
+  const onGitHub = (repo: TempRepo, name: string) => {
+    const url = `https://github.com/owner/${name}.git`;
+    repo.git(["remote", "set-url", "origin", url]);
+    repo.git(["config", `url.${repo.origin}.insteadOf`, url]);
+  };
+
+  async function reviewSetup() {
+    const started = await lassoWithRepos(["app", "web"]);
+    const { lasso, repos } = started;
+    onGitHub(repos.app!, "app");
+    const head = await openPr(repos.app!, 7, "alice/dark-mode");
+    await lasso.tracker.reply(lookup("https://github.com/owner/app/pull/7", "Add dark mode", "alice/dark-mode"));
+    await lasso.tracker.reply(lookup("https://github.com/acme/lib/pull/12", "Expose the hook", "hook"));
+    return { ...started, head };
+  }
+
+  const linksOf = (lasso: Lasso, id: string) => lasso.api<PrView[]>(`/api/tickets/${id}/prs`);
+
+  it("creates the Ticket in the PR's repo with one Referenced link, its branch at the PR's head and tracking nothing", async () => {
+    const { lasso, repos, head } = await reviewSetup();
+    const r = await runCli(["add", "review", "--pr", "owner/app#7", "--yes", "--json"], lasso);
+    expect(r.code).toBe(0);
+    expect(r.stderr).toContain("repo: app");
+    expect(r.stderr).toContain("referenced PR #7: Add dark mode (open)");
+    const ticket = JSON.parse(r.stdout) as IntakeResult;
+    expect(ticket.repo).toBe("app");
+
+    expect(await linksOf(lasso, ticket.id)).toEqual([
+      { url: "https://github.com/owner/app/pull/7", number: 7, title: "Add dark mode", role: "referenced", source: "human", state: "OPEN", head: "alice/dark-mode", base: "main", author: "alice", feedback: 0, checks: "none" },
+    ]);
+    const git = (args: string[]) => repos.app!.git(args, ticket.worktree);
+    expect(git(["rev-parse", "--abbrev-ref", "HEAD"])).toBe(ticket.branch);
+    expect(git(["rev-parse", "HEAD"])).toBe(head);
+    expect(existsSync(path.join(ticket.worktree, "pr-7.txt"))).toBe(true);
+    // Nothing upstream: a push names Lasso's branch, never the teammate's.
+    expect(() => git(["rev-parse", "--abbrev-ref", "@{upstream}"])).toThrow();
+  });
+
+  it("links every PR given, in order, starting the branch at the first one in the Ticket's repo", async () => {
+    const { lasso, repos, head } = await reviewSetup();
+    const r = await runCli(["add", "review both", "--pr", "acme/lib#12", "--pr", "https://github.com/owner/app/pull/7", "--pr", "#7", "--repo", "app", "--yes", "--json"], lasso);
+    expect(r.code).toBe(0);
+    const ticket = JSON.parse(r.stdout) as IntakeResult;
+    expect((await linksOf(lasso, ticket.id)).map((p) => [p.number, p.role, p.source])).toEqual([[12, "referenced", "human"], [7, "referenced", "human"]]);
+    expect(repos.app!.git(["rev-parse", "HEAD"], ticket.worktree)).toBe(head);
+  });
+
+  it("starts at the default branch when no Referenced PR is in the Ticket's repo", async () => {
+    const { lasso, repos } = await reviewSetup();
+    const r = await runCli(["add", "review the hook", "--pr", "acme/lib#12", "--repo", "web", "--yes", "--json"], lasso);
+    expect(r.code).toBe(0);
+    const ticket = JSON.parse(r.stdout) as IntakeResult;
+    expect(ticket.repo).toBe("web");
+    expect((await linksOf(lasso, ticket.id)).map((p) => p.url)).toEqual(["https://github.com/acme/lib/pull/12"]);
+    expect(repos.web!.git(["rev-parse", "HEAD"], ticket.worktree)).toBe(repos.web!.git(["rev-parse", "origin/main"]));
+  });
+
+  it("refuses a first PR no configured repo's origin matches, or one gh can't find, and makes nothing", async () => {
+    const { lasso } = await reviewSetup();
+    const unmatched = await runCli(["add", "review", "--pr", "acme/lib#12", "--yes"], lasso);
+    expect(unmatched).toMatchObject({ code: 1, stderr: "no repo in config.yaml has its origin at github.com/acme/lib: pass --repo\n" });
+    const bare = await runCli(["add", "review", "--pr", "#7", "--yes"], lasso);
+    expect(bare).toMatchObject({ code: 1, stderr: "--pr #7 needs a repo: give owner/repo#N or the URL, or pass --repo\n" });
+    await lasso.tracker.reply({ tool: "gh", match: ["pr view", "https://github.com/owner/app/pull/99"], code: 1, stderr: "GraphQL: Could not resolve to a PullRequest with the number of 99.\n" });
+    const missing = await lasso.api<Response>("/api/tickets", { method: "POST", raw: true, body: JSON.stringify({ input: "review", prs: ["owner/app#99"] }) });
+    expect(missing.status).toBe(400);
+    expect((await missing.json()).error).toBe("owner/app#99: GraphQL: Could not resolve to a PullRequest with the number of 99.");
+    expect(await lasso.api<unknown[]>("/api/tickets")).toEqual([]);
+  });
+
+  it("runs the pr-review Pipeline only when asked for it", async () => {
+    const { lasso } = await reviewSetup();
+    const chosen = JSON.parse((await runCli(["add", "review", "--pr", "owner/app#7", "--pipeline", "pr-review", "--yes", "--json"], lasso)).stdout) as IntakeResult;
+    expect(chosen.pipeline).toBe("pr-review");
+    expect(chosen.stage).toMatchObject({ name: "review-pr", human: false, total: 1 });
+    const unchosen = JSON.parse((await runCli(["add", "review again", "--pr", "owner/app#7", "--yes", "--json"], lasso)).stdout) as IntakeResult;
+    expect(unchosen.pipeline).toBe("default");
+  });
+
+  it("leaves add without --repo and --pr as it was: no PR looked up, none linked", async () => {
+    const { lasso } = await lassoWithRepos(["app"]);
+    const r = await runCli(["add", "Add dark mode", "--yes", "--json"], lasso);
+    expect(r.code).toBe(0);
+    const ticket = JSON.parse(r.stdout) as IntakeResult;
+    expect(ticket.repo).toBe("app");
+    expect(await linksOf(lasso, ticket.id)).toEqual([]);
+    expect(await lasso.tracker.calls()).not.toContainEqual(expect.objectContaining({ args: expect.arrayContaining(["pr", "view"]) }));
   });
 });

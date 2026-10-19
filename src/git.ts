@@ -51,11 +51,26 @@ export class Git {
   }
 
   /**
+   * The head commit of PR `number` on origin, fetched so a branch can start
+   * there. Read from refs/pull/N/head, which GitHub keeps for every PR, fork or
+   * not, so no branch of the PR's author is ever tracked or pushed to.
+   */
+  async prHead(number: number): Promise<string> {
+    const ref = `refs/pull/${number}/head`;
+    const sha = (await this.exec(["ls-remote", "origin", ref])).split(/\s/)[0];
+    if (!sha) throw new GitError(`origin has no ${ref}`);
+    await this.exec(["fetch", "--quiet", "origin", ref]);
+    return sha;
+  }
+
+  /**
    * Make a worktree for `branch` at `dir`: an existing local or remote branch
-   * is checked out; otherwise the branch is created from origin's default.
+   * is checked out; otherwise the branch is created from the head of origin's
+   * PR `fromPr` when given, else from origin's default. A branch started at a
+   * PR tracks nothing, so a push names Lasso's branch on origin and nothing else.
    * Returns whether the branch already existed.
    */
-  async addWorktree(dir: string, branch: string): Promise<{ existed: boolean }> {
+  async addWorktree(dir: string, branch: string, fromPr?: number): Promise<{ existed: boolean }> {
     await this.fetch();
     if (await this.refExists(`refs/heads/${branch}`)) {
       await this.exec(["worktree", "add", "--quiet", dir, branch]);
@@ -64,6 +79,10 @@ export class Git {
     if (await this.refExists(`refs/remotes/origin/${branch}`)) {
       await this.exec(["worktree", "add", "--quiet", "--track", "-b", branch, dir, `origin/${branch}`]);
       return { existed: true };
+    }
+    if (fromPr !== undefined) {
+      await this.exec(["worktree", "add", "--quiet", "--no-track", "-b", branch, dir, await this.prHead(fromPr)]);
+      return { existed: false };
     }
     const base = await this.defaultBranch();
     await this.exec(["worktree", "add", "--quiet", "-b", branch, dir, `origin/${base}`]);

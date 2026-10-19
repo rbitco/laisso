@@ -121,9 +121,9 @@ actions:
     expect(tool(tools, "terminal-notifier")!.optional).toBe(true);
   });
 
-  it("reads the default Pipeline for a home with none yet", () => {
+  it("reads the shipped Pipelines for a home with none yet", () => {
     const home = resolveHome({ LASSO_HOME: mkdtempSync(path.join(tmpdir(), "lasso-tools-")) });
-    expect(homePipelines(home).map((p) => p.name)).toEqual(["default"]);
+    expect(homePipelines(home).map((p) => p.name)).toEqual(["default", "pr-review"]);
   });
 });
 
