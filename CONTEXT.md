@@ -37,10 +37,26 @@ an action Stage runs by name with the params the Stage supplies. It succeeds
 or fails by its exit code.
 _Avoid_: hook, script, built-in, task
 
+**Route**:
+A Pipeline's declared way for a Ticket to leave a Stage for some Stage
+other than the next one, backward or forward, chosen by an Action's result,
+by the Stage's agent where the Stage allows it, or by a human. A Route may
+add to or replace the target Stage's prompt, and the Ticket walks forward
+normally from the target.
+_Avoid_: jump, redirect, branch, goto, loop
+
+**Visit**:
+A Ticket's stay at one Stage, from arriving until it leaves. Retries and
+Rounds happen within one Visit; each arrival, by walking forward or by a
+Route, starts a new one. What a Route adds to a prompt lasts for the Visit
+it starts.
+_Avoid_: pass, attempt, run, iteration
+
 **Budget**:
 The limits on how much effort a Ticket may consume before it is Flagged:
-Rounds per repeating Stage, attempts per Stage, wall time per Session, and
-agent spend per Ticket. Set globally, per Pipeline, or per Ticket, with the
+Rounds and attempts per Visit, times each Route may be taken, wall time
+per Session, and agent spend per Ticket. A Route a human chooses never
+counts. Set globally, per Pipeline, or per Ticket, with the
 most specific value winning.
 _Avoid_: guardrail, boundary, limit, quota
 
@@ -148,8 +164,10 @@ _Avoid_: review, comment, issue, finding
 
 **Round**:
 One Session of a repeating Stage that addresses the Feedback outstanding
-when it started. Feedback arriving mid-Round waits for the next Round.
-A retried Round re-runs with the same Feedback and keeps its number.
+when it started, plus, on arrival by a Route, what the Route carried.
+Feedback arriving mid-Round waits for the next Round. A retried Round
+re-runs with the same Feedback and keeps its number; numbers run on
+across Visits.
 _Avoid_: iteration, pass, loop, cycle, revision
 
 **Marker**:
