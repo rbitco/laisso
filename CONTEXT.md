@@ -25,8 +25,9 @@ _Avoid_: import, add, create ticket, onboard
 
 **Stage**:
 One named step in a Ticket's journey, defined by its Pipeline: either a
-prompt run by a Runner, with or without a human present, or an Action Lasso
-runs itself, such as moving the tracker issue to a status. The default
+prompt run by a Runner, with or without a human present, an Action Lasso
+runs itself, such as moving the tracker issue to a status, or a wait on a
+check Action until it is met. The default
 Pipeline's Stages are Grill, Plan, Implement, Document, Review, but a
 Pipeline may name any ordered list of Stages.
 _Avoid_: step, phase, state, node
@@ -180,6 +181,12 @@ The displayed state of a Ticket on a repeating Stage with nothing to
 address: no Owned PR yet, or no open Owned PR with Feedback outstanding.
 Lasso keeps polling the Owned PRs; a human merges them.
 _Avoid_: idle, waiting, blocked
+
+**Watching**:
+The displayed state of a Ticket at a wait Stage whose check is not yet
+met. Lasso runs the check each Tick; no human is needed and no slot is
+held. Met, the Ticket advances or takes the Route the check chose.
+_Avoid_: waiting, pending, polling, idle
 
 **Tick**:
 One pass of Lasso's single clock, in which it polls PRs, retries pending
