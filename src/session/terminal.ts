@@ -26,6 +26,8 @@ export interface TerminalDeps {
   /** The Ticket's linked PRs, which every Session's prompt lists. */
   links: PrLinks;
   log: Logger;
+  /** Each of the Stage's Routes with how often it was taken and may be, for an opted-in agent's preamble. */
+  routeCounts: (ticket: TicketRow, stage: RunnerStage) => Record<string, { used: number; limit: number }>;
   /** Flags the Ticket; a Stage whose profile is gone from config cannot open. */
   flag: (ticket: string, reason: string, detail: string) => Promise<void>;
   /** The environment Lasso started in, which says whether it runs inside herdr or tmux; defaults to the process's. */
@@ -70,6 +72,8 @@ export class Terminal {
     }
     const sessionId = held?.id ?? randomUUID();
     const taking = held ? null : takeOver;
+    // A fresh terminal Session picks its own Route, as a fresh headless one does; a taken-over run's pick stays.
+    if (!held && !taking && this.deps.visits.current(ticket.id)?.picked_route) this.deps.visits.pick(ticket.id, null);
     // The row exists before a taken-over run stops, so the tick never sees the Ticket idle in between.
     const row =
       held ??
@@ -146,7 +150,7 @@ export class Terminal {
     file: string,
     note: string | null,
   ): Promise<{ launcher: string; terminal: TerminalKind }> {
-    const request: RunRequest = { ...requestFor(ticket, stage, profile.profile, this.deps.links.links(ticket.id), this.deps.visits.current(ticket.id)), mode: "terminal", ...session, name: `Lasso: ${ticketLabel(ticket)} ${stage.name}`, limits: {} };
+    const request: RunRequest = { ...requestFor(ticket, stage, profile.profile, this.deps.links.links(ticket.id), this.deps.visits.current(ticket.id), this.deps.routeCounts(ticket, stage)), mode: "terminal", ...session, name: `Lasso: ${ticketLabel(ticket)} ${stage.name}`, limits: {} };
     const command = adapter.command(request);
     const dir = path.join(this.deps.home.ticketsDir, ticket.id, "sessions");
     mkdirSync(dir, { recursive: true });

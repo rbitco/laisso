@@ -164,6 +164,9 @@ export class Runs {
     const switched = resumeFrom ? resumeRefusal(stage.name, resumeFrom, profile) : null;
     if (switched) throw new RunError(switched);
     this.deps.tickets.setRunnableSince(ticket.id, null);
+    // A fresh Session picks its own Route: one an earlier Session of the Visit left (a failed run's, or a spent one
+    // left pending) is not this one's. A Session that re-enters an earlier one keeps it, as the agent remembers it.
+    if (!resumeFrom && this.deps.visits.current(ticket.id)?.picked_route) this.deps.visits.pick(ticket.id, null);
     const adapter = adapterFor(profile.profile.runner);
     const sessionId = randomUUID();
     const sessionsDir = path.join(home.ticketsDir, ticket.id, "sessions");
@@ -177,7 +180,7 @@ export class Runs {
     const resumed = resumeFrom ? (resumeFrom.runner_session_id ?? resumeFrom.id) : null;
     const resume = resumed ? { resume: true, runnerSessionId: resumed } : {};
     const feedback = plan ? { feedback: { round: plan.round, prs: plan.prs, marker: plan.marker } } : {};
-    const request: RunRequest = { ...requestFor(ticket, stage, profile.profile, this.deps.links.links(ticket.id), this.deps.visits.current(ticket.id)), mode: "headless", sessionId, ...resume, limits: { wallTimeMs, remainingSpendUsd }, ...feedback };
+    const request: RunRequest = { ...requestFor(ticket, stage, profile.profile, this.deps.links.links(ticket.id), this.deps.visits.current(ticket.id), budgets.routes(ticket, stage)), mode: "headless", sessionId, ...resume, limits: { wallTimeMs, remainingSpendUsd }, ...feedback };
     const command = adapter.command(request);
 
     // The stdout file is opened before the row exists, so a row never outlives a process that was never spawned.

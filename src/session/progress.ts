@@ -283,9 +283,10 @@ export class Progress {
 
   /**
    * `lasso route`: a running Session or check run picks the Route its Stage is to leave by, over any it picked
-   * before, or with null drops its pick. The Route decision takes it when the run ends. Only an action Stage's
-   * Action and a check Action may pick for now, and only a Route its Stage declares. A check run's pick is held
-   * with the run and kept on the Visit's check result only when the run is met (LASSO-192).
+   * before, or with null drops its pick. The Route decision takes it when the run ends. An action Stage's Action, a
+   * check Action, and the agent of a Runner Stage that says `agentRoutes: true` (LASSO-193), headless or in a
+   * terminal, may pick, and only a Route its Stage declares; a spent Route is accepted here and Flags when taken. A
+   * check run's pick is held with the run and kept on the Visit's check result only when the run is met (LASSO-192).
    */
   pick(sessionId: string, route: string | null, note: string | null): { ticket: string; stage: Stage; route: string | null; note: string | null } {
     const run = this.deps.checkRun(sessionId);
@@ -298,9 +299,9 @@ export class Progress {
     const visit = this.deps.visits.current(ticket.id);
     if (!visit || session.visit !== visit.id) throw new TriggerError(`Session ${sessionId} is not working ${ticket.stage} on this Visit`);
     const { stage } = current;
-    if (stage.kind !== "action") throw new TriggerError(`Stage ${stage.name} does not let its agent choose a Route`);
+    if (stage.kind === "runner" && !stage.agentRoutes) throw new TriggerError(`Stage ${stage.name} does not let its agent choose a Route`);
     declares(stage, route);
-    const picked = this.deps.visits.pick(ticket.id, route, note?.trim() || null, "action")!;
+    const picked = this.deps.visits.pick(ticket.id, route, note?.trim() || null, stage.kind === "action" ? "action" : "agent")!;
     this.deps.log.info(route === null ? "route.cleared" : "route.picked", { ticket: ticket.id, stage: stage.name, session: sessionId, route });
     return { ticket: ticket.id, stage, route: picked.picked_route, note: picked.picked_note };
   }
@@ -390,7 +391,11 @@ export class Progress {
     return released;
   }
 
-  /** Mark <Stage> done: the artifact is checked with warn-and-override, then the Stage finishes (a human Stage, or a Flagged one: accept and advance). */
+  /**
+   * Mark <Stage> done: the artifact is checked with warn-and-override, then the Stage finishes (a human Stage, or a
+   * Flagged one: accept and advance). On a human or taken-over Stage that says `agentRoutes: true`, the Route its
+   * terminal agent picked is taken as a headless Session's would be when it met its artifact; a Flagged Stage walks.
+   */
   async markDone(ticket: TicketRow, override: boolean): Promise<TicketRow> {
     const { stage } = this.exitStage(ticket);
     if (!override && stage.kind === "runner" && stage.artifact) {
@@ -401,8 +406,10 @@ export class Progress {
     const fresh = this.deps.tickets.get(ticket.id)!;
     if (fresh.stage !== stage.name) throw new TriggerError(`${stage.name} already finished`);
     this.endHumanSessions(fresh);
-    this.deps.log.info("ticket.marked_done", { ticket: ticket.id, stage: stage.name, override, flagged: fresh.flagged_at !== null });
-    await this.finished(fresh);
+    const visit = this.deps.visits.current(fresh.id);
+    const agentPick = !fresh.flagged_at && stage.kind === "runner" && stage.agentRoutes && visit?.picked_route && visit.picked_by === "agent" ? visit.picked_route : null;
+    this.deps.log.info("ticket.marked_done", { ticket: ticket.id, stage: stage.name, override, flagged: fresh.flagged_at !== null, route: agentPick });
+    await (agentPick ? this.advance(fresh) : this.finished(fresh));
     return this.deps.tickets.get(ticket.id)!;
   }
 

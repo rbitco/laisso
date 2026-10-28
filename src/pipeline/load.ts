@@ -55,6 +55,8 @@ export interface RunnerStage {
   repeat: "feedback" | null;
   budget: StageBudget;
   routes?: Routes;
+  /** Its agent may pick one of its Routes with `lasso route` (LASSO-193); set only when written, and only with Routes. */
+  agentRoutes?: true;
 }
 
 /** A Stage that runs an Action defined in config by name, with the params it supplies (ADR 0010). */
@@ -117,7 +119,7 @@ export function loadPipeline(dir: string, name: string): Pipeline {
 }
 
 const PIPELINE_FIELDS = new Set(["profile", "budget", "stages"]);
-const RUNNER_STAGE_FIELDS = new Set(["name", "prompt", "skills", "profile", "human", "advance", "artifact", "repeat", "budget", "routes"]);
+const RUNNER_STAGE_FIELDS = new Set(["name", "prompt", "skills", "profile", "human", "advance", "artifact", "repeat", "budget", "routes", "agentRoutes"]);
 const ACTION_STAGE_FIELDS = new Set(["action", "name", "with", "routes"]);
 const ROUTE_FIELDS = new Set(["to", "when", "append", "replace", "budget", "advance"]);
 
@@ -182,6 +184,9 @@ function parseStage(pipeline: string, entry: unknown, index: number): Stage {
   if (s.repeat === "feedback" && artifact === null) throw new PipelineError(`${where}: a repeating Stage needs an artifact as its end condition`);
   if (s.human !== undefined && typeof s.human !== "boolean") throw new PipelineError(`${where}: human must be true or false`);
   if (s.advance !== undefined && typeof s.advance !== "boolean") throw new PipelineError(`${where}: advance must be true or false`);
+  if (s.agentRoutes !== undefined && typeof s.agentRoutes !== "boolean") throw new PipelineError(`${where}: agentRoutes must be true or false`);
+  const routes = parseRoutes(s.routes, where);
+  if (s.agentRoutes === true && !routes.routes) throw new PipelineError(`${where}: agentRoutes needs routes for the agent to choose from`);
   const budget = mapping(s.budget, `${where}: budget`, fail);
   for (const key of Object.keys(budget)) {
     if ((STAGE_BUDGET_KEYS as readonly string[]).includes(key)) continue;
@@ -204,7 +209,8 @@ function parseStage(pipeline: string, entry: unknown, index: number): Stage {
       attempts: budget.attempts === undefined ? undefined : count(budget.attempts, `${where}: budget.attempts`, fail),
       wallTime: budget.wallTime === undefined ? undefined : duration(budget.wallTime, `${where}: budget.wallTime`, fail),
     },
-    ...parseRoutes(s.routes, where),
+    ...routes,
+    ...(s.agentRoutes === true ? { agentRoutes: true as const } : {}),
   };
 }
 
@@ -268,6 +274,7 @@ function parseWith(value: unknown, where: string, field: string): Record<string,
 function parseActionStage(s: Record<string, unknown>, where: string): ActionStage {
   // The form before ADR 0010; startup migration rewrites it, so only a hand edit meets this.
   if (s.status !== undefined) throw new PipelineError(`${where}: status is now a param; write with: { status: ${String(s.status)} }`);
+  if (s.agentRoutes !== undefined) throw new PipelineError(`${where}: agentRoutes belongs to a Runner Stage; an action Stage's Action may run lasso route without it`);
   for (const key of Object.keys(s)) if (!ACTION_STAGE_FIELDS.has(key)) throw new PipelineError(`${where}: ${key} is not a field of an action Stage`);
   const action = String(s.action);
   if (!ACTION_NAME.test(action)) throw new PipelineError(`${where}: ${action} is not an Action name`);

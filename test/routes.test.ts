@@ -6,7 +6,6 @@ import { startLassoWithRepos, runCli, waitFor, claudeFixture, type Lasso, type L
 import type { TicketDetail, IntakeResult, PipelineListing, PipelineFile } from "../src/api/views.ts";
 import type { TickChange } from "../src/server/tick.ts";
 import { decide, type RoutePick } from "../src/route/route.ts";
-import { Visits } from "../src/store/visits.ts";
 import type { Stage } from "../src/pipeline/load.ts";
 
 // Routes (LASSO-190): a Stage declares Routes to other Stages, an Action picks
@@ -458,32 +457,22 @@ describe("a check Action that picks a Route", () => {
   });
 
   describe("beside an agent's pick", () => {
-    // The agent's pick stands in for an opted-in agent's `lasso route` (LASSO-193): it is written on the Visit while
-    // the check waits for it, then the check picks and is met.
-    const waitForAgent = 'while [ ! -f "$dir/agent-$LASSO_TICKET" ]; do sleep 0.1; done';
-    async function agentPicks(lasso: Lasso, ticket: string, route: string, note: string | null) {
-      const db = new DatabaseSync(path.join(lasso.home, "lasso.db"));
-      try {
-        db.exec("PRAGMA busy_timeout = 5000");
-        new Visits(db).pick(ticket, route, note);
-      } finally {
-        db.close();
-      }
-      await writeFile(path.join(lasso.pathDir, `agent-${ticket}`), "");
-    }
+    // An opted-in agent (LASSO-193) picks with `lasso route` during its Session; the check then picks and is met.
+    const OPTED_IN = CHECKED.replace("    artifact: action check\n", "    artifact: action check\n    agentRoutes: true\n");
+    const agentRuns = (lasso: Lasso, call: string) => lasso.runner.script({ stdout: claudeFixture("success.json"), commands: [["sh", "-c", call]] });
 
     it("Flags route.conflict showing both when they pick different Routes, and takes the Route once when they agree", async () => {
-      const lasso = await lassoWith(CHECKED);
-      await check(lasso, `${waitForAgent}; lasso route ahead; echo "ready to ship"`, `${waitForAgent}; lasso route ahead --note "check agrees"`);
+      const lasso = await lassoWith(OPTED_IN);
+      await check(lasso, 'lasso route ahead; echo "ready to ship"', 'lasso route ahead --note "check agrees"');
+      await agentRuns(lasso, 'lasso route again --note "another pass needed"');
       const split = await add(lasso);
-      await agentPicks(lasso, split.id, "again", "another pass needed");
       const flagged = await rested(lasso, split.id);
       expect(flagged.stage.name).toBe("implement");
       expect(flagged.flag).toMatchObject({ reason: "route.conflict", detail: "the agent picked Route again (another pass needed); the check picked Route ahead (ready to ship)" });
       expect(visitsOf(lasso, split.id).map((v) => v.stage)).toEqual(["implement"]);
 
+      await agentRuns(lasso, "lasso route ahead");
       const agreed = await add(lasso, "Add light mode");
-      await agentPicks(lasso, agreed.id, "ahead", null);
       const detail = await rested(lasso, agreed.id);
       expect(detail.flag).toBeNull();
       expect(detail.stage.name).toBe("ship");

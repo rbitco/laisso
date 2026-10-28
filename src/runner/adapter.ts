@@ -3,6 +3,7 @@ import type { Effort, ProfileSettings } from "../server/config.ts";
 import { renderFeedback, type PrFeedback } from "../review/feedback.ts";
 import type { PrLinkRow } from "../store/links.ts";
 import type { VisitRow } from "../store/visits.ts";
+import type { Routes } from "../pipeline/load.ts";
 
 export type OutcomeStatus = "succeeded" | "failed" | "exhausted" | "interrupted";
 
@@ -47,6 +48,18 @@ export interface RunRequest {
   profile: ProfileSettings;
   /** A Round of a repeating Stage: the Feedback snapshot it addresses and the marker its comments carry. */
   feedback?: RoundContext;
+  /** The Routes the Stage lets its agent choose from (`agentRoutes: true`), each with its count; absent otherwise. */
+  routes?: RouteChoice[];
+}
+
+/** A Route an opted-in agent may choose, as its preamble lists it: where it goes, when to choose it, and its Budget. */
+export interface RouteChoice {
+  name: string;
+  to: string;
+  when: string | null;
+  used: number;
+  /** How many times an agent, Action or check may take it; Infinity for one with no count. */
+  limit: number;
 }
 
 export interface RoundContext {
@@ -99,9 +112,17 @@ export interface RunnerAdapter {
  * The part of a RunRequest that comes from the Ticket, the Stage, and the Visit it is on; the caller adds mode,
  * session id, and limits. A Visit at another Stage (a draft opened while the next one holds) changes nothing.
  */
-export function requestFor(ticket: TicketLike, stage: StageLike, profile: ProfileSettings, links: TicketPr[], visit: VisitLike | null = null): Pick<RunRequest, "stage" | "prompt" | "skills" | "context" | "cwd" | "profile"> {
+export function requestFor(
+  ticket: TicketLike,
+  stage: StageLike,
+  profile: ProfileSettings,
+  links: TicketPr[],
+  visit: VisitLike | null = null,
+  counts: Record<string, { used: number; limit: number }> = {},
+): Pick<RunRequest, "stage" | "prompt" | "skills" | "context" | "cwd" | "profile" | "routes"> {
   const prs = links.map(({ url, role, title, head, base }) => ({ url, role, title, head, base }));
   return {
+    ...(stage.agentRoutes && stage.routes ? { routes: routeChoices(stage.routes, counts) } : {}),
     stage: stage.name,
     prompt: visit?.stage === stage.name ? visitPrompt(stage.prompt, visit) : stage.prompt,
     skills: stage.skills,
@@ -127,6 +148,13 @@ interface StageLike {
   name: string;
   prompt: string | null;
   skills: string[];
+  routes?: Routes;
+  agentRoutes?: boolean;
+}
+
+/** The Stage's Routes in the order written, each with its count; one with no count has none used and no cap. */
+function routeChoices(routes: Routes, counts: Record<string, { used: number; limit: number }>): RouteChoice[] {
+  return Object.entries(routes).map(([name, route]) => ({ name, to: route.to, when: route.when?.trim() || null, used: counts[name]?.used ?? 0, limit: counts[name]?.limit ?? Infinity }));
 }
 
 type VisitLike = Pick<VisitRow, "stage" | "arrived_by" | "route" | "chosen_by" | "text" | "note" | "replaces">;
@@ -162,6 +190,7 @@ export function renderPrompt(request: RunRequest, skill: (name: string) => strin
     ...(context.body ? ["", context.body.trim()] : []),
     "",
     ...renderPrs(context),
+    ...(request.routes?.length ? ["", ...renderRoutes(request.routes)] : []),
   ];
   // Skill invocations lead so the Runner sees them where it expects a command (spec: adapters prepend them).
   const skills = request.skills.map(skill);
@@ -179,6 +208,22 @@ function renderPrs(context: TicketContext): string[] {
   return [
     ...(list.length ? ["Linked PRs:", ...list, ""] : []),
     `If you open a PR on a branch other than ${context.branch}, run \`lasso pr link <url>\` so Lasso tracks it as this Ticket's; for a PR you only read, add --referenced. \`lasso pr list --json\` shows the Ticket's PRs as they are now.`,
+  ];
+}
+
+/**
+ * The Route block of an opted-in Stage (LASSO-193): each Route as name -> target with its `when:` text and count,
+ * how to choose one, and that no call walks forward. A spent Route stays listed, so the agent is never cornered.
+ */
+function renderRoutes(routes: RouteChoice[]): string[] {
+  const list = routes.map((r) => {
+    const count = r.limit === Infinity ? null : r.used >= r.limit ? `used ${r.used}/${r.limit}: choosing it Flags the Ticket for a human` : `used ${r.used}/${r.limit}`;
+    return `- ${r.name} -> ${r.to}${count ? ` (${count})` : ""}${r.when ? `: ${r.when}` : ""}`;
+  });
+  return [
+    "This Stage lets you choose a Route, which sends the Ticket to another Stage instead of the next one:",
+    ...list,
+    'To choose one, run `lasso route <name> [--note "..."]` before you finish; the note goes with the Ticket to say why. The last call wins, and `lasso route --clear` drops your choice. With no call, the Ticket continues to the next Stage as usual. Lasso takes the Route only if this Stage finishes with its work done.',
   ];
 }
 

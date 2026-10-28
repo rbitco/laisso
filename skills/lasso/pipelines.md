@@ -44,6 +44,7 @@ names are lowercase letters, digits and hyphens, unique in the Pipeline.
 | `repeat` | none | only `feedback`: the Review loop. Needs an `artifact` as its end condition: `pr-merged`, or a [check Action](#check-actions). |
 | `budget` | inherit | `rounds`, `attempts` (whole numbers, 0 or more), `wallTime` (duration). `spend` belongs on the Pipeline. |
 | `routes` | none | ways out to other Stages; see [Routes](#routes) |
+| `agentRoutes` | `false` | `true` lets the Stage's agent choose one of its `routes` with `lasso route`; needs `routes`. See [Routes](#routes). |
 
 Any other field is an error; `runner` and `runnerOptions` are the old forms
 and name the fix.
@@ -163,8 +164,24 @@ An action Stage's command picks a Route by running
 only when the command exits 0. A non-zero exit Flags the Ticket
 (`outcome.failed`) and names the Route not taken. With no pick the Ticket
 walks on to the next Stage as before. `lasso route` refuses a name the
-Stage does not declare, and works only in an action Stage's Session or a
-check run.
+Stage does not declare, and works only in an action Stage's Session, a
+check run, or a Runner Stage's Session when the Stage says
+`agentRoutes: true`.
+
+With `agentRoutes: true` on a Runner Stage (headless or `human: true`), the
+agent picks the same way, from a headless or terminal Session. Its preamble
+lists each Route as `name -> target`, with its count against its Budget
+and its `when:` text, and tells it how to call `lasso route` and that with
+no call the Ticket continues to the next Stage. A Route at its limit stays
+listed, marked "choosing it Flags the Ticket for a human", and the call
+accepts it. The pick is taken only when the Session ends as one that would
+advance: a headless Session that succeeded with its Artifact met, or Mark
+done on a human or taken-over Stage. A failed Session Flags as before and
+routes nothing; Skip, Send, and Mark done on a Flag walk or send as
+before. A new Session picks afresh: a pick an earlier Session of the Visit
+left is dropped, unless the new one re-enters that session (Resume, Take
+over). Without the opt-in, the agent's call is refused, while the Stage's
+check may still pick.
 
 A [check Action](#check-actions) can pick a Route the same way. Each check
 run gets its own `LASSO_SESSION`, and its pick counts only when that run is
@@ -211,6 +228,26 @@ With an Action `ci` whose command is
 `pnpm test || { lasso route fix --note "pnpm test failed"; exit 0; }`, a
 failing test run sends the Ticket back to `implement` with that note, and a
 passing one walks on to `ship`.
+
+```yaml lasso-pipeline
+stages:
+  - name: review-pr
+    skills: [code-review]
+    artifact: file review-findings.md
+    agentRoutes: true
+    routes:
+      approved:
+        to: done
+        when: Every earlier finding is fixed and nothing new needs raising.
+  - name: publish
+    human: true
+    prompt: Read review-findings.md and post the review.
+  - name: done
+    prompt: Say the review is finished.
+```
+
+Here the reviewing agent runs `lasso route approved` when nothing is left
+to raise, and the Ticket skips `publish`; otherwise it walks on to it.
 
 ### Holding before a Route
 
