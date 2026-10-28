@@ -1,7 +1,7 @@
 import { overrideFor, shortId, ticketLabel, type TicketRow } from "../store/tickets.ts";
 import { checkOf, latestVisit, type ArtifactCheck, type VisitRow } from "../store/visits.ts";
 import { runnerOf, type SessionProfile, type SessionRow } from "../store/sessions.ts";
-import { type Pipeline, type RunnerName, type RunnerStage, type Stage } from "../pipeline/load.ts";
+import { type Pipeline, type Routes, type RunnerName, type RunnerStage, type Stage } from "../pipeline/load.ts";
 import type { PipelineSource } from "../pipeline/files.ts";
 import type { Drift, VersionRow } from "../store/versions.ts";
 import type { ActionConfig, Config, ProfileScope, ProfileSettings, ProfileSource } from "../server/config.ts";
@@ -135,6 +135,16 @@ export interface PrView {
   checks: PrStatus["checks"];
 }
 
+/** The Route a Session has picked for leaving its Stage (`lasso route`), or none after --clear. */
+export interface RoutePickView {
+  ticket: string;
+  stage: string;
+  route: string | null;
+  /** The Stage the Route goes to. */
+  to: string | null;
+  note: string | null;
+}
+
 /** One Feedback item a Round was told about, and how it was addressed once the Round ended. */
 export interface FeedbackView {
   kind: FeedbackRow["kind"];
@@ -230,8 +240,8 @@ export interface PipelineView {
 }
 
 export type StageFields =
-  | { kind: "runner"; name: string; label: string; prompt: string | null; skills: string[]; profile: string | null; human: boolean; advance: boolean; artifact: string | null; artifactWith?: Record<string, string>; repeat: "feedback" | null; budget: { rounds?: number; attempts?: number; wallTime?: string } }
-  | { kind: "action"; name: string; label: string; action: string; with: Record<string, string> };
+  | { kind: "runner"; name: string; label: string; prompt: string | null; skills: string[]; profile: string | null; human: boolean; advance: boolean; artifact: string | null; artifactWith?: Record<string, string>; repeat: "feedback" | null; budget: { rounds?: number; attempts?: number; wallTime?: string }; routes?: Routes }
+  | { kind: "action"; name: string; label: string; action: string; with: Record<string, string>; routes?: Routes };
 
 export interface PipelineListing {
   name: string;

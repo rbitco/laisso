@@ -40,6 +40,8 @@ export interface VisitRow {
   chosen_by: ChosenBy | null;
   text: string | null;
   note: string | null;
+  /** 1 when `text` replaces the Stage's prompt text (a Route's replace:), 0 when it follows it (append:). */
+  replaces: number;
   /** The Route picked for leaving, pending or overridden, and its note. */
   picked_route: string | null;
   picked_note: string | null;
@@ -51,7 +53,7 @@ export interface VisitRow {
 }
 
 /** What a new Visit records of how it began, beyond the Stage. */
-export type Arrival = Pick<VisitRow, "stage" | "arrived_by"> & Partial<Pick<VisitRow, "route" | "chosen_by" | "text" | "note">>;
+export type Arrival = Pick<VisitRow, "stage" | "arrived_by"> & Partial<Pick<VisitRow, "route" | "chosen_by" | "text" | "note">> & { replaces?: boolean };
 
 /** The latest check at a Visit, or null before any. */
 export function checkOf(visit: Pick<VisitRow, "check_result"> | null): ArtifactCheck | null {
@@ -99,10 +101,10 @@ export class Visits {
     const number = (this.latest(ticket, arrival.stage)?.number ?? 0) + 1;
     const { lastInsertRowid } = this.db
       .prepare(
-        `INSERT INTO visits (ticket, stage, number, version, arrived_at, arrived_by, from_visit, route, chosen_by, text, note)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO visits (ticket, stage, number, version, arrived_at, arrived_by, from_visit, route, chosen_by, text, note, replaces)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(ticket, arrival.stage, number, version, now, arrival.arrived_by, from?.id ?? null, arrival.route ?? null, arrival.chosen_by ?? null, arrival.text ?? null, arrival.note ?? null);
+      .run(ticket, arrival.stage, number, version, now, arrival.arrived_by, from?.id ?? null, arrival.route ?? null, arrival.chosen_by ?? null, arrival.text ?? null, arrival.note ?? null, arrival.replaces ? 1 : 0);
     this.changed(ticket);
     return this.db.prepare(`SELECT * FROM visits WHERE id = ?`).get(lastInsertRowid) as unknown as VisitRow;
   }
@@ -113,6 +115,13 @@ export class Visits {
     if (!visit) return;
     this.db.prepare(`UPDATE visits SET check_result = ?, check_run = ? WHERE id = ?`).run(JSON.stringify(check), run, visit.id);
     this.changed(ticket);
+  }
+
+  /** Record the Route picked for leaving the current Visit, over any picked before; null drops the pick. */
+  pick(ticket: string, route: string | null, note: string | null = null): VisitRow | null {
+    this.db.prepare(`UPDATE visits SET picked_route = ?, picked_note = ? WHERE ticket = ? AND left_at IS NULL`).run(route, route === null ? null : note, ticket);
+    this.changed(ticket);
+    return this.current(ticket);
   }
 
   /** Record that a human skipped the Stage on the current Visit. */

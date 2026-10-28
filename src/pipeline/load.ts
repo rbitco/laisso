@@ -1,6 +1,6 @@
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
-import { parse } from "yaml";
+import { parse, YAMLParseError } from "yaml";
 import { hyphenate } from "../intake/slug.ts";
 import { count, duration, isPlainObject, mapping, money, text, type Fail } from "../fields.ts";
 import { ACTION_NAME, PROFILE_NAME, type ActionConfig, type ProfileConfig } from "../server/config.ts";
@@ -17,6 +17,26 @@ export interface StageBudget {
   wallTime?: string;
 }
 
+/**
+ * A declared way out of a Stage to some Stage other than the next (CONTEXT.md:
+ * Route). Optional fields are left out when not written, so a Pipeline
+ * without them keeps the definition its Versions were taken from.
+ */
+export interface Route {
+  /** The target Stage's name: an action Stage by its derived name unless it sets name:. */
+  to: string;
+  /** When to choose it, for whoever may. */
+  when?: string;
+  /** Text added after the target Stage's prompt, or (replace) in place of it, for the Visit the Route starts. */
+  append?: string;
+  replace?: string;
+  /** How many times an agent, Action or check may take it; parsed here, enforced by the Route Budget. */
+  budget?: number;
+}
+
+/** A Stage's Routes by name; absent when it declares none. */
+export type Routes = Record<string, Route>;
+
 export interface RunnerStage {
   kind: "runner";
   name: string;
@@ -32,6 +52,7 @@ export interface RunnerStage {
   artifactWith?: Record<string, string>;
   repeat: "feedback" | null;
   budget: StageBudget;
+  routes?: Routes;
 }
 
 /** A Stage that runs an Action defined in config by name, with the params it supplies (ADR 0010). */
@@ -40,6 +61,7 @@ export interface ActionStage {
   name: string;
   action: string;
   with: Record<string, string>;
+  routes?: Routes;
 }
 
 export type Stage = RunnerStage | ActionStage;
@@ -57,6 +79,8 @@ const fail: Fail = (message) => new PipelineError(message);
 
 /** What a Pipeline may be called: the file name without its extension. */
 export const NAME = /^[a-z0-9][a-z0-9-]*$/;
+/** What a Stage, and a Route, may be called. */
+export const STAGE_NAME = /^[a-z0-9][a-z0-9-]*$/;
 /** The Budget dimensions a Stage sets; spend is the Pipeline's. */
 export const STAGE_BUDGET_KEYS = ["rounds", "attempts", "wallTime"] as const;
 
@@ -91,11 +115,19 @@ export function loadPipeline(dir: string, name: string): Pipeline {
 }
 
 const PIPELINE_FIELDS = new Set(["profile", "budget", "stages"]);
-const RUNNER_STAGE_FIELDS = new Set(["name", "prompt", "skills", "profile", "human", "advance", "artifact", "repeat", "budget"]);
-const ACTION_STAGE_FIELDS = new Set(["action", "name", "with"]);
+const RUNNER_STAGE_FIELDS = new Set(["name", "prompt", "skills", "profile", "human", "advance", "artifact", "repeat", "budget", "routes"]);
+const ACTION_STAGE_FIELDS = new Set(["action", "name", "with", "routes"]);
+const ROUTE_FIELDS = new Set(["to", "when", "append", "replace", "budget"]);
 
 export function parsePipeline(name: string, text: string): Pipeline {
-  const raw = parse(text);
+  let raw: unknown;
+  try {
+    raw = parse(text);
+  } catch (error) {
+    // A key written twice, such as two Routes of one name, is refused by YAML itself.
+    if (error instanceof YAMLParseError) throw new PipelineError(`Pipeline ${name}: ${error.message.split("\n")[0]}`);
+    throw error;
+  }
   if (!raw || typeof raw !== "object") throw new PipelineError(`Pipeline ${name} is empty`);
   const doc = raw as Record<string, unknown>;
   const where = `Pipeline ${name}`;
@@ -110,6 +142,11 @@ export function parsePipeline(name: string, text: string): Pipeline {
   for (const stage of stages) {
     if (names.has(stage.name)) throw new PipelineError(`${where} has two Stages named ${stage.name}`);
     names.add(stage.name);
+  }
+  for (const stage of stages) {
+    for (const [route, { to }] of Object.entries(stage.routes ?? {})) {
+      if (!names.has(to)) throw new PipelineError(`${where} Stage ${stage.name}: Route ${route} goes to ${to}, which is not a Stage of this Pipeline`);
+    }
   }
   const budget = mapping(doc.budget, `${where}: budget`, fail);
   for (const key of Object.keys(budget)) {
@@ -135,7 +172,7 @@ function parseStage(pipeline: string, entry: unknown, index: number): Stage {
   }
   if (s.runner !== undefined) throw new PipelineError(`${where}: runner is now an Agent Profile in config.yaml; write profile: ${String(s.runner)}`);
   for (const key of Object.keys(s)) if (!RUNNER_STAGE_FIELDS.has(key)) throw new PipelineError(`${where}: unknown field ${key}`);
-  if (typeof s.name !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(s.name)) throw new PipelineError(`${where} needs a name of lowercase letters, digits, and hyphens`);
+  if (typeof s.name !== "string" || !STAGE_NAME.test(s.name)) throw new PipelineError(`${where} needs a name of lowercase letters, digits, and hyphens`);
   if (s.prompt !== undefined) text(s.prompt, `${where}: prompt`, fail);
   if (s.skills !== undefined && (!Array.isArray(s.skills) || !s.skills.every((x) => typeof x === "string"))) throw new PipelineError(`${where}: skills must be a list of skill names`);
   const { artifact, artifactWith } = parseArtifact(s.artifact, where);
@@ -165,7 +202,34 @@ function parseStage(pipeline: string, entry: unknown, index: number): Stage {
       attempts: budget.attempts === undefined ? undefined : count(budget.attempts, `${where}: budget.attempts`, fail),
       wallTime: budget.wallTime === undefined ? undefined : duration(budget.wallTime, `${where}: budget.wallTime`, fail),
     },
+    ...parseRoutes(s.routes, where),
   };
+}
+
+/**
+ * A Stage's `routes:` map, keyed by Route name, as `{ routes }`, or nothing
+ * when it declares none. Whether each `to` names a Stage is checked once
+ * every Stage is parsed.
+ */
+function parseRoutes(value: unknown, where: string): { routes?: Routes } {
+  if (value === undefined || value === null) return {};
+  if (!isPlainObject(value)) throw new PipelineError(`${where}: routes must be a mapping of Route name to its fields`);
+  const routes: Routes = {};
+  for (const [name, raw] of Object.entries(value)) {
+    const at = `${where} Route ${name}`;
+    if (!STAGE_NAME.test(name)) throw new PipelineError(`${where}: Route ${name} needs a name of lowercase letters, digits, and hyphens`);
+    if (!isPlainObject(raw)) throw new PipelineError(`${at} must be a mapping with to: <Stage>`);
+    for (const key of Object.keys(raw)) if (!ROUTE_FIELDS.has(key)) throw new PipelineError(`${at}: ${key} is not a field of a Route`);
+    if (typeof raw.to !== "string" || !raw.to) throw new PipelineError(`${at} needs to: <Stage>`);
+    if (raw.append !== undefined && raw.replace !== undefined) throw new PipelineError(`${at} has both append and replace; give one`);
+    const route: Route = { to: raw.to };
+    if (raw.when !== undefined) route.when = text(raw.when, `${at}: when`, fail);
+    if (raw.append !== undefined) route.append = text(raw.append, `${at}: append`, fail);
+    if (raw.replace !== undefined) route.replace = text(raw.replace, `${at}: replace`, fail);
+    if (raw.budget !== undefined) route.budget = count(raw.budget, `${at}: budget`, fail);
+    routes[name] = route;
+  }
+  return Object.keys(routes).length ? { routes } : {};
 }
 
 const ARTIFACT_ACTION_FIELDS = new Set(["action", "with"]);
@@ -201,9 +265,9 @@ function parseActionStage(s: Record<string, unknown>, where: string): ActionStag
   for (const key of Object.keys(s)) if (!ACTION_STAGE_FIELDS.has(key)) throw new PipelineError(`${where}: ${key} is not a field of an action Stage`);
   const action = String(s.action);
   if (!ACTION_NAME.test(action)) throw new PipelineError(`${where}: ${action} is not an Action name`);
-  if (s.name !== undefined && (typeof s.name !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(s.name))) throw new PipelineError(`${where} needs a name of lowercase letters, digits, and hyphens`);
+  if (s.name !== undefined && (typeof s.name !== "string" || !STAGE_NAME.test(s.name))) throw new PipelineError(`${where} needs a name of lowercase letters, digits, and hyphens`);
   const params = parseWith(s.with, where, "with");
-  return { kind: "action", name: typeof s.name === "string" ? s.name : defaultActionName(action, params), action, with: params };
+  return { kind: "action", name: typeof s.name === "string" ? s.name : defaultActionName(action, params), action, with: params, ...parseRoutes(s.routes, where) };
 }
 
 /** An unnamed action Stage is called by its Action's last part and its param values: tracker.transition with status In Progress is transition-in-progress. */

@@ -300,6 +300,10 @@ const MIGRATIONS: Array<(db: DatabaseSync) => void> = [
       ALTER TABLE tickets DROP COLUMN skipped_stages;
     `);
   },
+  // Routes (LASSO-190): whether the text a Visit arrived with replaces the Stage's prompt text rather than following it.
+  (db) => {
+    db.exec(`ALTER TABLE visits ADD COLUMN replaces INTEGER NOT NULL DEFAULT 0;`);
+  },
 ];
 
 /**

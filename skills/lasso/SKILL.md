@@ -24,7 +24,7 @@ Lasso uses them; say them that way to the user.
    Stage names what. Lasso's own comments in these files are worth keeping.
 3. **Make the change** in the files, following the reference that covers it:
    - `config.yaml` (repos, Actions, Budget, everything else): [config.md](config.md)
-   - Pipelines and Stages: [pipelines.md](pipelines.md)
+   - Pipelines and Stages, and Routes between them (`lasso route`): [pipelines.md](pipelines.md)
    - Agent Profiles and Runners: [profiles.md](profiles.md)
    - Complete, tested homes for a GitHub-tracked and a JIRA-tracked repo:
      [examples/github/](examples/github/) and [examples/jira/](examples/jira/)

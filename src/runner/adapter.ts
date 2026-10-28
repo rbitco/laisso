@@ -2,6 +2,7 @@ import type { RunnerName } from "../pipeline/load.ts";
 import type { Effort, ProfileSettings } from "../server/config.ts";
 import { renderFeedback, type PrFeedback } from "../review/feedback.ts";
 import type { PrLinkRow } from "../store/links.ts";
+import type { VisitRow } from "../store/visits.ts";
 
 export type OutcomeStatus = "succeeded" | "failed" | "exhausted" | "interrupted";
 
@@ -94,12 +95,15 @@ export interface RunnerAdapter {
   findSession(query: { cwd: string; launchedAfter: Date }): string | null;
 }
 
-/** The part of a RunRequest that comes from the Ticket and the Stage; the caller adds mode, session id, and limits. */
-export function requestFor(ticket: TicketLike, stage: StageLike, profile: ProfileSettings, links: TicketPr[]): Pick<RunRequest, "stage" | "prompt" | "skills" | "context" | "cwd" | "profile"> {
+/**
+ * The part of a RunRequest that comes from the Ticket, the Stage, and the Visit it is on; the caller adds mode,
+ * session id, and limits. A Visit at another Stage (a draft opened while the next one holds) changes nothing.
+ */
+export function requestFor(ticket: TicketLike, stage: StageLike, profile: ProfileSettings, links: TicketPr[], visit: VisitLike | null = null): Pick<RunRequest, "stage" | "prompt" | "skills" | "context" | "cwd" | "profile"> {
   const prs = links.map(({ url, role, title, head, base }) => ({ url, role, title, head, base }));
   return {
     stage: stage.name,
-    prompt: stage.prompt,
+    prompt: visit?.stage === stage.name ? visitPrompt(stage.prompt, visit) : stage.prompt,
     skills: stage.skills,
     context: { id: ticket.id, reference: ticket.reference, repo: ticket.repo, branch: ticket.branch, title: ticket.title, body: ticket.origin === "prompt" ? ticket.prompt : ticket.body, prs },
     cwd: ticket.worktree,
@@ -123,6 +127,22 @@ interface StageLike {
   name: string;
   prompt: string | null;
   skills: string[];
+}
+
+type VisitLike = Pick<VisitRow, "stage" | "route" | "chosen_by" | "text" | "note" | "replaces">;
+
+const CHOOSERS: Record<NonNullable<VisitRow["chosen_by"]>, string> = { agent: "the agent", action: "an Action", check: "a check", human: "a human" };
+
+/**
+ * The Stage prompt for a Visit that arrived by Route: the Route's text after the prompt, or in place of its text
+ * (skills and the preamble are not part of it, so they stay), then the note it carried. It lasts for the Visit,
+ * retries and Rounds included; any other Visit runs the Stage prompt as written.
+ */
+export function visitPrompt(prompt: string | null, visit: Omit<VisitLike, "stage">): string | null {
+  if (!visit.route) return prompt;
+  const note = visit.note ? `Lasso sent this Ticket here by Route ${visit.route}, chosen by ${visit.chosen_by ? CHOOSERS[visit.chosen_by] : "Lasso"}, with this note: ${visit.note}` : null;
+  const parts = [visit.replaces ? null : prompt?.trim(), visit.text?.trim(), note].filter(Boolean);
+  return parts.length ? parts.join("\n\n") : null;
 }
 
 /** The Ticket context and Stage prompt every Runner sees, with skills in the Runner's own invocation form. */

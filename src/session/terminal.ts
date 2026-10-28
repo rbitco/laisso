@@ -6,6 +6,7 @@ import type { LassoHome } from "../server/home.ts";
 import type { Logger } from "../server/log.ts";
 import { ticketLabel, type TicketRow } from "../store/tickets.ts";
 import type { PrLinks } from "../store/links.ts";
+import type { Visits } from "../store/visits.ts";
 import { runnerOf, sessionProfile, type Sessions, type SessionRow } from "../store/sessions.ts";
 import { ticketProfile } from "./overrides.ts";
 import type { Pipeline, RunnerStage } from "../pipeline/load.ts";
@@ -20,6 +21,8 @@ export interface TerminalDeps {
   config: Config;
   home: LassoHome;
   sessions: Sessions;
+  /** The current Visit, whose Route text and note every Session of it is told. */
+  visits: Visits;
   /** The Ticket's linked PRs, which every Session's prompt lists. */
   links: PrLinks;
   log: Logger;
@@ -143,7 +146,7 @@ export class Terminal {
     file: string,
     note: string | null,
   ): Promise<{ launcher: string; terminal: TerminalKind }> {
-    const request: RunRequest = { ...requestFor(ticket, stage, profile.profile, this.deps.links.links(ticket.id)), mode: "terminal", ...session, name: `Lasso: ${ticketLabel(ticket)} ${stage.name}`, limits: {} };
+    const request: RunRequest = { ...requestFor(ticket, stage, profile.profile, this.deps.links.links(ticket.id), this.deps.visits.current(ticket.id)), mode: "terminal", ...session, name: `Lasso: ${ticketLabel(ticket)} ${stage.name}`, limits: {} };
     const command = adapter.command(request);
     const dir = path.join(this.deps.home.ticketsDir, ticket.id, "sessions");
     mkdirSync(dir, { recursive: true });

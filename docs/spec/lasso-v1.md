@@ -192,6 +192,8 @@ stages:
 ```
 
   The prompt text per Stage is in the resolution of "Default Pipeline contents and v1 artifact and action catalogues" (LASSO-18). Implement commits only; Document pushes and opens the PR; Code Review posts one marked PR review; Review is prompt-only and receives the Feedback snapshot each Round.
+- Routes (LASSO-190): any Stage may declare `routes:`, a map keyed by Route name (Stage-name rule, unique per Stage) of `to` (required: a Stage of the same Pipeline, an action Stage by its derived name unless it sets `name:`; a Stage may route to itself), `when` (text), at most one of `append` and `replace` (text for the target's prompt), and `budget` (whole number, 0 or more; parsed, enforced by a later slice). Loading, a dashboard save, and Intake taking a Version refuse a Pipeline that breaks a rule. A Route taken closes the source Visit and opens one at `to` with arrived_by route, from_visit, route, chosen_by, text, replaces and note; Stages it passes over get no Visit and no Skip, and nothing checks the target's inputs. An Action picks with `lasso route <name> [--note]` or drops its pick with `lasso route --clear` (the last call wins, kept as the Visit's picked_route); the pick is taken only on exit 0, while a non-zero exit Flags outcome.failed with "Route <name> not taken" in the detail. Without `--note` the note is the Action's last non-empty line of output. No pick walks to the next Stage as before. A pure Route decision module (`src/route/route.ts`) makes the walk, take or fail call.
+- On a Visit a Route started, every Runner Session gets the Route's `append` text after the Stage prompt, or its `replace` text in the prompt's place (skills and the Ticket preamble stay), then a line naming the Route, who chose it, and the note. The next Visit to the Stage gets none of it.
 - Intake pins each Ticket to a Version of its Pipeline (ADR 0009), so renaming, editing, or deleting the file never reaches a live Ticket. Only a Ticket from before Versions whose file could not be pinned still reads the file, and Flags with a missing-Pipeline reason when it is gone.
 
 Runner adapters (ADR 0003)
@@ -252,7 +254,7 @@ Dashboard (from the prototypes on branch prototype/dashboard, variant D of index
 
 CLI
 
-- `lasso` starts the server. `lasso add`, `lasso status [ticket]` (ledger, or detail with an argument; `--all`), and `lasso check [ticket]` (run a tick, wait, print one line per changed Ticket or "nothing new") are thin API clients; all take `--json`. Flag exits and human-Stage triggers are dashboard-only.
+- `lasso` starts the server. `lasso add`, `lasso status [ticket]` (ledger, or detail with an argument; `--all`), and `lasso check [ticket]` (run a tick, wait, print one line per changed Ticket or "nothing new") are thin API clients; all take `--json`. `lasso route <name> [--note "..."]` and `lasso route --clear` run inside an Action's Session (`POST /api/route` with the `x-lasso-session` header); an unknown Route name, a Runner Session, or no `$LASSO_SESSION` exits non-zero. Flag exits and human-Stage triggers are dashboard-only.
 
 Notifications
 

@@ -8,6 +8,7 @@ import type { Logger } from "../server/log.ts";
 import type { TickChange } from "../server/tick.ts";
 import type { Tickets, TicketRow } from "../store/tickets.ts";
 import type { PrLinks } from "../store/links.ts";
+import type { Visits } from "../store/visits.ts";
 import { sessionProfile, type Sessions, type SessionRow, type SessionEnd, type EndedReason } from "../store/sessions.ts";
 import type { Pipeline, RunnerStage } from "../pipeline/load.ts";
 import type { Progress } from "./progress.ts";
@@ -33,6 +34,8 @@ export interface RunsDeps {
   /** The Ticket's linked PRs, which every Session's prompt lists. */
   links: PrLinks;
   sessions: Sessions;
+  /** The current Visit, whose Route text and note every Session of it is told. */
+  visits: Visits;
   log: Logger;
   progress: Progress;
   budgets: Budgets;
@@ -174,7 +177,7 @@ export class Runs {
     const resumed = resumeFrom ? (resumeFrom.runner_session_id ?? resumeFrom.id) : null;
     const resume = resumed ? { resume: true, runnerSessionId: resumed } : {};
     const feedback = plan ? { feedback: { round: plan.round, prs: plan.prs, marker: plan.marker } } : {};
-    const request: RunRequest = { ...requestFor(ticket, stage, profile.profile, this.deps.links.links(ticket.id)), mode: "headless", sessionId, ...resume, limits: { wallTimeMs, remainingSpendUsd }, ...feedback };
+    const request: RunRequest = { ...requestFor(ticket, stage, profile.profile, this.deps.links.links(ticket.id), this.deps.visits.current(ticket.id)), mode: "headless", sessionId, ...resume, limits: { wallTimeMs, remainingSpendUsd }, ...feedback };
     const command = adapter.command(request);
 
     // The stdout file is opened before the row exists, so a row never outlives a process that was never spawned.

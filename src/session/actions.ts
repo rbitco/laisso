@@ -8,16 +8,20 @@ import type { Logger } from "../server/log.ts";
 import type { TickChange } from "../server/tick.ts";
 import type { Tickets, TicketRow } from "../store/tickets.ts";
 import type { Sessions } from "../store/sessions.ts";
+import type { Visits } from "../store/visits.ts";
 import type { PrLinks } from "../store/links.ts";
 import type { ActionStage } from "../pipeline/load.ts";
 import type { Progress } from "./progress.ts";
 import { actionLine, LatestMessageTracker } from "./latest-message.ts";
+import { decide } from "../route/route.ts";
 
 export interface ActionsDeps {
   config: Config;
   home: LassoHome;
   tickets: Tickets;
   sessions: Sessions;
+  /** Where the Action's `lasso route` pick is kept, on the current Visit. */
+  visits: Visits;
   links: PrLinks;
   log: Logger;
   progress: Progress;
@@ -38,7 +42,8 @@ interface Live {
  * Lasso-minted id and mode action, and auto-advances. The Action config
  * defines (ADR 0010) runs as a shell command in the background, judged by
  * its exit code. A failed action is a failed Session, so the Ticket is
- * Flagged like any other Outcome.
+ * Flagged like any other Outcome. An Action that ran `lasso route` and
+ * exits 0 sends the Ticket along that Route instead of walking forward.
  */
 export class Actions {
   private deps: ActionsDeps;
@@ -80,8 +85,10 @@ export class Actions {
    * Session keeps the tick off the Ticket meanwhile.
    */
   private start(ticket: TicketRow, stage: ActionStage): string {
-    const { sessions, home, log } = this.deps;
+    const { sessions, home, log, visits } = this.deps;
     const id = randomUUID();
+    // Each run picks afresh: a pick an earlier, failed run left is not this one's.
+    if (visits.current(ticket.id)?.picked_route) visits.pick(ticket.id, null);
     const dir = path.join(home.ticketsDir, ticket.id, "sessions");
     mkdirSync(dir, { recursive: true });
     const stdoutPath = path.join(dir, `${id}.stdout`);
@@ -128,9 +135,9 @@ export class Actions {
     return null;
   }
 
-  /** Record how a command Action ended, then Flag or advance its Ticket; a shutdown leaves the Ticket for the next start. */
+  /** Record how a command Action ended, then Flag, advance, or route its Ticket; a shutdown leaves the Ticket for the next start. */
   private async settle(ticket: TicketRow, stage: ActionStage, sessionId: string, how: { failure: string | null; tail: string; shutdown?: boolean }): Promise<void> {
-    const { sessions, tickets, log, progress } = this.deps;
+    const { sessions, tickets, visits, log, progress } = this.deps;
     try {
       const ended = sessions.end(sessionId, {
         ended_by: "outcome",
@@ -144,8 +151,11 @@ export class Actions {
       log.info("session.ended", { session: ended.id, ticket: ticket.id, stage: stage.name, mode: "action", outcome: ended.outcome, message: ended.final_message });
       if (how.shutdown) return;
       const fresh = tickets.get(ticket.id)!;
-      if (how.failure) await progress.flag(fresh.id, "outcome.failed", how.failure);
-      else await progress.finished(fresh);
+      const visit = visits.current(fresh.id);
+      const pick = visit?.picked_route ? { route: visit.picked_route, note: visit.picked_note, by: "action" as const } : null;
+      const exit = decide({ stage, pick, end: { succeeded: how.failure === null, lastLine: lastLine(how.tail) || null } });
+      if (exit.kind === "failed") await progress.flag(fresh.id, "outcome.failed", exit.untaken ? `${how.failure}; Route ${exit.untaken.route} not taken` : how.failure);
+      else await progress.leave(fresh, exit);
     } finally {
       this.live.delete(sessionId);
       if (!how.shutdown) this.deps.ended?.();

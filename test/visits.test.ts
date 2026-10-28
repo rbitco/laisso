@@ -173,7 +173,7 @@ describe("the Visits migration", () => {
         ALTER TABLE sessions DROP COLUMN visit;
         DROP TABLE visits;
       `);
-      db.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run(String(SCHEMA_VERSION - 1));
+      db.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run(String(SCHEMA_VERSION - 2));
     });
   }
 

@@ -43,6 +43,7 @@ names are lowercase letters, digits and hyphens, unique in the Pipeline.
 | `artifact` | none | what must exist for the Stage to count as done; see [Artifacts](#artifacts) |
 | `repeat` | none | only `feedback`: the Review loop. Needs an `artifact` as its end condition: `pr-merged`, or a [check Action](#check-actions). |
 | `budget` | inherit | `rounds`, `attempts` (whole numbers, 0 or more), `wallTime` (duration). `spend` belongs on the Pipeline. |
+| `routes` | none | ways out to other Stages; see [Routes](#routes) |
 
 Any other field is an error; `runner` and `runnerOptions` are the old forms
 and name the fix.
@@ -117,6 +118,7 @@ and resolve what it fixed, as the default Pipeline's `review` Stage does.
 | `action` | required: an Action name from config.yaml |
 | `with` | mapping of param to a single value; must supply exactly the Action's `params` |
 | `name` | optional; defaults to the Action's last dotted part plus the param values, hyphenated: `tracker.transition` with `status: In Progress` is `transition-in-progress` |
+| `routes` | optional; ways out to other Stages, which the Action picks with `lasso route`; see [Routes](#routes) |
 
 Nothing else is allowed (`status:` is the old form of `with: { status: ... }`).
 An action Stage always advances on success. Parsing alone cannot see
@@ -135,6 +137,58 @@ stages:
   - action: tracker.transition
     with: { status: In Review }
 ```
+
+## Routes
+
+A Route is a declared way out of a Stage to a Stage other than the next:
+back to fix something, or ahead past Stages not needed. A Stage lists its
+Routes under `routes:`, keyed by Route name (lowercase letters, digits and
+hyphens, unique in the Stage).
+
+| Field | Rule |
+| --- | --- |
+| `to` | required: a Stage of this Pipeline, by name (an action Stage by its derived name unless it sets `name:`). The Stage itself is allowed. |
+| `when` | optional text: when to choose this Route |
+| `append` | optional text added after the target Stage's prompt |
+| `replace` | optional text used in place of the target Stage's prompt; give `append` or `replace`, not both |
+| `budget` | optional whole number, 0 or more: how many times the Route may be taken (not yet enforced) |
+
+Saving from the dashboard, loading the file, and Intake all refuse a
+Pipeline whose Route breaks a rule, naming the Stage and Route.
+
+An action Stage's command picks a Route by running
+`lasso route <name> [--note "..."]`, and drops its pick with
+`lasso route --clear`; the last call in the run wins. The pick is taken
+only when the command exits 0. A non-zero exit Flags the Ticket
+(`outcome.failed`) and names the Route not taken. With no pick the Ticket
+walks on to the next Stage as before. `lasso route` refuses a name the
+Stage does not declare, and works only in an action Stage's Session.
+
+Taking a Route starts a new Visit at its target. Every Runner Session of
+that Visit gets the Route's `append` text after the Stage's prompt, or its
+`replace` text in its place (skills and the Ticket preamble stay), then a
+line naming the Route and its note: the `--note`, else the command's last
+line of output. A later Visit to the Stage gets none of it. Stages a Route
+passes over are not run and not marked skipped.
+
+```yaml lasso-pipeline
+stages:
+  - name: implement
+    prompt: Implement the issue. Commit to the current branch.
+  - action: ci
+    routes:
+      fix:
+        to: implement
+        when: the tests fail
+        append: The tests failed. Fix them before anything else.
+  - name: ship
+    prompt: Push and open a PR.
+```
+
+With an Action `ci` whose command is
+`pnpm test || { lasso route fix --note "pnpm test failed"; exit 0; }`, a
+failing test run sends the Ticket back to `implement` with that note, and a
+passing one walks on to `ship`.
 
 ## Artifacts
 

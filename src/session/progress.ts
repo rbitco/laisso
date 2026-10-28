@@ -3,13 +3,14 @@ import type { Logger } from "../server/log.ts";
 import type { Tickets, TicketRow } from "../store/tickets.ts";
 import type { PipelineVersions } from "../store/versions.ts";
 import type { Sessions, EndedReason } from "../store/sessions.ts";
-import type { Visits } from "../store/visits.ts";
+import type { Visits, VisitRow } from "../store/visits.ts";
 import { roundDue, type PrLinks } from "../store/links.ts";
 import type { Notifier } from "../notify/notifier.ts";
 import { type ActionStage, type Pipeline, type RunnerStage, type Stage } from "../pipeline/load.ts";
 import type { Mirror } from "../tracker/mirror.ts";
 import { checkArtifact, type ActionProbe, type PrProbe } from "../artifact/check.ts";
 import type { Teardown } from "./teardown.ts";
+import type { Exit } from "../route/route.ts";
 
 /** A Trigger that cannot pull right now, with the reason for the human. */
 export class TriggerError extends Error {}
@@ -52,8 +53,9 @@ export interface ProgressDeps {
 
 /**
  * How a Ticket moves along its Pipeline (ADR 0001): a Stage finishes and the
- * next becomes current, holds for a Start trigger when the finished Stage
- * said `advance: false`, or the Ticket is done after the last. Flags freeze
+ * next becomes current, or a Route's target does, holds for a Start trigger
+ * when the finished Stage said `advance: false`, or the Ticket is done after
+ * the last. Flags freeze
  * it until an exit clears them. Every Attention event notifies once, here.
  */
 export class Progress {
@@ -200,6 +202,49 @@ export class Progress {
     if (holds) this.deps.notifier.post("gate", updated, `${current.stage.name} finished; Start ${next.name} when ready`);
     else this.entered(updated, next);
     this.deps.mirror.pushSoon(updated.id);
+  }
+
+  /**
+   * The current Stage finished along the exit the Route decision chose: walk forward as `finished` does, or take
+   * the Route. Taking one leaves the Visit for a new one at the target, carrying the Route's text and note; Stages a
+   * forward Route passes over get no Visit and keep their last one's state. The Ticket walks on from the target.
+   */
+  async leave(ticket: TicketRow, exit: Exclude<Exit, { kind: "failed" }>): Promise<void> {
+    if (exit.kind === "walk") return this.finished(ticket);
+    const current = this.current(ticket);
+    if ("problem" in current) return this.flag(ticket.id, "pipeline.missing", current.problem);
+    const target = current.pipeline.stages.find((s) => s.name === exit.to);
+    if (!target) return this.flag(ticket.id, "pipeline.missing", `Pipeline ${ticket.pipeline} has no Stage named ${exit.to} for Route ${exit.route}`);
+    const now = new Date().toISOString();
+    const arrival = { stage: target.name, arrived_by: "route" as const, route: exit.route, chosen_by: exit.chosenBy, text: exit.text, note: exit.note, replaces: exit.replaces };
+    const updated = this.deps.tickets.arrive(ticket.id, arrival, { holding_since: null, ...unflagPatch(ticket, now) }, now);
+    this.deps.log.info("ticket.routed", { ticket: ticket.id, from: current.stage.name, route: exit.route, stage: target.name, chosen_by: exit.chosenBy });
+    this.entered(updated, target);
+    this.deps.mirror.pushSoon(updated.id);
+  }
+
+  /**
+   * `lasso route`: a running Session picks the Route its Stage is to leave by, over any it picked before, or with
+   * null drops its pick. The Route decision takes it when the run ends. Only an action Stage's Action may pick
+   * for now, and only a Route its Stage declares.
+   */
+  pick(sessionId: string, route: string | null, note: string | null): { stage: Stage; visit: VisitRow } {
+    const session = this.deps.sessions.get(sessionId);
+    if (!session) throw new TriggerError(`no Session ${sessionId}`);
+    if (session.ended_at) throw new TriggerError(`Session ${sessionId} has ended; a Route is picked while it runs`);
+    const ticket = this.deps.tickets.get(session.ticket)!;
+    const current = this.currentForTrigger(ticket);
+    const visit = this.deps.visits.current(ticket.id);
+    if (!visit || session.visit !== visit.id) throw new TriggerError(`Session ${sessionId} is not working ${ticket.stage} on this Visit`);
+    const { stage } = current;
+    if (stage.kind !== "action") throw new TriggerError(`Stage ${stage.name} does not let its agent choose a Route`);
+    if (route !== null && !stage.routes?.[route]) {
+      const names = Object.keys(stage.routes ?? {});
+      throw new TriggerError(`no Route named ${route} on Stage ${stage.name}; ${names.length ? `it has ${names.join(", ")}` : "it declares none"}`);
+    }
+    const picked = this.deps.visits.pick(ticket.id, route, note?.trim() || null)!;
+    this.deps.log.info(route === null ? "route.cleared" : "route.picked", { ticket: ticket.id, stage: stage.name, session: sessionId, route });
+    return { stage, visit: picked };
   }
 
   /** The Start trigger: release a holding Ticket into its current Stage. */

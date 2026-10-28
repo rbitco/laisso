@@ -4,6 +4,7 @@ import { status } from "./status.ts";
 import { add } from "./add.ts";
 import { check } from "./check.ts";
 import { pr as prCommand } from "./pr.ts";
+import { route } from "./route.ts";
 import { doctor } from "./doctor.ts";
 import { skill } from "./skill.ts";
 
@@ -19,6 +20,8 @@ const USAGE = `usage:
   lasso pr link <pr> [ticket]    link a PR to a Ticket (URL, owner/repo#N, #N or N)
   lasso pr unlink <pr> [ticket]  unlink a PR; the Tick won't link it again
   lasso pr list [ticket]         list a Ticket's PRs; the Ticket defaults to $LASSO_TICKET
+  lasso route <name> [--note "..."]  in an Action: leave the Stage by that Route if it exits 0
+  lasso route --clear            in an Action: drop the Route picked, so the Ticket walks forward
   lasso doctor              list the tools Lasso needs, whether each is found and logged in
   lasso skill install       copy the Lasso skill to where Claude Code and Codex look for skills
 options:
@@ -30,6 +33,8 @@ options:
   --pipeline <n>   add: the Pipeline to run
   --pr <pr>        add: link a PR as Referenced (repeatable); without --repo, its repo is the Ticket's
   --referenced     pr link: link for context only, not as the Ticket's own work
+  --note <text>    route: why, for the Stage the Route goes to; else the run's last line of output
+  --clear          route: drop the Route picked
   --dry-run        skill install: print what would be written, write nothing`;
 
 export async function main(argv: string[]): Promise<number> {
@@ -46,6 +51,8 @@ export async function main(argv: string[]): Promise<number> {
       pipeline: { type: "string" },
       pr: { type: "string", multiple: true },
       referenced: { type: "boolean", default: false },
+      note: { type: "string" },
+      clear: { type: "boolean", default: false },
       "dry-run": { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
     },
@@ -83,6 +90,8 @@ export async function main(argv: string[]): Promise<number> {
       const [pr, ticket] = action === "list" ? [undefined, args[0]] : args;
       return prCommand({ portFlag, action, pr, ticket, referenced: Boolean(values.referenced), json: Boolean(values.json) });
     }
+    case "route":
+      return route({ portFlag, name: rest[0], note: typeof values.note === "string" ? values.note : undefined, clear: Boolean(values.clear), json: Boolean(values.json) });
     case "doctor":
       return doctor({ json: Boolean(values.json) });
     case "skill":

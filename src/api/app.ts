@@ -25,7 +25,7 @@ import { Intake, IntakeError, type IntakeRequest } from "../intake/intake.ts";
 import { PipelineError, type Pipeline } from "../pipeline/load.ts";
 import { PipelineFiles } from "../pipeline/files.ts";
 import type { Dashboard } from "../dashboard/page.ts";
-import { ticketView, ticketDetail, sessionView, prView, sortForLedger, pipelineListing, pipelineFileView, pipelineVersionView, actionListings, type LiveVersionView, type ViewContext, type IntakeResult, type ConfigFile, type PrListsYaml, type Health, type MissingTool, type VersionView } from "./views.ts";
+import { ticketView, ticketDetail, sessionView, prView, type RoutePickView, sortForLedger, pipelineListing, pipelineFileView, pipelineVersionView, actionListings, type LiveVersionView, type ViewContext, type IntakeResult, type ConfigFile, type PrListsYaml, type Health, type MissingTool, type VersionView } from "./views.ts";
 import { readFileSync } from "node:fs";
 import { isPlainObject } from "../fields.ts";
 import { replaceFile } from "../atomic-write.ts";
@@ -287,6 +287,20 @@ export function createApp(deps: AppDeps): Hono {
     deps.links.unlink(ticket.id, link.url);
     if (ticket.state === "active") deps.tick.kick("pr-link");
     return c.json(prView(link));
+  });
+
+  // `lasso route` (LASSO-190): the Session the x-lasso-session header names picks the Route its Stage leaves by,
+  // over any it picked before; { route: null } drops the pick. The name is checked against the Stage's Routes now,
+  // so the caller can fix it at once; the pick is taken, or not, when the run ends.
+  app.post("/api/route", async (c) => {
+    const session = c.req.header("x-lasso-session");
+    if (!session) return c.json({ error: "lasso route runs inside a Session, where $LASSO_SESSION names it" }, 400);
+    const body = ((await c.req.json().catch(() => null)) ?? {}) as { route?: unknown; note?: unknown };
+    if (body.route !== null && (typeof body.route !== "string" || !body.route)) return c.json({ error: "route must name a Route, or be null to drop the pick" }, 400);
+    if (body.note !== undefined && body.note !== null && typeof body.note !== "string") return c.json({ error: "note must be text" }, 400);
+    const { stage, visit } = deps.progress.pick(session, body.route, typeof body.note === "string" ? body.note : null);
+    const to = visit.picked_route ? (stage.routes?.[visit.picked_route]?.to ?? null) : null;
+    return c.json({ ticket: visit.ticket, stage: stage.name, route: visit.picked_route, to, note: visit.picked_note } satisfies RoutePickView);
   });
 
   // A Session of a Ticket, or the 404 that says which is unknown.

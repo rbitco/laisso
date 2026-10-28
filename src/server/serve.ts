@@ -138,15 +138,16 @@ export async function serve(opts: ServeOptions): Promise<number> {
     return ignoring(rules.ignore_self ? [...rules.ignore_authors, await prs.viewer()] : rules.ignore_authors);
   };
   const review: Review = new Review({ tickets, sessions, feedback, links, progress, prs, checks, log, ignored });
-  const terminal = new Terminal({ config, home, sessions, links, log, flag: (ticket, reason, detail) => progress.flag(ticket, reason, detail) });
+  const terminal = new Terminal({ config, home, sessions, visits, links, log, flag: (ticket, reason, detail) => progress.flag(ticket, reason, detail) });
   const budgets = new Budgets({ config, sessions, links, visits });
   const queue = new Queue({ home, tickets, sessions, progress, log, cap: config.concurrency });
-  const runs = new Runs({ config, home, tickets, links, sessions, log, progress, budgets, queue, review, checks, stdoutWritten: (ticket, session) => changes.emit({ kind: "stdout", ticket, session }), ended: () => tick.kick("session-end") });
+  const runs = new Runs({ config, home, tickets, links, sessions, visits, log, progress, budgets, queue, review, checks, stdoutWritten: (ticket, session) => changes.emit({ kind: "stdout", ticket, session }), ended: () => tick.kick("session-end") });
   const actions = new Actions({
     config,
     home,
     tickets,
     sessions,
+    visits,
     links,
     log,
     progress,
