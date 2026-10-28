@@ -68,7 +68,25 @@ export interface ActionStage {
   routes?: Routes;
 }
 
-export type Stage = RunnerStage | ActionStage;
+/**
+ * A Stage that Watches a check Action until it is met (CONTEXT.md: Watching): no Runner, no human. Met, the Ticket
+ * advances or takes the Route the check chose (LASSO-195).
+ */
+export interface WaitStage {
+  kind: "wait";
+  name: string;
+  /** The check Action it Watches, written as an Artifact names one: `action <name>` (ADR 0014). */
+  wait: string;
+  /** The params the check Action passes, as an action Stage's `with`. */
+  waitWith: Record<string, string>;
+  /** False holds before the next Stage once the check is met, as a Runner Stage's does. */
+  advance: boolean;
+  /** How long it may Watch before it Flags budget.wall_time; no limit when absent. */
+  budget: { wallTime?: string };
+  routes?: Routes;
+}
+
+export type Stage = RunnerStage | ActionStage | WaitStage;
 
 export interface Pipeline {
   name: string;
@@ -121,6 +139,7 @@ export function loadPipeline(dir: string, name: string): Pipeline {
 const PIPELINE_FIELDS = new Set(["profile", "budget", "stages"]);
 const RUNNER_STAGE_FIELDS = new Set(["name", "prompt", "skills", "profile", "human", "advance", "artifact", "repeat", "budget", "routes", "agentRoutes"]);
 const ACTION_STAGE_FIELDS = new Set(["action", "name", "with", "routes"]);
+const WAIT_STAGE_FIELDS = new Set(["name", "wait", "routes", "budget", "advance"]);
 const ROUTE_FIELDS = new Set(["to", "when", "append", "replace", "budget", "advance"]);
 
 export function parsePipeline(name: string, text: string): Pipeline {
@@ -165,11 +184,12 @@ function parseStage(pipeline: string, entry: unknown, index: number): Stage {
   if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new PipelineError(`Pipeline ${pipeline} stage ${index + 1} is not a mapping`);
   const s = entry as Record<string, unknown>;
   const where = `Pipeline ${pipeline} stage ${index + 1}`;
+  if (s.wait !== undefined) return parseWaitStage(s, where);
   const isAction = typeof s.action === "string";
   const isRunner = s.prompt !== undefined || s.skills !== undefined;
   if (isAction && isRunner) throw new PipelineError(`${where} has both action and prompt/skills`);
   if (isAction) return parseActionStage(s, where);
-  if (!isRunner) throw new PipelineError(`${where} needs a prompt, skills, or an action`);
+  if (!isRunner) throw new PipelineError(`${where} needs a prompt, skills, an action, or a wait`);
   if (s.runnerOptions !== undefined) {
     const named = typeof s.name === "string" ? `${pipeline}-${s.name}` : `${pipeline}-<stage>`;
     throw new PipelineError(`${where}: runnerOptions are now an Agent Profile in config.yaml; define one there with the runner and args, and write profile: ${named}`);
@@ -247,13 +267,14 @@ function parseRoutes(value: unknown, where: string): { routes?: Routes } {
 const ARTIFACT_ACTION_FIELDS = new Set(["action", "with"]);
 
 /** A Stage's artifact: a name as written, or `{ action, with }`, which reads as `action <name>` with its params. */
-function parseArtifact(value: unknown, where: string): { artifact: string | null; artifactWith?: Record<string, string> } {
+function parseArtifact(value: unknown, where: string, field: "artifact" | "wait" = "artifact"): { artifact: string | null; artifactWith?: Record<string, string> } {
   if (value === undefined || value === null) return { artifact: null };
   if (isPlainObject(value)) {
     const o = value as Record<string, unknown>;
-    for (const key of Object.keys(o)) if (!ARTIFACT_ACTION_FIELDS.has(key)) throw new PipelineError(`${where}: ${key} is not a field of a check Action artifact`);
-    if (typeof o.action !== "string") throw new PipelineError(`${where}: a check Action artifact needs action: <name>`);
-    return { artifact: `action ${o.action}`, artifactWith: parseWith(o.with, where, "artifact.with") };
+    const what = field === "wait" ? "a wait Stage's check Action" : "a check Action artifact";
+    for (const key of Object.keys(o)) if (!ARTIFACT_ACTION_FIELDS.has(key)) throw new PipelineError(`${where}: ${key} is not a field of ${what}`);
+    if (typeof o.action !== "string") throw new PipelineError(`${where}: ${what} needs action: <name>`);
+    return { artifact: `action ${o.action}`, artifactWith: parseWith(o.with, where, `${field}.with`) };
   }
   const artifact = String(value);
   if (!isKnownArtifact(artifact)) throw new PipelineError(`${where}: unknown artifact ${artifact}`);
@@ -283,6 +304,32 @@ function parseActionStage(s: Record<string, unknown>, where: string): ActionStag
   return { kind: "action", name: typeof s.name === "string" ? s.name : defaultActionName(action, params), action, with: params, ...parseRoutes(s.routes, where) };
 }
 
+/**
+ * A wait Stage (LASSO-195): `wait:` takes a check Action in the forms `artifact:` does (`action <name>`, or
+ * `{ action, with }`); it needs a name and allows only wait, routes, budget (wallTime alone) and advance.
+ */
+function parseWaitStage(s: Record<string, unknown>, where: string): WaitStage {
+  for (const key of Object.keys(s)) if (!WAIT_STAGE_FIELDS.has(key)) throw new PipelineError(`${where}: ${key} is not a field of a wait Stage; it allows only name, wait, routes, budget and advance`);
+  if (typeof s.name !== "string" || !STAGE_NAME.test(s.name)) throw new PipelineError(`${where}: a wait Stage needs a name of lowercase letters, digits, and hyphens`);
+  const needs = `${where}: wait must name a check Action, as action <name> or { action, with }`;
+  if (s.wait === null || (!isPlainObject(s.wait) && typeof s.wait !== "string")) throw new PipelineError(needs);
+  if (typeof s.wait === "string" && actionArtifact(s.wait) === null) throw new PipelineError(needs);
+  const { artifact, artifactWith } = parseArtifact(s.wait, where, "wait");
+  if (artifact === null || actionArtifact(artifact) === null) throw new PipelineError(needs);
+  if (s.advance !== undefined && typeof s.advance !== "boolean") throw new PipelineError(`${where}: advance must be true or false`);
+  const budget = mapping(s.budget, `${where}: budget`, fail);
+  for (const key of Object.keys(budget)) if (key !== "wallTime") throw new PipelineError(`${where}: budget.${key} does not apply to a wait Stage; it allows only wallTime`);
+  return {
+    kind: "wait",
+    name: s.name,
+    wait: artifact,
+    waitWith: artifactWith ?? {},
+    advance: s.advance !== false,
+    budget: budget.wallTime === undefined ? {} : { wallTime: duration(budget.wallTime, `${where}: budget.wallTime`, fail) },
+    ...parseRoutes(s.routes, where),
+  };
+}
+
 /** An unnamed action Stage is called by its Action's last part and its param values: tracker.transition with status In Progress is transition-in-progress. */
 export function defaultActionName(action: string, params: Record<string, string>): string {
   return hyphenate([action.split(".").at(-1)!, ...Object.values(params)].join(" "));
@@ -297,6 +344,7 @@ export function checkActions(pipeline: Pipeline, actions: Record<string, ActionC
   for (const stage of pipeline.stages) {
     const where = `Pipeline ${pipeline.name} Stage ${stage.name}`;
     if (stage.kind === "action") checkParams(where, stage.action, stage.with, "with", actions);
+    else if (stage.kind === "wait") checkParams(`${where} wait`, actionArtifact(stage.wait)!, stage.waitWith, "with", actions);
     else if (stage.artifact && stage.artifactWith) checkParams(`${where} artifact`, actionArtifact(stage.artifact)!, stage.artifactWith, "with", actions);
   }
 }

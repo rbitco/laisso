@@ -26,9 +26,10 @@ Any other top-level field is an error. `runner:` is the old form: write
 
 ## Stages
 
-A Stage is a **Runner Stage** when it has `prompt` or `skills`, an
-**action Stage** when it has `action`. Both, or neither, is an error. Stage
-names are lowercase letters, digits and hyphens, unique in the Pipeline.
+A Stage is a **wait Stage** when it has `wait`, a **Runner Stage** when it
+has `prompt` or `skills`, an **action Stage** when it has `action`. Runner
+and action fields together, or none of them, is an error. Stage names are
+lowercase letters, digits and hyphens, unique in the Pipeline.
 
 ### Runner Stage
 
@@ -137,6 +138,52 @@ stages:
 
   - action: tracker.transition
     with: { status: In Review }
+```
+
+### Wait Stage
+
+A wait Stage runs no Session. It **Watches** a [check Action](#check-actions)
+until it is met: on every Tick, and on Check now, from the moment the
+Ticket arrives.
+
+| Field | Rule |
+| --- | --- |
+| `name` | required |
+| `wait` | required: a check Action, as `action <name>` or `{ action: <name>, with: { ... } }` |
+| `routes` | optional; the check may pick one with `lasso route` |
+| `budget` | optional; only `wallTime`: Flag `budget.wall_time` when not met within it. No limit by default |
+| `advance` | `true` (default); `false` holds once met, as for a Runner Stage, including before a Route the check picked (Start takes it, Skip declines it) |
+
+Nothing else is allowed. Each run of the check:
+
+- **met** (exit 0): the Ticket takes the Route the check picked, or walks
+  on; a Route still counts against its [Route Budget](#route-budget).
+- **not met** (exit 1): the Ticket keeps Watching; the next Tick checks again.
+- **broken** (any other exit, a timeout, or no Action): Flags `artifact.error`.
+
+The latest result stays on the Visit. The check does not run while the
+Ticket is Flagged or holding, or while another check of it is running, and
+it needs no PR. A Watching Ticket holds no concurrency slot, is never
+Queued, and raises no notification when met. The dashboard shows it as
+**Watching**, with the check's last line and when it last ran. Its levers
+are Check now, Skip (walks on as if met, taking no Route) and Abandon; it
+has no Mark done. Send to Stage works to and from a wait Stage; a check
+still running when the Ticket is sent keeps its result on the Visit it ran
+for.
+
+```yaml lasso-pipeline
+stages:
+  - name: implement
+    skills: [implement]
+    artifact: commits-on-branch
+    prompt: |
+      Implement the issue. Commit to the current branch; do not push.
+
+  - name: ci
+    wait: { action: ci-green, with: { workflow: test } }
+    budget: { wallTime: 2h }
+    routes:
+      back: { to: implement, append: Fix what CI found. }
 ```
 
 ## Routes

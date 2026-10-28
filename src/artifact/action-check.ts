@@ -80,12 +80,12 @@ export class ActionChecks {
       this.busy.delete(ticket.id);
       this.runs.delete(run.id);
     });
-    // Shutdown cut it short: it is no verdict, so nothing is kept.
-    if (code !== "shutdown") {
+    // Shutdown cut it short: it is no verdict, so nothing is kept. A run is kept on the Visit it began on only.
+    if (code !== "shutdown" && run.visit !== null) {
       const result = verdict.present ? "met" : verdict.broken ? "error" : "not_met";
       // A pick counts only from a met run; a not-met or broken run's is discarded.
       const pick = result === "met" && run.pick ? { route: run.pick.route, note: run.pick.note } : {};
-      this.deps.visits.setCheck(ticket.id, stage, { action: name, result, at: new Date().toISOString(), code: typeof code === "number" ? code : null, line: verdict.detail, ...pick }, run.id);
+      this.deps.visits.setCheck(ticket.id, run.visit, { action: name, result, at: new Date().toISOString(), code: typeof code === "number" ? code : null, line: verdict.detail, ...pick }, run.id);
     }
     return verdict;
   }

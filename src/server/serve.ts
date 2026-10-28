@@ -35,6 +35,7 @@ import { startupToolCheck } from "../tools/startup.ts";
 import { chooseTerminal } from "../session/openers.ts";
 import { VersionCheck, npmLatest } from "./version-check.ts";
 import { ActionChecks } from "../artifact/action-check.ts";
+import { Watch } from "../wait/watch.ts";
 import { PrLists } from "../prs/lists.ts";
 import { githubRepos } from "../prs/origins.ts";
 import type { GitHubRepo } from "../prs/query.ts";
@@ -138,7 +139,8 @@ export async function serve(opts: ServeOptions): Promise<number> {
     const rules = reviewFor(config, ticket.repo);
     return ignoring(rules.ignore_self ? [...rules.ignore_authors, await prs.viewer()] : rules.ignore_authors);
   };
-  const review: Review = new Review({ tickets, sessions, feedback, links, progress, prs, checks, log, ignored });
+  const review: Review = new Review({ tickets, sessions, visits, feedback, links, progress, prs, checks, log, ignored });
+  const watch = new Watch({ tickets, visits, progress, checks, log });
   const terminal = new Terminal({ config, home, sessions, visits, links, log, routeCounts: (ticket, stage) => budgets.routes(ticket, stage), flag: (ticket, reason, detail) => progress.flag(ticket, reason, detail) });
   const queue = new Queue({ home, tickets, sessions, progress, log, cap: config.concurrency });
   const runs = new Runs({ config, home, tickets, links, sessions, visits, log, progress, budgets, queue, review, checks, stdoutWritten: (ticket, session) => changes.emit({ kind: "stdout", ticket, session }), ended: () => tick.kick("session-end") });
@@ -173,15 +175,15 @@ export async function serve(opts: ServeOptions): Promise<number> {
     example: `pr_lists:\n${prListsBlock("").trimEnd().replace(/^/gm, "  ")}\n`,
   });
   // One tick: the PR Lists, which only start their fetches (a Tick never waits on a PR search), then owed mirror
-  // pushes, then action Stages, then the PR poll (a Round it makes due starts below), then headless starts, then the
-  // retention sweep.
+  // pushes, then action Stages, then the PR poll (a Round it makes due starts below), then wait Stages' checks, then
+  // headless starts, then the retention sweep.
   const tick = new Tick(
     config.tick,
     log,
     async () => {
       // A PR List problem must never cost the Tick the rest of its work.
       await prLists.onTick().catch((error: unknown) => log.error("prlists.tick", { error: error instanceof Error ? error.message : String(error) }));
-      return [...(await mirror.retryPending()), ...(await actions.runDue()), ...(await review.poll()), ...(await runs.startRunnable()), ...(await teardown.sweep())];
+      return [...(await mirror.retryPending()), ...(await actions.runDue()), ...(await review.poll()), ...(await watch.poll()), ...(await runs.startRunnable()), ...(await teardown.sweep())];
     },
     () => changes.emit({ kind: "tick" }),
   );

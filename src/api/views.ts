@@ -24,11 +24,12 @@ export interface Health {
   home: string;
 }
 
-export type DisplayState ="flagged" | "needs_you" | "holding" | "ready" | "running" | "queued" | "quiet" | "done" | "abandoned";
+export type DisplayState = "flagged" | "needs_you" | "holding" | "ready" | "running" | "queued" | "watching" | "quiet" | "done" | "abandoned";
 
 /** A lever the human can pull on a Ticket right now; the dashboard renders one button per Trigger. Flagged, the six exits. */
 export interface Trigger {
-  action: "terminal" | "done" | "skip" | "start" | "retry" | "resume" | "extend" | "abandon" | "takeover" | "handback" | "draft";
+  /** `check` is Check now: it runs a Tick, in which a wait Stage runs its check. */
+  action: "terminal" | "done" | "skip" | "start" | "retry" | "resume" | "extend" | "abandon" | "takeover" | "handback" | "draft" | "check";
   label: string;
   /** Set when the lever is shown but cannot be pulled now, saying why: Resume when the Stage's profile is on another Runner. */
   unavailable?: string;
@@ -42,6 +43,7 @@ export const DISPLAY_LABEL: Record<DisplayState, string> = {
   ready: "Ready to start",
   running: "Running",
   queued: "Queued",
+  watching: "Watching",
   quiet: "Quiet",
   done: "Done",
   abandoned: "Abandoned",
@@ -322,7 +324,7 @@ export interface ViewContext {
 }
 
 /** The order the Ledger shows display states in: attention first. */
-export const LEDGER_ORDER: DisplayState[] = ["flagged", "needs_you", "holding", "ready", "running", "queued", "quiet", "done", "abandoned"];
+export const LEDGER_ORDER: DisplayState[] = ["flagged", "needs_you", "holding", "ready", "running", "queued", "watching", "quiet", "done", "abandoned"];
 
 /** A Pipeline as the editor sees it: every field of every Stage, action Stages included. */
 export interface PipelineView {
@@ -333,7 +335,8 @@ export interface PipelineView {
 
 export type StageFields =
   | { kind: "runner"; name: string; label: string; prompt: string | null; skills: string[]; profile: string | null; human: boolean; advance: boolean; artifact: string | null; artifactWith?: Record<string, string>; repeat: "feedback" | null; budget: { rounds?: number; attempts?: number; wallTime?: string }; routes?: Routes; agentRoutes?: true }
-  | { kind: "action"; name: string; label: string; action: string; with: Record<string, string>; routes?: Routes };
+  | { kind: "action"; name: string; label: string; action: string; with: Record<string, string>; routes?: Routes }
+  | { kind: "wait"; name: string; label: string; wait: string; waitWith: Record<string, string>; advance: boolean; budget: { wallTime?: string }; routes?: Routes };
 
 export interface PipelineListing {
   name: string;
@@ -498,7 +501,7 @@ export function ticketView(ticket: TicketRow, ctx: ViewContext): TicketView {
     triggers,
     budget,
     stages: (pipeline?.stages ?? []).map((s) => ({ name: s.name, kind: s.kind, label: stageLabel(s), human: s.kind === "runner" && s.human, skippedAt: latestVisit(visits, s.name)?.skipped_at ?? null })),
-    check: stage?.kind === "runner" && stage.artifactWith ? check : null,
+    check: (stage?.kind === "runner" && stage.artifactWith) || stage?.kind === "wait" ? check : null,
     visit: currentVisit(visits),
     mirrorPending: ticket.mirror_pending !== null,
     createdAt: ticket.created_at,
@@ -677,6 +680,8 @@ function displayState(ticket: TicketRow, links: PrLinkRow[], stage: Stage | null
     return { state: "needs_you", why: takenOver ? `taken over; ${opened ? why : "terminal not opened"}` : why };
   }
   if (queue !== null) return { state: "queued", why: `${queue} in line; ${name} starts when a slot frees` };
+  // A wait Stage Watches its check: no slot, no human, never Queued (CONTEXT.md: Watching).
+  if (stage?.kind === "wait") return { state: "watching", why: watchingWhy(stage.wait, check) };
   // A repeating Stage with no Round due waits on its PR: quiet (spec: Review loop).
   if (stage?.kind === "runner" && stage.repeat && !roundDue(links)) return { state: "quiet", why: quietWhy(check, links, name) };
   return { state: "ready", why: `${name} starts on the next tick` };
@@ -684,6 +689,13 @@ function displayState(ticket: TicketRow, links: PrLinkRow[], stage: Stage | null
 
 /** The Route a Ticket holding at its source Stage waits to take (LASSO-196). */
 type HeldRoute = { route: string; to: string };
+
+/** The why line of a Watching Ticket: the check's latest detail line and when it last ran, or that it has not run yet. */
+function watchingWhy(wait: string, check: ArtifactCheck | null): string {
+  if (!check) return `${wait}: not checked yet`;
+  const line = check.line ?? `${check.action} ${check.result === "met" ? "met" : "not met"}`;
+  return `${line} · checked ${clockTime(check.at)}`;
+}
 
 /** The last headless Session of the Stage, when there is one Resume could re-enter. */
 function resumableHeadless(rows: SessionRow[], stage: string): SessionRow | null {
@@ -710,6 +722,13 @@ function ticketTriggers(ticket: TicketRow, stage: Stage | null, rows: SessionRow
     const unavailable = refusal(toTake);
     return [{ action: "takeover", label: "Take over in terminal", ...(unavailable ? { unavailable } : {}) }];
   };
+  if (stage.kind === "wait") {
+    // A wait Stage has no Mark done (LASSO-195): Skip advances it as if met, taking no Route.
+    const skip: Trigger = { action: "skip", label: `Skip ${stage.name}` };
+    if (ticket.flagged_at) return [{ action: "retry", label: `Retry ${stage.name}` }, { action: "extend", label: "Extend Budget" }, skip, abandon];
+    if (ticket.holding_since) return [{ action: "start", label: held ? `Start ${held.to} via ${held.route}` : `Start ${stage.name}` }, skip, abandon];
+    return [{ action: "check", label: "Check now" }, skip, abandon];
+  }
   if (ticket.flagged_at) {
     // Resume needs something to re-enter: a terminal window that opened, or the last headless Session of this
     // Stage, which a Runner that names its own sessions must have reported an id for.

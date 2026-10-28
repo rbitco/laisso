@@ -58,6 +58,19 @@ export function VersionView({ name, version }: { name: string; version: number }
           </div>
         </RailStage>
       );
+    if (s.kind === "wait")
+      return (
+        <RailStage key={i} kind="wait" station={String(i + 1)} name={s.name} summary={"Watches " + s.wait} peek="" open={open[i]!} onToggle={toggle}>
+          <div className="fields">
+            <Value label="wait" value={s.wait} />
+            {Object.entries(s.waitWith).map(([key, value]) => (
+              <Value key={key} label={"wait " + key} value={value} />
+            ))}
+            <Value label="advances on its own" value={yes(s.advance)} />
+            <Value label="wall time" value={s.budget.wallTime ?? "no limit"} />
+          </div>
+        </RailStage>
+      );
     return (
       <RailStage key={i} kind={s.human ? "human" : "runner"} station={String(i + 1)} name={s.name} summary={s.artifact ? "artifact " + s.artifact : ""} peek={firstLine(s.prompt)} open={open[i]!} onToggle={toggle}>
         <div className="fgroup">

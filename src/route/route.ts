@@ -133,7 +133,7 @@ export function decide({ stage, pick, check = null, end, counts }: Leaving): Exi
   if (taken.by !== "human" && count && count.used >= count.limit) {
     return { kind: "flag", reason: "budget.routes", detail: `Route ${taken.route} to ${route.to}: ${count.used} of ${count.limit} used; Extend to take it`, pending: take };
   }
-  const gated = (stage.kind === "runner" && !stage.advance) || route.advance === false;
+  const gated = (stage.kind !== "action" && !stage.advance) || route.advance === false;
   return taken.by !== "human" && gated ? { ...take, holds: true } : take;
 }
 

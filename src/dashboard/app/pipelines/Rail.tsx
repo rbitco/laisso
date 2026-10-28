@@ -1,8 +1,8 @@
 import type { CSSProperties, ReactNode } from "react";
 
-export type StageKind = "runner" | "human" | "action";
+export type StageKind = "runner" | "human" | "action" | "wait";
 
-const KIND_LABEL: Record<StageKind, string> = { runner: "Runner", human: "Human", action: "Action" };
+const KIND_LABEL: Record<StageKind, string> = { runner: "Runner", human: "Human", action: "Action", wait: "Wait" };
 
 /** A prompt's first line with text in it, for a closed Stage's peek. */
 export const firstLine = (text: string | null): string => (text ?? "").split("\n").find((l) => l.trim()) ?? "";

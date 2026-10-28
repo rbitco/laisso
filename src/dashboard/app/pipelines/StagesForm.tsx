@@ -190,7 +190,9 @@ function Editor({ file, params, start, onSaved }: { file: LoadedPipeline; params
           };
           return (
             <Fragment key={card.id}>
-              {card.draft.kind === "action" ? (
+              {card.draft.kind === "wait" ? (
+                <WaitCard {...shared} />
+              ) : card.draft.kind === "action" ? (
                 <ActionCard {...shared} draft={card.draft} params={params} onEdit={(change) => editStage(card.id, change)} />
               ) : (
                 <RunnerCard {...shared} draft={card.draft} params={params} pipeline={file.name} pipelineProfile={draft.profile || null} config={config} onConfig={setConfig} onEdit={(change) => editStage(card.id, change)} />
@@ -256,6 +258,20 @@ interface CardProps {
 }
 
 const stageClass = (card: Card) => [card.fresh && "fresh", card.removed && "removed"].filter(Boolean).join(" ");
+
+/** A wait Stage, shown as written: the form moves and removes it, and its fields are edited as text (LASSO-195). */
+function WaitCard({ card, station, tools, onToggle }: CardProps) {
+  const s = card.stage;
+  if (s.kind !== "wait") throw new Error("a wait card needs a wait Stage");
+  const params = Object.entries(s.waitWith);
+  return (
+    <RailStage kind="wait" station={station} name={s.name} summary={"Watches " + s.wait} peek="" open={card.open} onToggle={onToggle} className={stageClass(card)} role="wait-stage" tools={tools}>
+      <div className="fields">
+        <p className="why">{"Watches " + s.wait + (params.length ? " with " + params.map(([k, v]) => k + ": " + v).join(", ") : "") + (s.budget.wallTime ? ", for up to " + s.budget.wallTime : "") + (s.advance ? "" : ", then holds") + ". Edit it as text."}</p>
+      </div>
+    </RailStage>
+  );
+}
 
 /** An Action Stage: the Action picked from config, and one field per param it takes. */
 function ActionCard({ card, station, tools, onToggle, draft, params, onEdit }: CardProps & { draft: ActionDraft; params: Params; onEdit: (change: Partial<ActionDraft>) => void }) {

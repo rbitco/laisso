@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { existsSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { startLassoWithRepos, startLasso, runCli, waitFor, claudeFixture, type Lasso } from "./harness.ts";
 import type { TicketDetail, IntakeResult } from "../src/api/views.ts";
 import type { TickChange } from "../src/server/tick.ts";
@@ -556,6 +557,32 @@ describe("a repeating Stage that ends on a check Action", () => {
     await Promise.all([checkNow(lasso), checkNow(lasso), checkNow(lasso)]);
     expect(existsSync(path.join(ticket.worktree, "..", "overlaps"))).toBe(false);
     expect((await detailOf(lasso, ticket.id)).check).toMatchObject({ result: "not_met" });
+  });
+
+  it("moves nothing when the Ticket is sent back to the Stage while its check runs, keeping the result on the old Visit", async () => {
+    const { lasso, ticket } = await lassoWithCheck('touch ../started; while [ ! -f ../release ]; do sleep 0.1; done; echo "ready to go"');
+    await setScene(lasso, ticket.branch, green);
+    const visitsOf = () => {
+      const db = new DatabaseSync(path.join(lasso.home, "lasso.db"));
+      try {
+        return db.prepare("SELECT id, stage, arrived_by, check_result FROM visits WHERE ticket = ? ORDER BY id").all(ticket.id) as Array<{ id: number; stage: string; arrived_by: string; check_result: string | null }>;
+      } finally {
+        db.close();
+      }
+    };
+    const tick = checkNow(lasso);
+    await waitFor(async () => (existsSync(path.join(ticket.worktree, "..", "started")) ? true : null), "the check to start");
+    const sent = pull(lasso, ticket.id, "send", { stage: "review" });
+    await waitFor(async () => (visitsOf().length === 2 ? true : null), "the send to land");
+    await writeFile(path.join(ticket.worktree, "..", "release"), "");
+    const [{ changes }] = await Promise.all([tick, sent]);
+    expect(changes.map((c) => c.summary)).not.toContain("action ready met; review finished");
+
+    const d = await detailOf(lasso, ticket.id);
+    expect(d).toMatchObject({ state: "active", stage: { name: "review" } });
+    const [old, now] = visitsOf();
+    expect(JSON.parse(old!.check_result!)).toMatchObject({ result: "met", line: "ready to go" });
+    expect(now).toMatchObject({ stage: "review", arrived_by: "send", check_result: null });
   });
 
   it("takes the Route a met check picked with lasso route (LASSO-192)", async () => {

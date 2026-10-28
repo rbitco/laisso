@@ -32,7 +32,12 @@ export interface ActionDraft {
   with: Record<string, string>;
 }
 
-export type StageDraft = RunnerDraft | ActionDraft;
+/** A wait Stage: shown, moved and removed by the form, but its fields are edited in the file's text. */
+export interface WaitDraft {
+  kind: "wait";
+}
+
+export type StageDraft = RunnerDraft | ActionDraft | WaitDraft;
 
 /** One Stage card: the Stage it started as, what it holds now, and whether it is new, removed on Save, or open. */
 export interface Card {
@@ -97,6 +102,7 @@ export function actionKeys(stage: ActionFields, action: string, params: Params):
 
 export function stageDraft(s: StageFields): StageDraft {
   if (s.kind === "action") return { kind: "action", action: s.action, with: { ...s.with } };
+  if (s.kind === "wait") return { kind: "wait" };
   const text = (v: number | string | undefined) => (v === undefined ? "" : String(v));
   return {
     kind: "runner",
@@ -183,6 +189,7 @@ export function removeStage(cards: Card[], id: number): Card[] {
 /** The name a closed card shows. */
 export function stageTitle(card: Card): string {
   if (card.draft.kind === "action") return card.fresh ? "New Stage" : card.stage.name;
+  if (card.draft.kind === "wait") return card.stage.name;
   return card.draft.name.trim() || "New Stage";
 }
 
@@ -211,6 +218,7 @@ function prune<T extends Record<string, unknown>>(patch: T): T {
  */
 export function stagePatch(card: Card, params: Params, at: number): Record<string, unknown> {
   const { stage: s, draft: d } = card;
+  if (s.kind === "wait" && d.kind === "wait") return {};
   if (s.kind === "action" && d.kind === "action") {
     const next = Object.fromEntries(actionKeys(s, d.action, params).map((key) => [key, (d.with[key] ?? "").trim()]));
     // A param left blank is left out, so the save names it as missing.

@@ -105,7 +105,7 @@ export class Mirror {
     return repo ? trackerFor(repo.tracker, repo.project) : null;
   }
 
-  /** Action Stages get no label of their own: the label of the last Runner Stage before it stays; null when the Pipeline cannot say. */
+  /** Action Stages get no label of their own: the label of the last Runner or wait Stage before it stays; null when the Pipeline cannot say. */
   private labelledStage(ticket: TicketRow): string | null {
     const pipeline = this.deps.pipelineFor(ticket);
     if (!pipeline) return null;
@@ -113,7 +113,7 @@ export class Mirror {
     if (index < 0) return null;
     for (let i = index; i >= 0; i--) {
       const stage = pipeline.stages[i]!;
-      if (stage.kind === "runner") return stage.name;
+      if (stage.kind !== "action") return stage.name;
     }
     return null;
   }

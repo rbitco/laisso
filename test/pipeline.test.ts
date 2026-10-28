@@ -11,7 +11,7 @@ const FAILING: Array<[string, string, RegExp]> = [
   ["no stages", "profile: claude\n", /has no stages/],
   ["a stage that is not a mapping", STAGES("  - implement\n"), /stage 1 is not a mapping/],
   ["a stage with both action and prompt", STAGES("  - name: x\n    prompt: p\n    action: tracker.transition\n    with: { status: Done }\n"), /has both action and prompt\/skills/],
-  ["a stage with neither prompt, skills nor action", STAGES("  - name: x\n    artifact: pr-exists\n"), /needs a prompt, skills, or an action/],
+  ["a stage with neither prompt, skills nor action", STAGES("  - name: x\n    artifact: pr-exists\n"), /needs a prompt, skills, an action, or a wait/],
   ["an action that could not be an Action's name", STAGES("  - action: Tell Ops\n"), /Tell Ops is not an Action name/],
   ["a status outside with, as before ADR 0010", STAGES("  - action: tracker.transition\n    status: Done\n"), /stage 1: status is now a param; write with: \{ status: Done \}/],
   ["an action stage carrying Runner fields", STAGES("  - action: notify\n    human: true\n"), /stage 1: human is not a field of an action Stage/],

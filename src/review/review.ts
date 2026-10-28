@@ -8,7 +8,7 @@ import type { Verdict } from "../session/runs.ts";
 import { actionArtifact, type RunnerStage } from "../pipeline/load.ts";
 import type { ActionChecks } from "../artifact/action-check.ts";
 import type { OwnedPr } from "../artifact/check.ts";
-import type { ArtifactCheck } from "../store/visits.ts";
+import type { ArtifactCheck, Visits } from "../store/visits.ts";
 import { ownedOf, type PrLinkFacts, type PrLinks, type PrLinkRow } from "../store/links.ts";
 import { parsePrUrl, type PullRequests, type PrRef } from "./github.ts";
 import { addressedEvidence, checkFailed, describe, fresh, logSlice, marker, outstanding, ownMark, repeatedChecks, watermarkOf, withoutIgnored, type FeedbackItem, type IgnoredAuthor, type PrFacts, type PrFeedback, type Seen } from "./feedback.ts";
@@ -46,6 +46,7 @@ export interface RoundPlan {
 export interface ReviewDeps {
   tickets: Tickets;
   sessions: Sessions;
+  visits: Visits;
   feedback: Feedback;
   links: PrLinks;
   progress: Progress;
@@ -93,7 +94,7 @@ export class Review {
   }
 
   private async pollTicket(ticket: TicketRow, stage: RunnerStage): Promise<TickChange[]> {
-    const { tickets, links, progress, prs, feedback, sessions } = this.deps;
+    const { tickets, links, progress, prs, feedback, sessions, visits } = this.deps;
     const changes: TickChange[] = [];
     const found = await this.branchPr(ticket);
     if (found) changes.push({ ticket: ticket.id, summary: `PR #${found.number} found` });
@@ -143,9 +144,11 @@ export class Review {
     // A check Action ends the Stage, not the merge: it runs each poll while the Ticket waits, unless a human has it or one is running.
     if (stage.artifactWith) {
       if (ticket.flagged_at || this.deps.checks.running(ticket.id)) return changes;
+      const visit = visits.current(ticket.id);
       const verdict = await this.endCheck(ticket, stage, merged);
+      // A send meanwhile, even back to this Stage, opens a new Visit: the result stays on the old one and moves nothing.
       const fresh = tickets.get(ticket.id);
-      if (!fresh || fresh.state !== "active" || fresh.stage !== stage.name || sessions.running(ticket.id).some((s) => s.mode === "headless")) return changes;
+      if (!fresh || fresh.state !== "active" || !visit || visits.current(ticket.id)?.id !== visit.id || sessions.running(ticket.id).some((s) => s.mode === "headless")) return changes;
       if (verdict === "advance") {
         await progress.advance(fresh);
         changes.push({ ticket: ticket.id, summary: `${stage.artifact} met; ${stage.name} finished` });

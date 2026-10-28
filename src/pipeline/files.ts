@@ -81,10 +81,10 @@ export class PipelineFiles {
         const index = current.pipeline.stages.findIndex((s) => s.name === stageName);
         if (index < 0) throw new PipelineError(`Pipeline ${name} has no Stage named ${stageName}`);
         if (!isPlainObject(fields)) throw new PipelineError(`Stage ${stageName}: fields must be a mapping`);
-        // A check Action artifact `{ action, with }` replaces whatever artifact was there whole, not key by key.
-        const { artifact, ...rest } = fields;
-        if (isPlainObject(artifact)) doc.setIn(["stages", index, "artifact"], artifactNode(doc, artifact));
-        applyPatch(doc, isPlainObject(artifact) ? rest : fields, ["stages", index]);
+        // A check Action `{ action, with }`, as an artifact or a wait Stage's wait, replaces what was there whole, not key by key.
+        const whole = Object.entries(fields).filter(([key, value]) => (key === "artifact" || key === "wait") && isPlainObject(value));
+        for (const [key, value] of whole) doc.setIn(["stages", index, key], artifactNode(doc, value as Record<string, unknown>));
+        applyPatch(doc, Object.fromEntries(Object.entries(fields).filter(([key]) => !whole.some(([k]) => k === key))), ["stages", index]);
       }
     }
     if (order !== undefined) reorderStages(doc, name, current.pipeline.stages.map((s) => s.name), order);
@@ -147,7 +147,7 @@ function newStage(doc: Document, fields: Record<string, unknown>) {
   const node = doc.createNode(Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== null)));
   for (const pair of node.items) {
     if (isSeq(pair.value) || (isMap(pair.value) && isScalar(pair.key) && pair.key.value === "with")) pair.value.flow = true;
-    if (isMap(pair.value) && isScalar(pair.key) && pair.key.value === "artifact") flowWith(pair.value);
+    if (isMap(pair.value) && isScalar(pair.key) && (pair.key.value === "artifact" || pair.key.value === "wait")) flowWith(pair.value);
   }
   return node;
 }

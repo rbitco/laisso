@@ -60,7 +60,8 @@ export class Exits {
     if (stage.kind === "runner") this.affordable(ticket, pipeline, stage);
     if (profile !== undefined && profile !== null) ticket = overrides.set(ticket, stage.name, profile);
     return this.cleared(ticket, "retry", async (cleared) => {
-      if (stage.kind === "action") await tick.run("start");
+      // An action Stage performs again, and a wait Stage Watches again, on the Tick this runs.
+      if (stage.kind !== "runner") await tick.run("start");
       else if (stage.human) {
         progress.endHumanSessions(cleared);
         await terminal.open(cleared, pipeline, stage);
@@ -73,6 +74,7 @@ export class Exits {
     const { progress, terminal, sessions, runs } = this.deps;
     const { pipeline, stage } = progress.flaggedStage(ticket);
     if (stage.kind === "action") throw new TriggerError(`${stage.name} is an action Stage; Retry performs it again`);
+    if (stage.kind === "wait") throw new TriggerError(`${stage.name} is a wait Stage; Retry Watches its check again`);
     if (stage.human) {
       const held = sessions.running(ticket.id).find((s) => s.mode === "terminal" && s.stage === stage.name && s.opened_at !== null);
       if (!held) throw new TriggerError(`no terminal Session of ${stage.name} to resume; Retry opens a fresh one`);
@@ -100,7 +102,7 @@ export class Exits {
     const { progress, sessions, terminal, runs, tickets } = this.deps;
     if (ticket.holding_since && !ticket.flagged_at) throw new TriggerError(`Ticket ${ticket.reference ?? ticket.id} is holding; ${progress.startLabel(ticket, progress.currentForTrigger(ticket).stage)} or open the draft`);
     const { pipeline, stage } = ticket.flagged_at ? progress.flaggedStage(ticket) : progress.currentForTrigger(ticket);
-    if (stage.kind !== "runner") throw new TriggerError(`${stage.name} is an action Stage; there is no Session to take over`);
+    if (stage.kind !== "runner") throw new TriggerError(`${stage.name} is ${stage.kind === "wait" ? "a wait" : "an action"} Stage; there is no Session to take over`);
     if (stage.human) throw new TriggerError(`${stage.name} is a human Stage; Open terminal works it`);
     let takeOver = null;
     if (!progress.takenOver(ticket, stage.name)) {

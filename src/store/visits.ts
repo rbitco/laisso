@@ -116,11 +116,12 @@ export class Visits {
     return this.db.prepare(`SELECT * FROM visits WHERE id = ?`).get(lastInsertRowid) as unknown as VisitRow;
   }
 
-  /** Keep the latest check on the Stage's latest Visit, over the one before (ADR 0014). */
-  setCheck(ticket: string, stage: string, check: ArtifactCheck, run: string | null = null): void {
-    const visit = this.latest(ticket, stage);
-    if (!visit) return;
-    this.db.prepare(`UPDATE visits SET check_result = ?, check_run = ? WHERE id = ?`).run(JSON.stringify(check), run, visit.id);
+  /**
+   * Keep the latest check on the Visit the run checked for, over the one before (ADR 0014). A run that began on a
+   * Visit the Ticket has since left (a send, a Skip) writes there, never onto the Visit that replaced it.
+   */
+  setCheck(ticket: string, visit: number, check: ArtifactCheck, run: string | null = null): void {
+    this.db.prepare(`UPDATE visits SET check_result = ?, check_run = ? WHERE id = ? AND ticket = ?`).run(JSON.stringify(check), run, visit, ticket);
     this.changed(ticket);
   }
 

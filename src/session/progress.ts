@@ -210,7 +210,7 @@ export class Progress {
       this.deps.mirror.pushSoon(done.id);
       return;
     }
-    const holds = !release && current.stage.kind === "runner" && !current.stage.advance;
+    const holds = !release && current.stage.kind !== "action" && !current.stage.advance;
     const updated = this.deps.tickets.arrive(ticket.id, { stage: next.name, arrived_by: "walk" }, { holding_since: holds ? now : null, ...unflagPatch(ticket, now) }, now);
     this.deps.log.info("ticket.advanced", { ticket: ticket.id, stage: next.name, holding: holds });
     if (holds) this.deps.notifier.post("gate", updated, `${current.stage.name} finished; Start ${next.name} when ready`);
@@ -397,6 +397,8 @@ export class Progress {
    * terminal agent picked is taken as a headless Session's would be when it met its artifact; a Flagged Stage walks.
    */
   async markDone(ticket: TicketRow, override: boolean): Promise<TicketRow> {
+    const at = ticket.flagged_at ? this.flaggedStage(ticket).stage : this.currentForTrigger(ticket).stage;
+    if (at.kind === "wait") throw new TriggerError(`${at.name} is a wait Stage; it has no Mark done. Skip advances it as if its check were met`);
     const { stage } = this.exitStage(ticket);
     if (!override && stage.kind === "runner" && stage.artifact) {
       const verdict = await checkArtifact(stage.artifact, ticket.worktree, this.deps.prProbe(ticket), this.deps.actionProbe(ticket, stage.name), stage.artifactWith);

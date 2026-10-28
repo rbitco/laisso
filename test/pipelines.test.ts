@@ -236,7 +236,7 @@ stages:
     const lasso = await lassoWith();
     const patch = (order: unknown) => lasso.api("/api/pipelines/work", { method: "PATCH", body: json({ order }) });
     await expect(patch(["implement", { name: "notes", prompt: "Again." }, "notes"])).rejects.toThrow(/Pipeline work has two Stages named notes/);
-    await expect(patch(["implement", { name: "review" }, "notes"])).rejects.toThrow(/Pipeline work stage 2 needs a prompt, skills, or an action/);
+    await expect(patch(["implement", { name: "review" }, "notes"])).rejects.toThrow(/Pipeline work stage 2 needs a prompt, skills, an action, or a wait/);
     await expect(patch(["implement", { prompt: "No name." }])).rejects.toThrow(/stage 2 needs a name/);
     expect(await pipelineText(lasso, "work")).toBe(WORK);
   });
@@ -302,8 +302,8 @@ stages:
   it("lists a Pipeline whose file is broken with the problem, and intake refuses it", async () => {
     const lasso = await lassoWith({ work: WORK, broken: "stages:\n  - name: x\n    artifact: pr-exists\n" });
     const listing = await lasso.api<PipelineListing[]>("/api/pipelines");
-    expect(listing.find((p) => p.name === "broken")).toMatchObject({ stages: [], problem: expect.stringMatching(/needs a prompt, skills, or an action/) });
-    await expect(lasso.api("/api/tickets", { method: "POST", body: json({ input: "x", repo: "app", pipeline: "broken" }) })).rejects.toThrow(/needs a prompt, skills, or an action/);
+    expect(listing.find((p) => p.name === "broken")).toMatchObject({ stages: [], problem: expect.stringMatching(/needs a prompt, skills, an action, or a wait/) });
+    await expect(lasso.api("/api/tickets", { method: "POST", body: json({ input: "x", repo: "app", pipeline: "broken" }) })).rejects.toThrow(/needs a prompt, skills, an action, or a wait/);
   });
 
 });
