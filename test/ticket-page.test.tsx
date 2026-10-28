@@ -4,7 +4,8 @@ import { render, screen, cleanup, act, waitFor, within } from "@testing-library/
 import { userEvent } from "@testing-library/user-event";
 import { DEFAULT_CONFIG, type Config } from "../src/server/config.ts";
 import type { BudgetView } from "../src/budget/budget.ts";
-import type { ConfigFile, PipelineListing, PrView, RouteArcView, RouteRecordView, SessionView, StageProfileView, TicketDetail } from "../src/api/views.ts";
+import type { ConfigFile, PipelineListing, PrView, RouteArcView, RouteRecordView, SessionView, StageProfileView, TicketDetail, UpgradeView } from "../src/api/views.ts";
+import type { UpgradePlan } from "../src/session/upgrade.ts";
 import { TicketPage } from "../src/dashboard/app/ticket/TicketPage.tsx";
 import { closeProfileDrawer, ProfileDrawerHost } from "../src/dashboard/app/profiles/drawer.tsx";
 import { events } from "../src/dashboard/app/events.ts";
@@ -73,7 +74,7 @@ function ticket(id: string, over: Partial<TicketDetail> = {}): TicketDetail {
     ],
     mirrorPending: false, createdAt: T0, updatedAt: T0, url: `http://lasso/#${id}`,
     session: s, sessions: [session({ ticket: id, id: "S2", stage: "implement", outcome: "failed" }), s], pipelineDrift: "same",
-    profiles: [profile("plan", "claude-opus"), profile("implement", "claude-opus")], send: { unavailable: null, routes: [] }, markDone: null, visit: null, visits: [], arcs: [],
+    profiles: [profile("plan", "claude-opus"), profile("implement", "claude-opus")], send: { unavailable: null, routes: [] }, markDone: null, visit: null, visits: [], arcs: [], upgrades: [],
     ...over,
   };
 }
@@ -94,6 +95,7 @@ function fakeLasso(tickets: TicketDetail[]) {
     stdout: {} as Record<string, string>,
     held: new Map<string, Promise<void>>(),
     refuse: {} as Record<string, { status: number; body: unknown }>,
+    plans: {} as Record<string, UpgradePlan>,
   };
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
   vi.stubGlobal("fetch", async (url: string, init: RequestInit = {}) => {
@@ -121,6 +123,7 @@ function fakeLasso(tickets: TicketDetail[]) {
       return json({ text: text.slice(from), offset: text.length, ended: false });
     }
     if (out) return json(session());
+    if (rest === "upgrade" && method === "GET") return json(state.plans[t.id]);
     const refused = state.refuse[rest];
     if (refused) return json(refused.body, refused.status);
     if (rest === "name") state.tickets[t.id] = { ...t, name: body.name, label: body.name ?? t.reference ?? t.shortId };
@@ -208,7 +211,7 @@ describe("a Ticket's page", () => {
     expect(within(pane).getByText("Planned.")).toBeTruthy();
     const version = screen.getByRole("link", { name: "default v2" });
     expect(version.getAttribute("href")).toBe("#pipelines/default/v2");
-    expect(version.parentElement!.textContent).toBe("default v2 · Pipeline has changed");
+    expect(version.parentElement!.textContent).toBe("default v2 · Pipeline has changed · Upgrade");
     // The spend limit is set on this Ticket, so it is starred.
     expect(document.querySelector('[data-gauge="spend"]')!.textContent).toBe("$0.50/$5*spend");
     expect(within(document.querySelector<HTMLElement>('[data-role="timeline"]')!).getAllByRole("listitem")).toHaveLength(2);
@@ -900,6 +903,92 @@ describe("Route history on the Stage track (LASSO-199)", () => {
     expect(within(records()!).queryByText(/Taken|spent|Flag/)).toBeNull();
     await user.click(within(records()!).getByRole("button", { name: "Close" }));
     expect(records()).toBeNull();
+  });
+});
+
+describe("upgrading a Ticket's Pipeline Version (LASSO-201)", () => {
+  const plan = (over: Partial<UpgradePlan> = {}): UpgradePlan => ({ from: 2, to: 3, fresh: true, stages: ["plan", "implement", "ship"], stage: "implement", keeps: true, pick: null, unavailable: null, ...over });
+  const dialog = () => screen.findByRole("dialog", { name: "Upgrade to v3" });
+  const upgradeButton = () => screen.getByRole("button", { name: "Upgrade" });
+
+  it("offers Upgrade only on an active Ticket whose Pipeline file has changed", async () => {
+    fakeLasso([ticket("A"), ticket("B", { pipelineDrift: "changed", state: "done" }), ticket("C", { pipelineDrift: "deleted" })]);
+    for (const id of ["A", "B", "C"]) {
+      const view = await showPage(id);
+      expect(screen.queryByRole("button", { name: "Upgrade" })).toBeNull();
+      view.unmount();
+    }
+  });
+
+  it("stays on the Ticket's Stage by default, says where a held pick now goes, and upgrades with an empty body", async () => {
+    const lasso = fakeLasso([ticket("A", { pipelineDrift: "changed" })]);
+    lasso.state.plans.A = plan({ pick: { route: "back", by: "action", note: "lint", from: "plan", to: "review", dropped: null, held: true } });
+    await showPage("A");
+    const user = userEvent.setup();
+    await user.click(upgradeButton());
+    const pop = await dialog();
+    expect((within(pop).getByRole("combobox", { name: "Land on" }) as HTMLSelectElement).value).toBe("implement");
+    expect(within(pop).getByText("The held pick of Route back now goes to review (was plan).")).toBeTruthy();
+    await user.click(within(pop).getByRole("button", { name: "Upgrade" }));
+    await waitFor(() => expect(lasso.sent).toEqual([{ method: "POST", route: "/api/tickets/A/upgrade", body: {} }]));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("warns that a pick will be dropped and confirms with drop: true; a landing elsewhere sends the Stage instead", async () => {
+    const lasso = fakeLasso([ticket("A", { pipelineDrift: "changed" })]);
+    lasso.state.plans.A = plan({ pick: { route: "back", by: "action", note: "lint", from: "plan", to: null, dropped: "Route back is gone from implement in the new Version", held: true } });
+    await showPage("A");
+    const user = userEvent.setup();
+    await user.click(upgradeButton());
+    let pop = await dialog();
+    expect(within(pop).getByText('Route back is gone from implement in the new Version: upgrading drops the held pick of it and its note "lint".')).toBeTruthy();
+    await user.click(within(pop).getByRole("button", { name: "Upgrade and drop the pick" }));
+    await waitFor(() => expect(lasso.sent).toEqual([{ method: "POST", route: "/api/tickets/A/upgrade", body: { drop: true } }]));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await user.click(upgradeButton());
+    pop = await dialog();
+    await user.selectOptions(within(pop).getByRole("combobox", { name: "Land on" }), "ship");
+    expect(within(pop).queryByText(/drops/)).toBeNull();
+    await user.click(within(pop).getByRole("button", { name: "Upgrade" }));
+    await waitFor(() => expect(lasso.sent.at(-1)).toEqual({ method: "POST", route: "/api/tickets/A/upgrade", body: { stage: "ship" } }));
+  });
+
+  it("asks for a landing when the Stage is gone, and holds the confirm while a Session runs", async () => {
+    const lasso = fakeLasso([ticket("A", { pipelineDrift: "changed" })]);
+    lasso.state.plans.A = plan({ stages: ["plan", "build"], keeps: false, unavailable: "implement has a Session running; upgrade once it ends" });
+    await showPage("A");
+    const user = userEvent.setup();
+    await user.click(upgradeButton());
+    const pop = await dialog();
+    expect(within(pop).getByText("The new Version has no implement; pick the Stage the Ticket lands on.")).toBeTruthy();
+    expect((within(pop).getByRole("combobox", { name: "Land on" }) as HTMLSelectElement).value).toBe("plan");
+    expect((within(pop).getByRole("button", { name: "Upgrade" }) as HTMLButtonElement).disabled).toBe(true);
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(lasso.sent).toEqual([]);
+  });
+
+  it("marks each upgrade under its station and opens it, with the pick it dropped and the records it took off the track", async () => {
+    const at = new Date(Date.now() - 10 * 60_000).toISOString();
+    const upgrade: UpgradeView = {
+      key: "upgrade:4", at, from: 1, to: 2, stage: "implement", landed: true,
+      dropped: { route: "back", to: "review", by: "action", note: "lint" },
+      earlier: [{ kind: "route", from: "implement", to: "review", version: 1, visit: 3, number: 1, at, chosenBy: "action", route: "fix", text: "Fix it.", replaces: false, note: null, budget: { used: 1, limit: null } }],
+    };
+    fakeLasso([ticket("A", { upgrades: [upgrade] })]);
+    await showPage("A");
+    const user = userEvent.setup();
+    const marker = document.querySelector<SVGGElement>('[data-role="flow"] [data-arc="upgrade:4"]')!;
+    expect(marker.textContent).toBe("v1 → v2Upgraded to v2, landing on implement; dropped the pick of Route back; 1 earlier record");
+    await user.click(marker.querySelector("text")!);
+    const panel = document.querySelector<HTMLElement>('[data-role="upgrade-records"]')!;
+    expect(within(panel).getByRole("heading").textContent).toBe("Upgraded v1 → v2");
+    expect(panel.textContent).toContain("Landed on implement, on a new Visit · 10m ago");
+    expect(within(panel).getByText("Dropped the Action's pick of Route back to review; the new Version has no such Route or target")).toBeTruthy();
+    expect(within(panel).getAllByRole("listitem").map((li) => li.textContent)).toEqual([
+      "Route fix · implement → review · Visit 1 · earlier Version (v1) · chosen by implement's Action · 10m ago · 1/?Added to the prompt: Fix it.",
+    ]);
   });
 });
 

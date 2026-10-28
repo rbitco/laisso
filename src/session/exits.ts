@@ -104,7 +104,7 @@ export class Exits {
    */
   async takeOver(ticket: TicketRow): Promise<TicketRow> {
     const { progress, sessions, terminal, runs, tickets } = this.deps;
-    if (ticket.holding_since && !ticket.flagged_at) throw new TriggerError(`Ticket ${ticket.reference ?? ticket.id} is holding; ${progress.startLabel(ticket, progress.currentForTrigger(ticket).stage)} or open the draft`);
+    if (ticket.holding_since && !ticket.flagged_at) throw new TriggerError(`Ticket ${ticket.reference ?? ticket.id} is holding; ${progress.startLabel(ticket, progress.currentForTrigger(ticket))} or open the draft`);
     const { pipeline, stage } = ticket.flagged_at ? progress.flaggedStage(ticket) : progress.currentForTrigger(ticket);
     if (stage.kind !== "runner") throw new TriggerError(`${stage.name} is ${stage.kind === "wait" ? "a wait" : "an action"} Stage; there is no Session to take over`);
     if (stage.human) throw new TriggerError(`${stage.name} is a human Stage; Open terminal works it`);

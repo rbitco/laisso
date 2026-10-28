@@ -147,6 +147,15 @@ export function heldRoute(stage: Stage, picked: string | null): { route: string;
   return route ? { route: picked!, to: route.to } : null;
 }
 
+/**
+ * What Start does for a holding Ticket: take the Route it holds before, walk on from a source Stage whose held pick
+ * a Version upgrade dropped (to `next`, or finishing the Ticket after the last Stage; LASSO-201), or start the Stage.
+ */
+export function startLabel(stage: string, held: { route: string; to: string } | null, walkOn: { next: string | null } | null = null): string {
+  if (held) return `Start ${held.to} via ${held.route}`;
+  if (walkOn) return walkOn.next ? `Start ${walkOn.next}` : "Finish the Ticket";
+  return `Start ${stage}`;
+}
 
 /** The pick when the Stage declares its Route, else null. */
 function declared(stage: Stage, pick: RoutePick | null): RoutePick | null {

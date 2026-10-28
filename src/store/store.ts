@@ -311,6 +311,25 @@ const MIGRATIONS: Array<(db: DatabaseSync) => void> = [
       ALTER TABLE visits ADD COLUMN picked_by TEXT CHECK (picked_by IN ('agent', 'action', 'check', 'human'));
     `);
   },
+  // Version upgrades (LASSO-201): each upgrade of a Ticket, where it left the Ticket, and the Route pick it dropped.
+  (db) => {
+    db.exec(`
+      CREATE TABLE upgrades (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ticket TEXT NOT NULL REFERENCES tickets (id),
+        at TEXT NOT NULL,
+        from_version INTEGER,
+        to_version INTEGER NOT NULL,
+        visit INTEGER NOT NULL REFERENCES visits (id),
+        landed INTEGER REFERENCES visits (id),
+        dropped_route TEXT,
+        dropped_to TEXT,
+        dropped_note TEXT,
+        dropped_by TEXT CHECK (dropped_by IN ('agent', 'action', 'check', 'human'))
+      );
+      CREATE INDEX upgrades_ticket ON upgrades (ticket);
+    `);
+  },
 ];
 
 /**

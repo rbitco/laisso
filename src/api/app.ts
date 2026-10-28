@@ -1,3 +1,5 @@
+import type { Upgrades } from "../store/upgrades.ts";
+import type { UpgradePlan, VersionUpgrade } from "../session/upgrade.ts";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { Changes, Change } from "../server/changes.ts";
@@ -39,6 +41,8 @@ export interface AppDeps {
   versions: PipelineVersions;
   sessions: Sessions;
   visits: Visits;
+  upgrades: Upgrades;
+  upgrade: VersionUpgrade;
   feedback: Feedback;
   links: PrLinks;
   /** gh, for the one lookup that confirms a PR before it is linked. */
@@ -85,6 +89,7 @@ export function createApp(deps: AppDeps): Hono {
     driftFor: (ticket: TicketRow) => deps.versions.drift(ticket, deps.home.pipelinesDir),
     sessionsFor: (ticket: TicketRow) => deps.sessions.forTicket(ticket.id),
     visitsFor: (ticket: TicketRow) => deps.visits.forTicket(ticket.id),
+    upgradesFor: (ticket: TicketRow) => deps.upgrades.forTicket(ticket.id),
     feedbackFor: (session) => deps.feedback.forSession(session.id),
     linksFor: (ticket) => deps.links.links(ticket.id),
     budgetFor: (ticket, pipeline, stage, rows) => deps.budgets.view(ticket, pipeline, stage, rows),
@@ -221,7 +226,7 @@ export function createApp(deps: AppDeps): Hono {
   });
   trigger("skip", (ticket) => deps.progress.skip(ticket));
   trigger("start", async (ticket) => {
-    const released = deps.progress.start(ticket);
+    const released = await deps.progress.start(ticket);
     await deps.tick.run("start");
     return deps.tickets.get(released.id)!;
   });
@@ -236,6 +241,16 @@ export function createApp(deps: AppDeps): Hono {
     await deps.tick.run("start");
     return deps.tickets.get(sent.id)!;
   });
+  // Upgrade to the Pipeline as the file stands (LASSO-201): GET says what it would do, for the dialog; POST
+  // { stage?, drop? } does it, landing on `stage` (left out: the Ticket's own Stage, its Visit continuing), and
+  // `drop: true` confirms dropping a pending or held Route pick the new Version cannot take.
+  app.get("/api/tickets/:id/upgrade", (c) => {
+    const ticket = deps.tickets.find(c.req.param("id"));
+    if (!ticket) return c.json({ error: `no Ticket matches ${c.req.param("id")}` }, 404);
+    const { pipeline: _pipeline, ...plan } = deps.upgrade.plan(ticket);
+    return c.json(plan satisfies UpgradePlan);
+  });
+  trigger("upgrade", (ticket, body) => deps.upgrade.upgrade(ticket, body));
   // The six exits from a Flag; Mark done and Skip above accept a Flagged Ticket too, and Abandon any active one.
   // Retry with { profile } ("retry with…") sets the Stage's override to it first, then retries under it.
   trigger("retry", (ticket, body) => deps.exits.retry(ticket, body.profile));

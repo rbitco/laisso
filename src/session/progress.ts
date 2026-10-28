@@ -10,7 +10,8 @@ import { type ActionStage, type Pipeline, type RunnerStage, type Stage } from ".
 import type { Mirror } from "../tracker/mirror.ts";
 import { checkArtifact, type ActionProbe, type PrProbe } from "../artifact/check.ts";
 import type { Teardown } from "./teardown.ts";
-import { decide, heldRoute, type Exit, type RoutePick, type TakeRoute } from "../route/route.ts";
+import { decide, heldRoute, startLabel, type Exit, type RoutePick, type TakeRoute } from "../route/route.ts";
+import { holdDropped, type Upgrades } from "../store/upgrades.ts";
 import type { CheckRun } from "../artifact/action-check.ts";
 import type { Budgets } from "../budget/budgets.ts";
 
@@ -58,6 +59,8 @@ export interface ProgressDeps {
   links: PrLinks;
   /** Each Route's count and limit, for the Route Budget. */
   budgets: Budgets;
+  /** Each Version upgrade, where a dropped Route pick is kept. */
+  upgrades: Upgrades;
   log: Logger;
   notifier: Notifier;
   mirror: Mirror;
@@ -150,7 +153,7 @@ export class Progress {
    */
   humanStage(ticket: TicketRow): { pipeline: Pipeline; stage: RunnerStage } {
     const current = this.currentForTrigger(ticket);
-    if (ticket.holding_since) throw new TriggerError(`Ticket ${ticket.reference ?? ticket.id} is holding; ${this.startLabel(ticket, current.stage)} first`);
+    if (ticket.holding_since) throw new TriggerError(`Ticket ${ticket.reference ?? ticket.id} is holding; ${this.startLabel(ticket, current)} first`);
     if (current.stage.kind !== "runner" || !(current.stage.human || this.takenOver(ticket, current.stage.name))) throw new TriggerError(`${current.stage.name} is not a human Stage`);
     return { pipeline: current.pipeline, stage: current.stage };
   }
@@ -374,17 +377,23 @@ export class Progress {
     return ticket.holding_since ? heldRoute(stage, this.deps.visits.current(ticket.id)?.picked_route ?? null) : null;
   }
 
-  /** What Start does for a holding Ticket: "Start <target> via <route>" before a Route, else "Start <Stage>". */
-  startLabel(ticket: TicketRow, stage: Stage): string {
-    const held = this.heldRoute(ticket, stage);
-    return held ? `Start ${held.to} via ${held.route}` : `Start ${stage.name}`;
+  /** A holding Ticket whose held Route pick a Version upgrade dropped: Start walks forward from its finished Stage (LASSO-201). */
+  holdDropped(ticket: TicketRow): boolean {
+    return holdDropped(ticket, this.deps.visits.current(ticket.id), this.deps.upgrades.forTicket(ticket.id));
+  }
+
+  /** What Start does for a holding Ticket: "Start <target> via <route>" before a Route, "Start <next Stage>" after a dropped one, else "Start <Stage>". */
+  startLabel(ticket: TicketRow, current: Current): string {
+    const walkOn = this.holdDropped(ticket) ? { next: current.pipeline.stages[current.index + 1]?.name ?? null } : null;
+    return startLabel(current.stage.name, this.heldRoute(ticket, current.stage), walkOn);
   }
 
   /**
    * The Start trigger: release a holding Ticket into its current Stage, or, holding before a Route, take the Route
-   * the Visit picked. It counts then, as its picker's, but is never refused: its Budget was checked at the pick.
+   * the Visit picked. It counts then, as its picker's, but is never refused: its Budget was checked at the pick. When
+   * a Version upgrade dropped the held pick, the Stage has finished, so Start walks forward from it (LASSO-201).
    */
-  start(ticket: TicketRow): TicketRow {
+  async start(ticket: TicketRow): Promise<TicketRow> {
     const current = this.currentForTrigger(ticket);
     if (!ticket.holding_since) throw new TriggerError(`Ticket ${ticket.reference ?? ticket.id} is not holding; ${current.stage.name} is already under way`);
     const held = this.heldRoute(ticket, current.stage);
@@ -396,6 +405,11 @@ export class Progress {
       if (exit.kind !== "route" || !target) throw new TriggerError(`Pipeline ${ticket.pipeline} has no Stage named ${held.to} for Route ${held.route}`);
       this.deps.log.info("ticket.started", { ticket: ticket.id, stage: current.stage.name, route: held.route });
       return this.take(ticket, current.stage, target, exit);
+    }
+    if (this.holdDropped(ticket)) {
+      this.deps.log.info("ticket.started", { ticket: ticket.id, stage: current.stage.name, walked: true });
+      await this.finished(ticket, true);
+      return this.deps.tickets.get(ticket.id)!;
     }
     const released = this.deps.tickets.update(ticket.id, { holding_since: null });
     this.deps.log.info("ticket.started", { ticket: ticket.id, stage: current.stage.name });

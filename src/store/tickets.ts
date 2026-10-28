@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { Visits, type Arrival } from "./visits.ts";
+import { Upgrades, type UpgradeRow } from "./upgrades.ts";
 
 export type TicketState = "active" | "done" | "abandoned";
 
@@ -83,12 +84,14 @@ export class Tickets {
   private changed: (ticket: string) => void;
   /** A Ticket's Stage and its current Visit move together, so every Stage change goes through here (LASSO-189). */
   private visits: Visits;
+  private upgrades: Upgrades;
 
   /** `changed` hears of every write, after it lands. */
   constructor(db: DatabaseSync, changed: (ticket: string) => void = () => undefined) {
     this.db = db;
     this.changed = changed;
     this.visits = new Visits(db, changed);
+    this.upgrades = new Upgrades(db);
   }
 
   /** A Ticket admitted at its first Stage, on its first Visit. */
@@ -116,6 +119,45 @@ export class Tickets {
       this.db.prepare(`UPDATE ticket_prs SET feedback_due = NULL WHERE ticket = ? AND feedback_due IS NOT NULL`).run(id);
       this.visits.arrive(id, patch.pipeline_version !== undefined ? patch.pipeline_version : row.pipeline_version, arrival, now);
       return this.update(id, { ...patch, stage: arrival.stage }, now);
+    });
+  }
+
+  /**
+   * A Version upgrade (ADR 0009, LASSO-201), as one write. Without a `landing` the Ticket stays on its Stage and the
+   * same Visit continues; `drop` names the pick taken off it, recorded as dropped. With one, an upgrade Visit opens
+   * there with no Route text. Overrides are kept only for Stages the new Version has (ADR 0011).
+   */
+  upgrade(
+    id: string,
+    to: { version: number; stages: string[] },
+    move: { landing: string | null; drop: { route: string; to: string | null } | null },
+    patch: Partial<Omit<TicketRow, "id" | "created_at" | "stage" | "pipeline_version" | "profile_overrides">> = {},
+    now: string = new Date().toISOString(),
+  ): { ticket: TicketRow; upgrade: UpgradeRow } {
+    return together(this.db, () => {
+      const row = this.get(id)!;
+      const current = this.visits.current(id)!;
+      if (move.drop) this.visits.pick(id, null);
+      const landed = move.landing ? this.visits.arrive(id, to.version, { stage: move.landing, arrived_by: "upgrade" }, now) : null;
+      const upgrade = this.upgrades.insert({
+        ticket: id,
+        at: now,
+        from_version: row.pipeline_version,
+        to_version: to.version,
+        visit: current.id,
+        landed: landed?.id ?? null,
+        dropped_route: move.drop?.route ?? null,
+        dropped_to: move.drop?.to ?? null,
+        dropped_note: move.drop ? current.picked_note : null,
+        dropped_by: move.drop ? current.picked_by : null,
+      });
+      const kept = Object.fromEntries(Object.entries(overridesOf(row)).filter(([stage]) => to.stages.includes(stage)));
+      const ticket = this.update(
+        id,
+        { ...patch, pipeline_version: to.version, profile_overrides: Object.keys(kept).length ? JSON.stringify(kept) : null, ...(move.landing ? { stage: move.landing } : {}) },
+        now,
+      );
+      return { ticket, upgrade };
     });
   }
 

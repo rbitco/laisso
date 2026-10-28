@@ -18,6 +18,7 @@ import { shownSession, type Shown } from "./selection.ts";
 import { StageProfiles } from "./StageProfiles.tsx";
 import { listTickets, message, readTicket } from "./ticket.ts";
 import { Triggers } from "./Triggers.tsx";
+import { UpgradeLever } from "./Upgrade.tsx";
 
 export interface TicketPageProps {
   /** The Ticket asked for: its id, or any key the API finds it by. */
@@ -198,7 +199,7 @@ function TicketBody({ ticket: t, select, refresh }: { ticket: TicketDetail; sele
             <dt>worktree</dt>
             <dd>{worktreeGone(t) ? t.worktree + " (removed)" : t.worktree}</dd>
             <dt>pipeline</dt>
-            <PipelineCell ticket={t} />
+            <PipelineCell ticket={t} refresh={refresh} />
             <dt>id</dt>
             <dd>{t.id}</dd>
           </dl>
@@ -324,16 +325,18 @@ function FlagBox({ ticket: t, children }: { ticket: TicketDetail; children: Reac
   );
 }
 
-// The Pipeline a Ticket runs: its Version, linked read-only, and a note when the file has moved on (ADR 0009).
+// The Pipeline a Ticket runs: its Version, linked read-only, and a note when the file has moved on (ADR 0009), with
+// Upgrade beside it on an active Ticket whose file has changed (LASSO-201).
 const DRIFT_NOTE: Partial<Record<Drift, string>> = { changed: "Pipeline has changed", deleted: "Pipeline deleted", broken: "Pipeline file does not load" };
 
-function PipelineCell({ ticket: t }: { ticket: TicketDetail }) {
+function PipelineCell({ ticket: t, refresh }: { ticket: TicketDetail; refresh: () => Promise<void> }) {
   if (t.pipelineVersion === null) return <dd>{t.pipeline}</dd>;
   const note = t.pipelineDrift && DRIFT_NOTE[t.pipelineDrift];
   return (
     <dd data-role="pipeline-version">
       <a href={pipelineHref(t.pipeline, t.pipelineVersion)}>{t.pipeline + " v" + t.pipelineVersion}</a>
       {note && <span className="drift">{" · " + note}</span>}
+      {t.pipelineDrift === "changed" && t.state === "active" && <UpgradeLever ticket={t} refresh={refresh} />}
     </dd>
   );
 }

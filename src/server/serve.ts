@@ -1,3 +1,5 @@
+import { Upgrades } from "../store/upgrades.ts";
+import { VersionUpgrade } from "../session/upgrade.ts";
 import { serve as listen } from "@hono/node-server";
 import { resolveHome, ensureHome } from "./home.ts";
 import { migrateConfigProfiles, migrateHome, migrateVersions } from "./migrate.ts";
@@ -133,7 +135,8 @@ export async function serve(opts: ServeOptions): Promise<number> {
   const teardown = new Teardown({ config, home, tickets, links, log, prs });
   const checks = new ActionChecks({ config, home, links, visits, log });
   const budgets = new Budgets({ config, sessions, links, visits });
-  const progress: Progress = new Progress({ home, tickets, versions, sessions, visits, links, budgets, log, notifier, mirror, prProbe: (ticket) => () => review.probe(ticket), actionProbe: (ticket, stage) => checks.probe(ticket, stage), checkRun: (id) => checks.liveRun(id), teardown });
+  const upgrades = new Upgrades(store.db);
+  const progress: Progress = new Progress({ home, tickets, versions, sessions, visits, links, budgets, upgrades, log, notifier, mirror, prProbe: (ticket) => () => review.probe(ticket), actionProbe: (ticket, stage) => checks.probe(ticket, stage), checkRun: (id) => checks.liveRun(id), teardown });
   // review: is read from the live config per Ticket, so a Config page save applies on the next poll; the gh login is read once.
   const ignored = async (ticket: TicketRow) => {
     const rules = reviewFor(config, ticket.repo);
@@ -189,6 +192,7 @@ export async function serve(opts: ServeOptions): Promise<number> {
   );
   const overrides = new Overrides({ config, home, tickets, progress, log });
   const exits = new Exits({ tickets, sessions, log, progress, runs, terminal, budgets, tick, teardown, overrides });
+  const upgrade = new VersionUpgrade({ home, tickets, versions, sessions, visits, progress, log, mirror });
   const missingTools = startupToolCheck(config, home, tickets, log);
   // The package on disk is read again at each check: after `npm update -g` it is newer than this process.
   const onDisk = () => {
@@ -199,7 +203,7 @@ export async function serve(opts: ServeOptions): Promise<number> {
     }
   };
   const versionCheck = new VersionCheck({ running: pkg.version, onDisk, latest: npmLatest, log, changed: () => changes.emit({ kind: "version" }) });
-  const app = createApp({ config, home, tick, tickets, versions, sessions, visits, feedback, links, prs, githubOf, runs, progress, terminal, exits, overrides, budgets, queue, changes, prLists, dashboard, version: pkg.version, missingTools, versionNotice: () => versionCheck.current() });
+  const app = createApp({ config, home, tick, tickets, versions, sessions, visits, upgrades, upgrade, feedback, links, prs, githubOf, runs, progress, terminal, exits, overrides, budgets, queue, changes, prLists, dashboard, version: pkg.version, missingTools, versionNotice: () => versionCheck.current() });
 
   if (defaults.wroteConfig) log.info("config.written", { file: home.configFile });
   for (const name of defaults.wrotePipelines) log.info("pipeline.written", { name });

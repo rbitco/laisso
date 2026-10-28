@@ -5,7 +5,7 @@ import { sessionLabel } from "./SessionPane.tsx";
 import { SendPopover } from "./Send.tsx";
 
 const LEGEND =
-  "Filled stations are done, the ringed station is current, a stop sign is Flagged, ticks are action Stages. The orbit above a repeating Stage is PR feedback with Rounds used of Budget on its badge; a small orbit counts attempts. An arc over the track is a Route that fired, with times taken of its Budget, red once spent; a dashed arc is your sends. Click a station to filter Sessions, or an arc to see its records; hover a station to send the Ticket there.";
+  "Filled stations are done, the ringed station is current, a stop sign is Flagged, ticks are action Stages. The orbit above a repeating Stage is PR feedback with Rounds used of Budget on its badge; a small orbit counts attempts. An arc over the track is a Route that fired, with times taken of its Budget, red once spent; a dashed arc is your sends. A dashed tag under a station is a Version upgrade. Click a station to filter Sessions, or an arc or upgrade tag to see its records; hover a station to send the Ticket there.";
 
 /** A station the pointer is over, and where its Send here sits within the panel. */
 interface Hovered {

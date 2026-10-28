@@ -13,6 +13,20 @@ Tickets either. Only new Intakes see an edit. Actions and Agent Profiles are
 not frozen: a Stage of an old Version still runs the Action and profile
 config.yaml has now.
 
+A human moves a Ticket onto the Pipeline as it stands with Upgrade, beside
+the Version on the Ticket page once the file has changed (or
+`POST /api/tickets/<id>/upgrade`). It waits for a running headless Session
+to end and is never refused over Routes. On a Stage the new Version still
+has by name, the same Visit goes on: attempts, Rounds, Route text and note
+carry, and [Route Budget](#route-budget) counts carry by Stage and Route
+name, so a renamed Route starts at 0. A pending or held Route pick whose
+Route still exists follows it to its new `to:`; one whose Route or target
+is gone is dropped once the human confirms the warning, and the upgrade
+records it. When the Stage is gone the human picks where the Ticket lands,
+on a new Visit with no Route text. Route records touching a Stage the new
+Version lacks draw no arc; they show under the upgrade's marker on the
+track as from an earlier Version.
+
 ## Top level
 
 | Field | Rule |

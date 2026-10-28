@@ -280,11 +280,16 @@ main { padding: 16px; }
 /* Route arcs (LASSO-199): each fired Route over the track, clickable for its records in the right-hand stack. */
 .flow .arc { cursor: pointer; }
 .flow text.arc-name { font-size: 11px; }
+.flow .upgrade { cursor: pointer; }
+.flow text.upgrade-name { font-size: 11px; fill: var(--muted); }
+.flow .upgrade.dropped text.upgrade-name { fill: var(--amber); }
 .flow .arc text.badge-text { font-size: 10px; }
 .route-records { display: grid; gap: 8px; font-size: 12px; }
 .route-records .spent { color: var(--crit); }
 .route-records .records { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .route-records .records li { display: grid; gap: 2px; border-left: 2px solid var(--accent); padding: 2px 0 2px 8px; }
+.route-records .records li.earlier { border-left: 2px dashed var(--line); }
+.route-records .dropped { color: var(--amber); }
 .route-records blockquote { margin: 0; color: var(--muted); font-style: italic; white-space: pre-wrap; }
 /* Send here (LASSO-197): the offer under a hovered station, and its popover, float over the flow panel. */
 .flow-wrap { position: relative; }
@@ -296,6 +301,12 @@ main { padding: 16px; }
 .send-pop label { display: flex; gap: 6px; align-items: center; color: var(--ink); }
 .send-pop blockquote { margin: 2px 0 0 22px; padding-left: 8px; border-left: 2px solid var(--line); white-space: pre-wrap; }
 .send-pop textarea { width: 100%; box-sizing: border-box; font: inherit; color: var(--ink); background: var(--surface2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; resize: vertical; }
+.upgrade-at { position: relative; }
+.upgrade-pop { position: absolute; z-index: 20; left: 0; top: calc(100% + 6px); width: 320px; max-width: calc(100vw - 32px); display: grid; gap: 6px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow); color: var(--muted); font-size: 12px; line-height: 1.4; }
+.upgrade-pop strong { color: var(--ink); font-size: 13px; font-weight: 600; }
+.upgrade-pop label { display: flex; gap: 6px; align-items: center; color: var(--ink); }
+.upgrade-pop .warn { color: var(--amber); }
+.upgrade-pop .upgrade-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
 .send-pop .send-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
 .triggers .done-menu { position: relative; }
 .done-menu > .send-pop { position: absolute; z-index: 20; left: 0; top: calc(100% + 6px); }

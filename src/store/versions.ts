@@ -37,6 +37,15 @@ export class PipelineVersions {
     return version;
   }
 
+  /** The number `pin` would give this content, without taking it: the last Version when identical (not fresh), else the next. */
+  peek(pipeline: Pipeline): { version: number; fresh: boolean } {
+    const last = this.db.prepare(`SELECT version, definition FROM pipeline_versions WHERE pipeline = ? ORDER BY version DESC LIMIT 1`).get(pipeline.name) as
+      | { version: number; definition: string }
+      | undefined;
+    if (last && last.definition === JSON.stringify(pipeline)) return { version: last.version, fresh: false };
+    return { version: (last?.version ?? 0) + 1, fresh: true };
+  }
+
   /** A Version with how many active Tickets run it, or null when it was never numbered. */
   row(name: string, version: number): VersionRow | null {
     return (this.db.prepare(`${VERSION_ROWS} WHERE v.pipeline = ? AND v.version = ? GROUP BY v.version`).get(name, version) as VersionRow | undefined) ?? null;

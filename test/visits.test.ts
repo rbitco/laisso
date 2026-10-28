@@ -186,12 +186,13 @@ describe("the Visits migration", () => {
         UPDATE tickets SET
           artifact_checks = NULLIF((SELECT json_group_object(stage, json(check_result)) FROM visits WHERE ticket = tickets.id AND check_result IS NOT NULL), '{}'),
           skipped_stages = NULLIF((SELECT json_group_object(stage, skipped_at) FROM visits WHERE ticket = tickets.id AND skipped_at IS NOT NULL), '{}');
+        DROP TABLE upgrades;
         DROP INDEX sessions_visit;
         ALTER TABLE sessions DROP COLUMN visit;
         DROP TABLE visits;
         ALTER TABLE tickets DROP COLUMN budget_routes;
       `);
-      db.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run(String(SCHEMA_VERSION - 3));
+      db.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run(String(SCHEMA_VERSION - 4));
     });
   }
 

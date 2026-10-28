@@ -2,13 +2,13 @@
 // the API's Ticket views as SVG strings. Pure on purpose: React components call it, and the tests run the same module
 // in Node against real API data (LASSO-41, the composed variant D of the dashboard prototype).
 
-import type { DisplayState, PipelineListing, RouteArcView, SessionView, StageProfileView, TicketView, Trigger } from "../api/views.ts";
+import type { DisplayState, PipelineListing, RouteArcView, SessionView, StageProfileView, TicketView, Trigger, UpgradeView } from "../api/views.ts";
 import type { TickStatus } from "../server/tick.ts";
 import type { Config, ProfileConfig, ProfileScope } from "../server/config.ts";
 import type { RunnerName } from "../pipeline/load.ts";
 
-/** A Ticket as the diagram reads it: the Ledger's view, with the Sessions and Route arcs the detail adds. */
-export type MetroTicket = TicketView & { sessions?: SessionView[]; arcs?: RouteArcView[] };
+/** A Ticket as the diagram reads it: the Ledger's view, with the Sessions, Route arcs and Version upgrades the detail adds. */
+export type MetroTicket = TicketView & { sessions?: SessionView[]; arcs?: RouteArcView[]; upgrades?: UpgradeView[] };
 
 type Colour = "good" | "crit" | "warn" | "run" | "accent" | "muted" | "done";
 
@@ -201,7 +201,9 @@ export function metroDiagram(t: MetroTicket, focus: string | null, width: number
   const band = arcs.length ? ARC_FIRST + ARC_LANE * (arcs.length - 1) + 14 : 0;
   // Room above the track only for what is drawn there: the Rounds orbit, an attempts orbit, or a line of text.
   const baseY = band + (infos.some((inf) => inf.roundsUsed) ? 66 : infos.some((inf) => inf.attempts.length > 1) ? 44 : 34);
-  const H = baseY + (infos.some((inf) => inf.roundsUsed || inf.attempts.length > 1) ? 50 : 40);
+  // A row under the names for the Version upgrade markers (LASSO-201), when the Ticket has been upgraded.
+  const upgrades = t.upgrades ?? [];
+  const H = baseY + (infos.some((inf) => inf.roundsUsed || inf.attempts.length > 1) ? 50 : 40) + (upgrades.length ? 22 : 0);
   // Adjacent stations sit far enough apart that their labels clear each other.
   const gaps = reach.slice(1).map((r, i) => Math.max(reach[i]!.right + r.left + 18, 56));
   const natural = reach[0]!.left + gaps.reduce((a, b) => a + b, 0) + reach[reach.length - 1]!.right + 24;
@@ -273,6 +275,10 @@ export function metroDiagram(t: MetroTicket, focus: string | null, width: number
     const xOf = new Map(pts.map((p) => [p.s.name, p.cx]));
     out += routeArcsSvg(arcs, xOf, band, W, arc);
   }
+  if (upgrades.length) {
+    const xOf = new Map(pts.map((p) => [p.s.name, p.cx]));
+    out += upgradeMarkersSvg(upgrades, xOf, xOf.get(t.stage.name) ?? pts[0]!.cx, H - 12, W, arc);
+  }
   return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Stage flow for ${esc(t.label)}">${out}</svg>`;
 }
 
@@ -323,6 +329,31 @@ function routeArcsSvg(arcs: RouteArcView[], xOf: Map<string, number>, foot: numb
       (badge ? `<g class="arc-badge"><rect x="${nameW - 4}" y="-7" width="${badgeW}" height="14" rx="7" fill="${a.spent ? COL.crit : COL[colour]}"/><text class="badge-text" x="${nameW - 4 + badgeW / 2}" y="3.5" text-anchor="middle">${badge}</text></g>` : "") +
       `</g><title>${esc(what)}</title></g>`;
   });
+  return out;
+}
+
+/**
+ * A marker under the station each Version upgrade continued on or landed on (LASSO-201), "v1 → v2", oldest leftmost
+ * where several share a station; one whose Stage a later upgrade removed sits under the current station. Each is a
+ * node with data-arc, so a click opens the upgrade in the Route records panel, with any records it took off the track.
+ */
+function upgradeMarkersSvg(upgrades: UpgradeView[], xOf: Map<string, number>, fallback: number, y: number, W: number, selected: string | null): string {
+  const seen = new Map<number, number>();
+  let out = "";
+  for (const u of upgrades) {
+    const cx = xOf.get(u.stage) ?? fallback;
+    const nth = seen.get(cx) ?? 0;
+    seen.set(cx, nth + 1);
+    const label = (u.from === null ? "" : `v${u.from} → `) + `v${u.to}`;
+    const w = Math.round(label.length * 6.2) + 14;
+    const left = Math.round(Math.min(Math.max(cx - w / 2 + nth * (w + 4), 2), W - w - 2));
+    const sel = u.key === selected;
+    const what = `Upgraded to v${u.to}` + (u.landed ? `, landing on ${u.stage}` : `, continuing on ${u.stage}`) + (u.dropped ? `; dropped the pick of Route ${u.dropped.route}` : "") + (u.earlier.length ? `; ${u.earlier.length} earlier record${u.earlier.length === 1 ? "" : "s"}` : "");
+    out +=
+      `<g class="upgrade${sel ? " sel" : ""}${u.dropped ? " dropped" : ""}" data-arc="${esc(u.key)}" transform="translate(${left},${y})">` +
+      `<rect x="0" y="-9" width="${w}" height="18" rx="4" fill="var(--surface)" stroke="${COL.muted}" stroke-width="${sel ? 2 : 1}" stroke-dasharray="3 2"/>` +
+      `<text class="upgrade-name" x="${w / 2}" y="4" text-anchor="middle">${esc(label)}</text><title>${esc(what)}</title></g>`;
+  }
   return out;
 }
 
