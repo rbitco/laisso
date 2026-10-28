@@ -37,7 +37,7 @@ function view(id: string, over: Partial<TicketView> = {}): TicketView {
       { name: "plan", kind: "runner", label: "plan", human: false, skippedAt: null },
       { name: "implement", kind: "runner", label: "implement", human: false, skippedAt: null },
     ],
-    mirrorPending: false, createdAt: ago(60), updatedAt: ago(5), url: `http://lasso/#${id}`, ...over,
+    mirrorPending: false, visit: null, createdAt: ago(60), updatedAt: ago(5), url: `http://lasso/#${id}`, ...over,
   };
 }
 
@@ -104,6 +104,22 @@ describe("the Ledger", () => {
     expect(within(role(a, "quick")).getByRole("button").className).toBe("sm primary");
     expect(within(role(a, "quick")).getByRole("button").textContent).toBe("Retry");
     expect(within(role(row("B"), "quick")).getByRole("button", { name: "Check PR now" }).className).toBe("sm");
+  });
+
+  it("counts the Visits to the current Stage past the first, and marks one a Route began with ↩ (LASSO-199)", async () => {
+    fakeLasso([
+      view("A", { visit: { number: 3, arrivedBy: "route", route: "back", chosenBy: "check" } }),
+      view("B", { visit: { number: 2, arrivedBy: "send", route: "back", chosenBy: "human" } }),
+      view("C", { visit: { number: 1, arrivedBy: "route", route: "ahead", chosenBy: "agent" } }),
+      view("D", { visit: { number: 1, arrivedBy: "walk", route: null, chosenBy: null } }),
+    ]);
+    render(<Ledger all={false} visit={1} />);
+    await screen.findByText("Ticket A");
+    expect(role(row("A"), "stage-text").textContent).toBe("implement ×3 ↩ · 2/2");
+    // A human's send is not a Route: the count, without ↩.
+    expect(role(row("B"), "stage-text").textContent).toBe("implement ×2 · 2/2");
+    expect(role(row("C"), "stage-text").textContent).toBe("implement ↩ · 2/2");
+    expect(role(row("D"), "stage-text").textContent).toBe("implement · 2/2");
   });
 
   it("shows a named Ticket by its name, with the name and reference on hover", async () => {

@@ -1,5 +1,5 @@
 import { overrideFor, shortId, ticketLabel, type TicketRow } from "../store/tickets.ts";
-import { checkOf, latestVisit, type ArtifactCheck, type VisitRow } from "../store/visits.ts";
+import { checkOf, latestVisit, type ArrivedBy, type ArtifactCheck, type ChosenBy, type VisitRow } from "../store/visits.ts";
 import { runnerOf, type SessionProfile, type SessionRow } from "../store/sessions.ts";
 import { type Pipeline, type Routes, type RunnerName, type RunnerStage, type Stage } from "../pipeline/load.ts";
 import type { PipelineSource } from "../pipeline/files.ts";
@@ -110,6 +110,8 @@ export interface TicketView {
   stages: Array<Pick<StageView, "name" | "kind" | "label" | "human"> & { skippedAt: string | null }>;
   /** How the current Stage's check Action artifact last came out (ADR 0014), or null when it has none or has not run. */
   check: ArtifactCheck | null;
+  /** The current Visit: which arrival at its Stage it is and how it began, for the Ledger's "×3 ↩"; null before Visits. */
+  visit: Pick<VisitView, "number" | "arrivedBy" | "route" | "chosenBy"> | null;
   /** True while a label push to the tracker is owed and the tick will retry it. */
   mirrorPending: boolean;
   createdAt: string;
@@ -206,6 +208,74 @@ export interface TicketDetail extends TicketView {
   profiles: StageProfileView[];
   /** Send here (LASSO-197): null when the Ticket cannot be sent anywhere (done, Abandoned, or its Pipeline not loading). */
   send: SendView | null;
+  /** Every Visit, oldest first, with how each began (LASSO-199). */
+  visits: VisitView[];
+  /** The arcs over the Stage track: one per Route that has fired, one per source and target of human sends. */
+  arcs: RouteArcView[];
+}
+
+/** A Ticket's stay at one Stage, and the arrival record of how it began. */
+export interface VisitView {
+  id: number;
+  stage: string;
+  /** Which arrival at the Stage this is, from 1. */
+  number: number;
+  /** The Pipeline Version the Ticket ran when it arrived. */
+  version: number | null;
+  arrivedAt: string;
+  /** Null for the current Visit. */
+  leftAt: string | null;
+  arrivedBy: ArrivedBy;
+  /** The Visit left to arrive here, and its Stage; null for the first. */
+  fromVisit: number | null;
+  fromStage: string | null;
+  /** The Route taken, or the declared Route a human's send reused; null otherwise. */
+  route: string | null;
+  chosenBy: ChosenBy | null;
+  /** What the Route adds to the Stage's prompt, or replaces it with. */
+  text: string | null;
+  replaces: boolean;
+  /** The note the chooser left, or a human's send instructions. */
+  note: string | null;
+  skippedAt: string | null;
+}
+
+/**
+ * One arc on the Ticket page: a Route that fired from a source Stage (picked by an agent, Action or check), or the
+ * human sends from a source Stage to a target. A send never counts against a Route's Budget, so it carries none.
+ */
+export interface RouteArcView {
+  /** Stable across reads: "route:<from>:<name>" or "send:<from>:<to>". */
+  key: string;
+  kind: "route" | "send";
+  from: string;
+  /** Where its latest record went. */
+  to: string;
+  /** The Route's name; null for sends. */
+  route: string | null;
+  /** Times taken of the limit now; null for sends and for a Route the Ticket's Version no longer declares. */
+  budget: { used: number; limit: number } | null;
+  /** The Route's Budget is used up, so the next pick of it by an agent, Action or check Flags. Never for sends. */
+  spent: boolean;
+  /** Each time it fired, newest first. */
+  records: RouteRecordView[];
+}
+
+/** One firing of an arc: the Visit it began, who chose it, when, what it carried, and where its Budget stood after it. */
+export interface RouteRecordView {
+  visit: number;
+  /** Which arrival at the target this began. */
+  number: number;
+  to: string;
+  at: string;
+  chosenBy: ChosenBy;
+  /** The Route taken, or the one a human's send reused. */
+  route: string | null;
+  text: string | null;
+  replaces: boolean;
+  note: string | null;
+  /** The Route's count after this firing, of the limit now; null for a human's send, which never counts. */
+  budget: { used: number; limit: number | null } | null;
 }
 
 /** What the Send here popover offers on any station of an active Ticket. */
@@ -242,6 +312,8 @@ export interface ViewContext {
   /** The Ticket's live PR links, in the order they were added. */
   linksFor(ticket: TicketRow): PrLinkRow[];
   budgetFor(ticket: TicketRow, pipeline: Pipeline | null, stage: Stage | null, rows: SessionRow[]): BudgetView;
+  /** Each of the Stage's declared Routes with how often it was taken for the Ticket and its resolved limit. */
+  routeBudgetsFor(ticket: TicketRow, stage: Stage): Record<string, { used: number; limit: number }>;
   driftFor(ticket: TicketRow): Drift | null;
   /** The Ticket's place in the line for a headless slot, 1 first, or null when it is not in line. */
   queuePosition(ticket: TicketRow): number | null;
@@ -427,6 +499,7 @@ export function ticketView(ticket: TicketRow, ctx: ViewContext): TicketView {
     budget,
     stages: (pipeline?.stages ?? []).map((s) => ({ name: s.name, kind: s.kind, label: stageLabel(s), human: s.kind === "runner" && s.human, skippedAt: latestVisit(visits, s.name)?.skipped_at ?? null })),
     check: stage?.kind === "runner" && stage.artifactWith ? check : null,
+    visit: currentVisit(visits),
     mirrorPending: ticket.mirror_pending !== null,
     createdAt: ticket.created_at,
     updatedAt: ticket.updated_at,
@@ -438,7 +511,81 @@ export function ticketDetail(ticket: TicketRow, ctx: ViewContext): TicketDetail 
   const sessions = ctx.sessionsFor(ticket).map((row) => sessionView(row, Date.now(), ctx.feedbackFor(row)));
   const pipeline = ctx.pipelineFor(ticket);
   const profiles = (pipeline?.stages ?? []).flatMap((stage) => (stage.kind === "runner" ? [stageProfileView(ctx.profiles, ticket, pipeline!, stage)] : []));
-  return { ...ticketView(ticket, ctx), session: sessions[0] ?? null, sessions, pipelineDrift: ctx.driftFor(ticket), profiles, send: sendView(ticket, pipeline, sessions) };
+  const visits = visitViews(ctx.visitsFor(ticket));
+  const arcs = pipeline ? routeArcs(visits, pipeline, (stage) => ctx.routeBudgetsFor(ticket, stage)) : [];
+  return { ...ticketView(ticket, ctx), session: sessions[0] ?? null, sessions, pipelineDrift: ctx.driftFor(ticket), profiles, send: sendView(ticket, pipeline, sessions), visits, arcs };
+}
+
+/** The Visit not yet left, as the Ledger reads it; null for a Ticket with none. */
+function currentVisit(visits: VisitRow[]): TicketView["visit"] {
+  const v = visits.find((x) => x.left_at === null);
+  return v ? { number: v.number, arrivedBy: v.arrived_by, route: v.route, chosenBy: v.chosen_by } : null;
+}
+
+function visitViews(rows: VisitRow[]): VisitView[] {
+  const stageOf = new Map(rows.map((r) => [r.id, r.stage]));
+  return rows.map((r) => ({
+    id: r.id,
+    stage: r.stage,
+    number: r.number,
+    version: r.version,
+    arrivedAt: r.arrived_at,
+    leftAt: r.left_at,
+    arrivedBy: r.arrived_by,
+    fromVisit: r.from_visit,
+    fromStage: r.from_visit === null ? null : (stageOf.get(r.from_visit) ?? null),
+    route: r.route,
+    chosenBy: r.chosen_by,
+    text: r.text,
+    replaces: r.replaces === 1,
+    note: r.note,
+    skippedAt: r.skipped_at,
+  }));
+}
+
+/**
+ * The arcs over the Stage track, in the order each first fired: one per source Stage and Route name for Routes an
+ * agent, Action or check took (matched by name, as Route counts are, so a Route keeps its arc across Versions), and
+ * one per source and target for a human's sends. Records touching a Stage no longer on the track draw no arc. Each
+ * Route record carries the count after it; the arc's badge is the count and limit as they stand now.
+ */
+export function routeArcs(visits: VisitView[], pipeline: Pipeline, budgetsOf: (stage: Stage) => Record<string, { used: number; limit: number }>): RouteArcView[] {
+  const onTrack = new Map(pipeline.stages.map((s) => [s.name, s]));
+  const arcs = new Map<string, RouteArcView>();
+  const counted = new Map<string, number>();
+  const budgets = new Map<string, Record<string, { used: number; limit: number }>>();
+  const budgetAt = (stage: Stage) => {
+    if (!budgets.has(stage.name)) budgets.set(stage.name, budgetsOf(stage));
+    return budgets.get(stage.name)!;
+  };
+  for (const v of visits) {
+    if ((v.arrivedBy !== "route" && v.arrivedBy !== "send") || !v.fromStage || !v.chosenBy) continue;
+    const kind = v.arrivedBy;
+    // A Route counts by its source Stage and name, wherever it went, so every firing counts even off the track.
+    const countKey = `${v.fromStage}:${v.route}`;
+    const used = kind === "route" ? (counted.get(countKey) ?? 0) + 1 : 0;
+    if (kind === "route") counted.set(countKey, used);
+    const source = onTrack.get(v.fromStage);
+    if (!source || !onTrack.has(v.stage) || (kind === "route" && !v.route)) continue;
+    const key = kind === "route" ? `route:${v.fromStage}:${v.route}` : `send:${v.fromStage}:${v.stage}`;
+    const now = kind === "route" ? (budgetAt(source)[v.route!] ?? null) : null;
+    const arc = arcs.get(key) ?? { key, kind, from: v.fromStage, to: v.stage, route: kind === "route" ? v.route : null, budget: now && { used: now.used, limit: now.limit }, spent: now !== null && now.used >= now.limit, records: [] };
+    arc.to = v.stage;
+    arc.records.unshift({
+      visit: v.id,
+      number: v.number,
+      to: v.stage,
+      at: v.arrivedAt,
+      chosenBy: v.chosenBy,
+      route: v.route,
+      text: v.text,
+      replaces: v.replaces,
+      note: v.note,
+      budget: kind === "route" ? { used, limit: now?.limit ?? null } : null,
+    });
+    arcs.set(key, arc);
+  }
+  return [...arcs.values()];
 }
 
 /** Send here as it stands: refused only while a Session other than a terminal runs; Flags, holds and Budgets never stop it. */

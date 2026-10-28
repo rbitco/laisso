@@ -193,8 +193,10 @@ describe("the Visits migration", () => {
     await pull(lasso, abandoned.id, "abandon");
 
     const ids = [active.id, done.id, abandoned.id];
+    // The backfill dates each Visit from its Sessions, else the Ticket's creation, so only those times may differ.
+    const undated = (d: TicketDetail) => ({ ...d, visits: d.visits.map(({ arrivedAt: _a, leftAt, ...v }) => ({ ...v, left: leftAt !== null })) });
     const read = async (on: Lasso) => ({
-      details: await Promise.all(ids.map((id) => detailOf(on, id))),
+      details: await Promise.all(ids.map(async (id) => undated(await detailOf(on, id)))),
       ledger: await on.api<TicketView[]>("/api/tickets?all=1"),
       status: await Promise.all(ids.map(async (id) => (await runCli(["status", id], on)).stdout)),
     });

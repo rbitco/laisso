@@ -11,6 +11,7 @@ import { pipelineHref } from "../pipelines/href.ts";
 import { ticketHref, type Selection } from "../route.ts";
 import { BudgetEditor, Gauges } from "./Budget.tsx";
 import { PrCount, PrPanel } from "./PullRequests.tsx";
+import { RouteRecords } from "./RouteRecords.tsx";
 import { Flow, Timeline } from "./Flow.tsx";
 import { SessionPane, sessionLabel, worktreeGone } from "./SessionPane.tsx";
 import { shownSession, type Shown } from "./selection.ts";
@@ -171,6 +172,8 @@ function NameEditor({ ticket: t, done, refresh }: { ticket: TicketDetail; done: 
  */
 function TicketBody({ ticket: t, select, refresh }: { ticket: TicketDetail; select: Selection; refresh: () => Promise<void> }) {
   const [editing, setEditing] = useState(false);
+  // The Route arc whose records show in the right-hand stack (LASSO-199).
+  const [arc, setArc] = useState<string | null>(null);
   // The live Session when this selection was made, so one starting later is noticed rather than jumped to.
   const key = ticketHref(t.id, select);
   const [baseline, setBaseline] = useState({ key, live: t.session?.id ?? null });
@@ -185,7 +188,7 @@ function TicketBody({ ticket: t, select, refresh }: { ticket: TicketDetail; sele
       <TitleBar ticket={t} refresh={refresh}>
         {!t.flag && triggers}
       </TitleBar>
-      <Flow ticket={t} focus={narrowed} onFocus={setFocus} refresh={refresh} />
+      <Flow ticket={t} focus={narrowed} onFocus={setFocus} arc={arc} onArc={setArc} refresh={refresh} />
       {t.flag && <FlagBox ticket={t}>{triggers}</FlagBox>}
       <div className="dgrid">
         <div className="stack">
@@ -201,6 +204,7 @@ function TicketBody({ ticket: t, select, refresh }: { ticket: TicketDetail; sele
           </dl>
         </div>
         <div className="stack">
+          {arc && <RouteRecords ticket={t} arc={arc} onClose={() => setArc(null)} />}
           <PrPanel ticket={t} />
           <div className="panel">
             <h3>Budget</h3>

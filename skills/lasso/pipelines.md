@@ -284,6 +284,18 @@ Route's `budget` and is never refused for one. It works on a Flagged,
 holding, human or not-yet-started Stage, and is refused only while a
 headless or action Session runs.
 
+### Route history on the dashboard
+
+The Ledger's stage text counts the Visits to the current Stage past the
+first and marks one a Route began with ↩, such as `review-pr ×3 ↩ · 1/4`.
+A send gets the count but no ↩. On the Ticket page each Route that has
+fired is an arc over the Stage track, from its source Stage to its target,
+labelled with its name and times taken of its `budget` (red once spent).
+Your sends are dashed arcs with no Budget. Click an arc for its records:
+who chose it, when, the Route's text, the note, and the count after each.
+`GET /api/tickets/<id>` returns the same as `visits` (every Visit and how
+it began) and `arcs`.
+
 ## Artifacts
 
 | Artifact | Present when |

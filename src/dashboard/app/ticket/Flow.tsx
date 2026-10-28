@@ -5,7 +5,7 @@ import { sessionLabel } from "./SessionPane.tsx";
 import { SendPopover } from "./Send.tsx";
 
 const LEGEND =
-  "Filled stations are done, the ringed station is current, a stop sign is Flagged, ticks are action Stages. The orbit above a repeating Stage is PR feedback with Rounds used of Budget on its badge; a small orbit counts attempts. Click a station to filter Sessions; hover one to send the Ticket there.";
+  "Filled stations are done, the ringed station is current, a stop sign is Flagged, ticks are action Stages. The orbit above a repeating Stage is PR feedback with Rounds used of Budget on its badge; a small orbit counts attempts. An arc over the track is a Route that fired, with times taken of its Budget, red once spent; a dashed arc is your sends. Click a station to filter Sessions, or an arc to see its records; hover a station to send the Ticket there.";
 
 /** A station the pointer is over, and where its Send here sits within the panel. */
 interface Hovered {
@@ -17,10 +17,13 @@ interface Hovered {
 /**
  * The Metro flow diagram in its panel; a station click selects that Stage, and a second click clears it. Hovering a
  * station offers Send here (LASSO-197), which opens the Send popover for it; the offer stays on the last station
- * hovered until the pointer leaves the panel.
+ * hovered until the pointer leaves the panel. An arc click selects that Route's arc (LASSO-199), and a second clears it.
  */
-export function Flow({ ticket, focus, onFocus, refresh }: { ticket: TicketDetail; focus: string | null; onFocus: (stage: string | null) => void; refresh: () => Promise<void> }) {
+export function Flow({ ticket, focus, onFocus, arc, onArc, refresh }: { ticket: TicketDetail; focus: string | null; onFocus: (stage: string | null) => void; arc: string | null; onArc: (arc: string | null) => void; refresh: () => Promise<void> }) {
   const click = (ev: MouseEvent) => {
+    // An arc click opens its Route records, and a second click closes them.
+    const drawn = (ev.target as Element).closest<SVGElement>("[data-arc]");
+    if (drawn) return onArc(drawn.dataset.arc === arc ? null : drawn.dataset.arc!);
     const station = (ev.target as Element).closest<SVGElement>("[data-stage]");
     if (!station) return;
     const stage = station.dataset.stage!;
@@ -56,7 +59,7 @@ export function Flow({ ticket, focus, onFocus, refresh }: { ticket: TicketDetail
   return (
     <div className="flow-wrap" ref={panel} onMouseLeave={leave}>
       <div className="flow" data-role="flow">
-        <div ref={box} onClick={click} onMouseOver={over} dangerouslySetInnerHTML={{ __html: metroDiagram(ticket, focus, width) }} />
+        <div ref={box} onClick={click} onMouseOver={over} dangerouslySetInnerHTML={{ __html: metroDiagram(ticket, focus, width, arc) }} />
         <div className="legend">{LEGEND}</div>
       </div>
       {ticket.send && hovered && !sending && (

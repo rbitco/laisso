@@ -88,6 +88,7 @@ export function createApp(deps: AppDeps): Hono {
     feedbackFor: (session) => deps.feedback.forSession(session.id),
     linksFor: (ticket) => deps.links.links(ticket.id),
     budgetFor: (ticket, pipeline, stage, rows) => deps.budgets.view(ticket, pipeline, stage, rows),
+    routeBudgetsFor: (ticket, stage) => deps.budgets.routes(ticket, stage),
   };
   /** The view context for one request: queue positions and config.yaml are read once for every Ticket it renders. */
   const viewContext = (): ViewContext => {

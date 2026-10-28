@@ -4,7 +4,7 @@ import { render, screen, cleanup, act, waitFor, within } from "@testing-library/
 import { userEvent } from "@testing-library/user-event";
 import { DEFAULT_CONFIG, type Config } from "../src/server/config.ts";
 import type { BudgetView } from "../src/budget/budget.ts";
-import type { ConfigFile, PipelineListing, PrView, SessionView, StageProfileView, TicketDetail } from "../src/api/views.ts";
+import type { ConfigFile, PipelineListing, PrView, RouteArcView, RouteRecordView, SessionView, StageProfileView, TicketDetail } from "../src/api/views.ts";
 import { TicketPage } from "../src/dashboard/app/ticket/TicketPage.tsx";
 import { closeProfileDrawer, ProfileDrawerHost } from "../src/dashboard/app/profiles/drawer.tsx";
 import { events } from "../src/dashboard/app/events.ts";
@@ -73,7 +73,7 @@ function ticket(id: string, over: Partial<TicketDetail> = {}): TicketDetail {
     ],
     mirrorPending: false, createdAt: T0, updatedAt: T0, url: `http://lasso/#${id}`,
     session: s, sessions: [session({ ticket: id, id: "S2", stage: "implement", outcome: "failed" }), s], pipelineDrift: "same",
-    profiles: [profile("plan", "claude-opus"), profile("implement", "claude-opus")], send: { unavailable: null, routes: [] },
+    profiles: [profile("plan", "claude-opus"), profile("implement", "claude-opus")], send: { unavailable: null, routes: [] }, visit: null, visits: [], arcs: [],
     ...over,
   };
 }
@@ -740,6 +740,71 @@ describe("sending a Ticket to a Stage (LASSO-197)", () => {
     await showPage("B");
     await user.hover(station("plan"));
     expect(sendHere()).toBeNull();
+  });
+});
+
+describe("Route history on the Stage track (LASSO-199)", () => {
+  const at = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+  const record = (over: Partial<RouteRecordView>): RouteRecordView => ({ visit: 1, number: 2, to: "plan", at: at(5), chosenBy: "check", route: "back", text: null, replaces: false, note: null, budget: null, ...over });
+  const back: RouteArcView = {
+    key: "route:implement:back", kind: "route", from: "implement", to: "plan", route: "back", budget: { used: 2, limit: 2 }, spent: true,
+    records: [
+      record({ visit: 5, number: 3, at: at(5), note: "bob re-requested review", text: "Review again.", budget: { used: 2, limit: 2 } }),
+      record({ visit: 3, number: 2, at: at(50), note: "alice re-requested review", text: "Review again.", budget: { used: 1, limit: 2 } }),
+    ],
+  };
+  const ahead: RouteArcView = { key: "route:plan:ahead", kind: "route", from: "plan", to: "implement", route: "ahead", budget: { used: 1, limit: 3 }, spent: false, records: [record({ visit: 2, number: 1, to: "implement", chosenBy: "agent", route: "ahead", budget: { used: 1, limit: 3 } })] };
+  const sent: RouteArcView = { key: "send:implement:plan", kind: "send", from: "implement", to: "plan", route: null, budget: null, spent: false, records: [record({ visit: 7, number: 4, chosenBy: "human", route: "back", text: "Review again.", note: "Push as is.", budget: null })] };
+  const arc = (key: string) => document.querySelector<SVGGElement>(`[data-role="flow"] [data-arc="${key}"]`)!;
+  const records = () => document.querySelector<HTMLElement>('[data-role="route-records"]');
+
+  it("draws one arc per fired Route with its name and used/limit, red once spent, and a dashed arc without a badge for sends", async () => {
+    fakeLasso([ticket("A", { arcs: [back, ahead, sent] }), ticket("B")]);
+    const a = await showPage("A");
+    expect([...document.querySelectorAll<SVGGElement>("[data-arc]")].map((g) => g.dataset.arc)).toEqual(["route:implement:back", "route:plan:ahead", "send:implement:plan"]);
+    expect(arc(back.key).textContent).toBe("back2/2Route back from implement to plan, taken 2 of 2 (spent)");
+    expect(arc(back.key).getAttribute("class")).toBe("arc route spent");
+    expect(arc(back.key).querySelector(".arc-badge rect")!.getAttribute("fill")).toBe("var(--crit)");
+    expect(arc(ahead.key).querySelector(".arc-badge rect")!.getAttribute("fill")).toBe("var(--accent)");
+    expect(arc(ahead.key).textContent).toContain("ahead1/3");
+    // A human's send: dashed, no badge, nothing about Flagging.
+    expect(arc(sent.key).getAttribute("class")).toBe("arc send");
+    expect(arc(sent.key).querySelector(".arc-badge")).toBeNull();
+    expect(arc(sent.key).querySelectorAll("path")[1]!.getAttribute("stroke-dasharray")).toBe("5 4");
+    expect(arc(sent.key).textContent).toBe("sent by youSent by you from implement to plan");
+    expect(document.body.textContent).not.toMatch(/will Flag/i);
+    a.unmount();
+    await showPage("B");
+    expect(document.querySelector("[data-arc]")).toBeNull();
+  });
+
+  it("opens an arc's records in the right-hand stack on click, newest first, and closes them on a second click or Close", async () => {
+    fakeLasso([ticket("A", { arcs: [back, sent] })]);
+    await showPage("A");
+    const user = userEvent.setup();
+    expect(records()).toBeNull();
+    await user.click(arc(back.key).querySelector("text")!);
+    expect(within(records()!).getByRole("heading").textContent).toBe("Route back · implement → plan");
+    expect(within(records()!).getByText("Taken 2 of 2; spent, so another pick by an agent, Action or check Flags")).toBeTruthy();
+    // The panel sits at the top of the right-hand stack, above the PRs and Budget.
+    expect(records()!.parentElement!.firstElementChild).toBe(records());
+    expect(arc(back.key).getAttribute("class")).toBe("arc route spent sel");
+    const items = within(records()!).getAllByRole("listitem");
+    expect(items.map((li) => li.textContent)).toEqual([
+      "plan · Visit 3 · chosen by implement's check · 5m ago · 2/2Added to the prompt: Review again.Note: bob re-requested review",
+      "plan · Visit 2 · chosen by implement's check · 50m ago · 1/2Added to the prompt: Review again.Note: alice re-requested review",
+    ]);
+    await user.click(arc(back.key).querySelector("text")!);
+    expect(records()).toBeNull();
+
+    await user.click(arc(sent.key).querySelector("text")!);
+    expect(within(records()!).getByRole("heading").textContent).toBe("Sent by you · implement → plan");
+    expect(within(records()!).getAllByRole("listitem").map((li) => li.textContent)).toEqual([
+      "plan · Visit 4 · sent by you, using Route back · 5m ago · doesn't countAdded to the prompt: Review again.Instructions: Push as is.",
+    ]);
+    expect(within(records()!).queryByText(/Taken|spent|Flag/)).toBeNull();
+    await user.click(within(records()!).getByRole("button", { name: "Close" }));
+    expect(records()).toBeNull();
   });
 });
 

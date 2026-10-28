@@ -2,13 +2,13 @@
 // the API's Ticket views as SVG strings. Pure on purpose: React components call it, and the tests run the same module
 // in Node against real API data (LASSO-41, the composed variant D of the dashboard prototype).
 
-import type { DisplayState, PipelineListing, SessionView, StageProfileView, TicketView, Trigger } from "../api/views.ts";
+import type { DisplayState, PipelineListing, RouteArcView, SessionView, StageProfileView, TicketView, Trigger } from "../api/views.ts";
 import type { TickStatus } from "../server/tick.ts";
 import type { Config, ProfileConfig, ProfileScope } from "../server/config.ts";
 import type { RunnerName } from "../pipeline/load.ts";
 
-/** A Ticket as the diagram reads it: the Ledger's view, with the Sessions the detail adds. */
-export type MetroTicket = TicketView & { sessions?: SessionView[] };
+/** A Ticket as the diagram reads it: the Ledger's view, with the Sessions and Route arcs the detail adds. */
+export type MetroTicket = TicketView & { sessions?: SessionView[]; arcs?: RouteArcView[] };
 
 type Colour = "good" | "crit" | "warn" | "run" | "accent" | "muted" | "done";
 
@@ -189,12 +189,15 @@ export function pipelineLine(stages: Array<{ kind: string }>): string {
  * travelling dot. Each station is a node with data-stage, for the timeline filter. Stations
  * sit as far apart as their labels need; given the panel's `width`, they spread across it.
  */
-export function metroDiagram(t: MetroTicket, focus: string | null, width: number | null = null): string {
+export function metroDiagram(t: MetroTicket, focus: string | null, width: number | null = null, arc: string | null = null): string {
   if (!t.stages.length) return `<svg viewBox="0 0 100 40" role="img" aria-label="no Stages"><text x="0" y="20" class="sub">This Pipeline does not load.</text></svg>`;
   const infos = t.stages.map((_, i) => stageInfo(t, i));
   const reach = infos.map(stationReach);
+  const arcs = (t.arcs ?? []).filter((a) => t.stages.some((s) => s.name === a.from) && t.stages.some((s) => s.name === a.to));
+  // A band over everything else for the Route arcs, a lane for each; nothing when none has fired.
+  const band = arcs.length ? ARC_FIRST + ARC_LANE * (arcs.length - 1) + 14 : 0;
   // Room above the track only for what is drawn there: the Rounds orbit, an attempts orbit, or a line of text.
-  const baseY = infos.some((inf) => inf.roundsUsed) ? 66 : infos.some((inf) => inf.attempts.length > 1) ? 44 : 34;
+  const baseY = band + (infos.some((inf) => inf.roundsUsed) ? 66 : infos.some((inf) => inf.attempts.length > 1) ? 44 : 34);
   const H = baseY + (infos.some((inf) => inf.roundsUsed || inf.attempts.length > 1) ? 50 : 40);
   // Adjacent stations sit far enough apart that their labels clear each other.
   const gaps = reach.slice(1).map((r, i) => Math.max(reach[i]!.right + r.left + 18, 56));
@@ -263,7 +266,61 @@ export function metroDiagram(t: MetroTicket, focus: string | null, width: number
     }
     out += "</g>";
   });
+  if (arcs.length) {
+    const xOf = new Map(pts.map((p) => [p.s.name, p.cx]));
+    out += routeArcsSvg(arcs, xOf, band, W, arc);
+  }
   return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Stage flow for ${esc(t.label)}">${out}</svg>`;
+}
+
+/** The lowest arc's height over the band's foot, and the rise from one lane to the next. */
+const ARC_FIRST = 24;
+const ARC_LANE = 22;
+/** How far right of a station's centre an arc leaves it, and how far left one arrives. */
+const ARC_LEG = 6;
+
+/**
+ * The Route arcs (LASSO-199), from source station to target over a band at the top of the diagram: the shortest in
+ * the lowest lane, so arcs nest. Each is labelled at its peak with the Route's name and used/limit, red once spent; a
+ * human's sends are a dashed amber arc with no Budget. A loop to its own Stage is a small arc over that station.
+ * Each arc is a node with data-arc for the Route records panel; `selected` draws its key heavier.
+ */
+function routeArcsSvg(arcs: RouteArcView[], xOf: Map<string, number>, foot: number, W: number, selected: string | null): string {
+  const span = (a: RouteArcView) => Math.abs(xOf.get(a.from)! - xOf.get(a.to)!);
+  const lanes = [...arcs].sort((a, b) => span(a) - span(b));
+  let out = "";
+  lanes.forEach((a, lane) => {
+    const sx = xOf.get(a.from)!,
+      tx = xOf.get(a.to)!;
+    const h = ARC_FIRST + ARC_LANE * lane;
+    // A cubic's peak sits at three quarters of its control points' rise.
+    const rise = (h * 4) / 3;
+    // Arcs leave a station just right of its centre and arrive just left of it, so a pair going opposite ways between
+    // the same Stages never share a leg; a loop to its own Stage leaves and arrives the same way, swelling out to fit.
+    const [x1, x2] = [sx + ARC_LEG, tx - ARC_LEG];
+    const [c1, c2] = sx === tx ? [sx + 40, sx - 40] : [x1, x2];
+    const d = `M${x1} ${foot} C${c1} ${foot - rise} ${c2} ${foot - rise} ${x2} ${foot}`;
+    const send = a.kind === "send";
+    const sel = a.key === selected;
+    const colour: Colour = send ? "warn" : "accent";
+    const name = send ? "sent by you" + (a.records.length > 1 ? ` ×${a.records.length}` : "") : a.route!;
+    const badge = !send && a.budget ? `${a.budget.used}/${a.budget.limit}` : "";
+    const nameW = Math.round(name.length * 6.2) + 14;
+    const badgeW = badge ? Math.round(badge.length * 6) + 10 : 0;
+    const w = nameW + badgeW;
+    const mid = (sx + tx) / 2;
+    const top = foot - h;
+    const what = send ? `Sent by you from ${a.from} to ${a.to}` : `Route ${a.route} from ${a.from} to ${a.to}` + (a.budget ? `, taken ${a.budget.used} of ${a.budget.limit}` + (a.spent ? " (spent)" : "") : "");
+    out +=
+      `<g class="arc ${a.kind}${a.spent ? " spent" : ""}${sel ? " sel" : ""}" data-arc="${esc(a.key)}">` +
+      `<path d="${d}" fill="none" stroke="transparent" stroke-width="12"/>` +
+      `<path d="${d}" fill="none" stroke="${COL[colour]}" stroke-width="${sel ? 3 : 1.8}"${send ? ` stroke-dasharray="5 4"` : ""} marker-end="url(#arr-${colour})"/>` +
+      `<g transform="translate(${Math.round(Math.min(Math.max(mid - w / 2, 2), W - w - 2))},${top})"><rect x="0" y="-9" width="${w}" height="18" rx="9" fill="var(--surface)" stroke="${COL[colour]}" stroke-width="${sel ? 2 : 1}"/>` +
+      `<text class="arc-name" x="${nameW / 2}" y="4" text-anchor="middle">${esc(name)}</text>` +
+      (badge ? `<g class="arc-badge"><rect x="${nameW - 4}" y="-7" width="${badgeW}" height="14" rx="7" fill="${a.spent ? COL.crit : COL[colour]}"/><text class="badge-text" x="${nameW - 4 + badgeW / 2}" y="3.5" text-anchor="middle">${badge}</text></g>` : "") +
+      `</g><title>${esc(what)}</title></g>`;
+  });
+  return out;
 }
 
 type StationInfo = ReturnType<typeof stageInfo>;
@@ -456,11 +513,15 @@ function modeSummary(headless: string[], human: string[]): string {
 
 /**
  * A Ledger row's stage text: the Stage and its place, then the profile with a star only when a human overrode the
- * current Stage's profile, e.g. "plan · 3/8 · claude-fable*". Nothing extra otherwise (LASSO-63).
+ * current Stage's profile, e.g. "plan · 3/8 · claude-fable*". Nothing extra otherwise (LASSO-63). A Stage visited
+ * more than once shows the Visit count, and ↩ when a Route began this Visit, e.g. "review-pr ×3 ↩ · 1/4" (LASSO-199);
+ * a human's send is not a Route and gets no ↩.
  */
 export function ledgerStageText(t: TicketView): string {
   const place = t.stage.index < 0 ? "" : " · " + (t.stage.index + 1) + "/" + t.stages.length;
-  return t.stage.label + place + (t.stage.override ? " · " + t.stage.override + "*" : "");
+  const count = t.visit && t.visit.number > 1 ? " ×" + t.visit.number : "";
+  const routed = t.visit?.arrivedBy === "route" ? " ↩" : "";
+  return t.stage.label + count + routed + place + (t.stage.override ? " · " + t.stage.override + "*" : "");
 }
 
 // Repo overrides (LASSO-74): a repo may define its own profile of a global's name, which replaces it whole for that

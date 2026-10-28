@@ -3,7 +3,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { startLassoWithRepos, runCli, waitFor, claudeFixture, type Lasso, type LassoConfig } from "./harness.ts";
-import type { TicketDetail, IntakeResult, PipelineListing, PipelineFile } from "../src/api/views.ts";
+import type { TicketDetail, TicketView, IntakeResult, PipelineListing, PipelineFile } from "../src/api/views.ts";
 import type { TickChange } from "../src/server/tick.ts";
 import { decide, type RoutePick } from "../src/route/route.ts";
 import type { Stage } from "../src/pipeline/load.ts";
@@ -859,4 +859,54 @@ describe("holding before a Route (LASSO-196)", () => {
       if (lever === "abandon") expect(visits).toHaveLength(2);
     }
   }, 60_000);
+});
+
+describe("Route history in the views (LASSO-199)", () => {
+  const send = (lasso: Lasso, id: string, body: Record<string, unknown>) => lasso.api<TicketDetail>(`/api/tickets/${id}/send`, { method: "POST", body: json(body) });
+
+  it("gives the Ledger the current Visit, and the Ticket page each Visit and one arc per fired Route and per send", async () => {
+    // back may be taken twice, so two laps spend it; ahead has the global limit of 3.
+    const lasso = await lassoWith(WORK.replace("budget: 3", "budget: 2"));
+    await gate(lasso, 'lasso route back --note "lap 1"', "lasso route back", "true", "lasso route ahead");
+    const ticket = await add(lasso);
+    expect((await rested(lasso, ticket.id)).stage.name).toBe("polish");
+    await send(lasso, ticket.id, { stage: "implement", instructions: "Handle the empty list too." });
+    const detail = await rested(lasso, ticket.id);
+    expect(detail.stage.name).toBe("ship");
+
+    // The Ledger row: ship's first Visit, which a Route began.
+    const [row] = await lasso.api<TicketView[]>("/api/tickets");
+    expect(row!.visit).toEqual({ number: 1, arrivedBy: "route", route: "ahead", chosenBy: "action" });
+    expect(detail.visit).toEqual(row!.visit);
+
+    expect(detail.visits.map((v) => [v.stage, v.number, v.arrivedBy, v.fromStage, v.route, v.chosenBy])).toEqual([
+      ["implement", 1, "intake", null, null, null],
+      ["gate", 1, "walk", "implement", null, null],
+      ["implement", 2, "route", "gate", "back", "action"],
+      ["gate", 2, "walk", "implement", null, null],
+      ["implement", 3, "route", "gate", "back", "action"],
+      ["gate", 3, "walk", "implement", null, null],
+      ["polish", 1, "walk", "gate", null, null],
+      ["implement", 4, "send", "polish", null, "human"],
+      ["gate", 4, "walk", "implement", null, null],
+      ["ship", 1, "route", "gate", "ahead", "action"],
+    ]);
+    expect(detail.visits[2]).toMatchObject({ text: "Fix what the gate found.", replaces: false, note: "lap 1", leftAt: expect.any(String) });
+    expect(detail.visits.at(-1)).toMatchObject({ leftAt: null, version: 1 });
+
+    // One arc per Route by its source, one for the sends from polish to implement, in the order each first fired.
+    expect(detail.arcs.map((a) => [a.key, a.kind, a.from, a.to, a.route, a.budget, a.spent])).toEqual([
+      ["route:gate:back", "route", "gate", "implement", "back", { used: 2, limit: 2 }, true],
+      ["send:polish:implement", "send", "polish", "implement", null, null, false],
+      ["route:gate:ahead", "route", "gate", "ship", "ahead", { used: 1, limit: 3 }, false],
+    ]);
+    const [back, sent] = detail.arcs;
+    // Records newest first, each with the count after it; a human's send counts nothing.
+    expect(back!.records.map((r) => [r.number, r.chosenBy, r.note, r.text, r.budget])).toEqual([
+      [3, "action", "picked Route back to implement", "Fix what the gate found.", { used: 2, limit: 2 }],
+      [2, "action", "lap 1", "Fix what the gate found.", { used: 1, limit: 2 }],
+    ]);
+    const sentVisit = detail.visits[7]!;
+    expect(sent!.records).toEqual([{ visit: sentVisit.id, number: 4, to: "implement", at: sentVisit.arrivedAt, chosenBy: "human", route: null, text: null, replaces: false, note: "Handle the empty list too.", budget: null }]);
+  });
 });
