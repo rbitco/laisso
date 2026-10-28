@@ -48,9 +48,10 @@ export interface VisitRow {
   note: string | null;
   /** 1 when `text` replaces the Stage's prompt text (a Route's replace:), 0 when it follows it (append:). */
   replaces: number;
-  /** The Route picked for leaving, pending or overridden, and its note. */
+  /** The Route picked for leaving, pending or overridden, its note, and who picked it. */
   picked_route: string | null;
   picked_note: string | null;
+  picked_by: ChosenBy | null;
   /** The latest check Action run here, as JSON (ADR 0014), and the id of that run (its LASSO_SESSION). */
   check_result: string | null;
   check_run: string | null;
@@ -123,11 +124,27 @@ export class Visits {
     this.changed(ticket);
   }
 
-  /** Record the Route picked for leaving the current Visit, over any picked before; null drops the pick. */
-  pick(ticket: string, route: string | null, note: string | null = null): VisitRow | null {
-    this.db.prepare(`UPDATE visits SET picked_route = ?, picked_note = ? WHERE ticket = ? AND left_at IS NULL`).run(route, route === null ? null : note, ticket);
+  /** Record the Route picked for leaving the current Visit, and who picked it, over any picked before; null drops the pick. */
+  pick(ticket: string, route: string | null, note: string | null = null, by: ChosenBy | null = null): VisitRow | null {
+    this.db
+      .prepare(`UPDATE visits SET picked_route = ?, picked_note = ?, picked_by = ? WHERE ticket = ? AND left_at IS NULL`)
+      .run(route, route === null ? null : note, route === null ? null : by, ticket);
     this.changed(ticket);
     return this.current(ticket);
+  }
+
+  /**
+   * How many times each Route of a Stage was taken for the Ticket by an agent, Action or check: the Visits that
+   * arrived by that Route from a Visit to the Stage, matched by name so counts carry across Versions. Never reset.
+   */
+  routeCounts(ticket: string, stage: string): Record<string, number> {
+    const rows = this.db
+      .prepare(
+        `SELECT v.route AS route, COUNT(*) AS n FROM visits v JOIN visits f ON f.id = v.from_visit
+         WHERE v.ticket = ? AND v.arrived_by = 'route' AND f.stage = ? AND v.chosen_by IS NOT 'human' GROUP BY v.route`,
+      )
+      .all(ticket, stage) as Array<{ route: string; n: number }>;
+    return Object.fromEntries(rows.map((r) => [r.route, Number(r.n)]));
   }
 
   /** Record that a human skipped the Stage on the current Visit. */

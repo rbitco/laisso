@@ -35,6 +35,8 @@ export interface BudgetDefaults {
   attempts: number;
   wallTime: string;
   spend: number;
+  /** Times an agent, Action or check may take each Route of a Ticket. */
+  routes: number;
 }
 
 export interface NotificationConfig {
@@ -145,7 +147,7 @@ export const DEFAULT_CONFIG: Config = {
     "claude-sonnet": { runner: "claude", model: "sonnet", permission: "auto" },
   },
   default_profile: "claude-opus",
-  budget: { rounds: 5, attempts: 2, wallTime: "30m", spend: 25 },
+  budget: { rounds: 5, attempts: 2, wallTime: "30m", spend: 25, routes: 3 },
   tick: 60,
   concurrency: 3,
   retention: 30,
@@ -221,6 +223,7 @@ budget:
   attempts: 2      # attempts per Stage
   wallTime: 30m    # wall time per headless Session
   spend: 25        # agent spend per Ticket, USD
+  routes: 3        # times an agent, Action or check may take each Route
 
 tick: 60           # seconds between polls of open PRs and pending work
 concurrency: 3     # headless Sessions running at once, across all Tickets
@@ -344,6 +347,7 @@ export function parseConfig(text: string, file: string, overrides: { port?: numb
       attempts: count(budget.attempts, at("budget.attempts"), fail, D.budget.attempts),
       wallTime: duration(budget.wallTime, at("budget.wallTime"), fail, D.budget.wallTime),
       spend: money(budget.spend, at("budget.spend"), fail, D.budget.spend),
+      routes: count(budget.routes, at("budget.routes"), fail, D.budget.routes),
     },
     tick: positive(raw.tick, at("tick"), fail, D.tick),
     concurrency: positive(raw.concurrency, at("concurrency"), fail, D.concurrency),
@@ -383,7 +387,7 @@ const string = text;
 
 /** What the dashboard may set (spec: Lasso home and configuration); repos stay a hand edit in v1. */
 const EDITABLE: Record<string, Set<string> | null> = {
-  budget: new Set(["rounds", "attempts", "wallTime", "spend"]),
+  budget: new Set(["rounds", "attempts", "wallTime", "spend", "routes"]),
   tick: null,
   concurrency: null,
   retention: null,

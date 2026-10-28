@@ -33,7 +33,8 @@ const BUDGET: BudgetView = {
   attempts: { used: 1, limit: 3, source: "global" },
   wallTime: { used: 60_000, limit: 1_800_000, source: "global", limitText: "30m" },
   spend: { used: 0.5, limit: 5, source: "ticket" },
-  ticket: { rounds: null, attempts: null, wallTime: null, spend: 5 },
+  routes: { value: 3, source: "global" },
+  ticket: { rounds: null, attempts: null, wallTime: null, spend: 5, routes: null },
 };
 
 function session(over: Partial<SessionView> = {}): SessionView {
@@ -819,7 +820,7 @@ describe("the Budget editor", () => {
     await user.clear(field("attempts"));
     await user.click(within(editor).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(document.querySelector('[data-role="budget-editor"]')).toBeNull());
-    expect(lasso.sent).toEqual([{ method: "POST", route: "/api/tickets/A/extend", body: { rounds: 5, attempts: null, wallTime: "1h", spend: null } }]);
+    expect(lasso.sent).toEqual([{ method: "POST", route: "/api/tickets/A/extend", body: { rounds: 5, attempts: null, wallTime: "1h", spend: null, routes: null } }]);
   });
 
   it("opens from Extend and closes on Cancel without sending anything", async () => {

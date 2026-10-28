@@ -12,6 +12,7 @@ import { checkArtifact, type ActionProbe, type PrProbe } from "../artifact/check
 import type { Teardown } from "./teardown.ts";
 import { decide, type Exit, type RoutePick } from "../route/route.ts";
 import type { CheckRun } from "../artifact/action-check.ts";
+import type { Budgets } from "../budget/budgets.ts";
 
 /** What Send to Stage asks for: the target Stage, the human's instructions, and a declared Route to reuse, if any. */
 export interface SendRequest {
@@ -49,6 +50,8 @@ export interface ProgressDeps {
   visits: Visits;
   /** The Ticket's PR links, where a Round due to start is kept. */
   links: PrLinks;
+  /** Each Route's count and limit, for the Route Budget. */
+  budgets: Budgets;
   log: Logger;
   notifier: Notifier;
   mirror: Mirror;
@@ -218,12 +221,19 @@ export class Progress {
    * The current Stage finished along the exit the Route decision chose: walk forward as `finished` does, or take
    * the Route. Taking one leaves the Visit for a new one at the target, carrying the Route's text and note; Stages a
    * forward Route passes over get no Visit and keep their last one's state. The Ticket walks on from the target.
+   * A spent Route Flags `budget.routes` instead, keeping the pick pending on the Visit for Extend.
    */
   async leave(ticket: TicketRow, exit: Exclude<Exit, { kind: "failed" }>): Promise<void> {
     if (exit.kind === "walk") return this.finished(ticket);
     if (exit.kind === "conflict") return this.flag(ticket.id, "route.conflict", `${pickLine(exit.pick)}; ${pickLine(exit.check)}`);
     const current = this.current(ticket);
     if ("problem" in current) return this.flag(ticket.id, "pipeline.missing", current.problem);
+    if (exit.kind === "flag") {
+      // The spent Route stays the Visit's pick, with the note it would carry, for Extend to take.
+      const { pending } = exit;
+      this.deps.visits.pick(ticket.id, pending.route, pending.note, pending.chosenBy);
+      return this.flag(ticket.id, exit.reason, exit.detail);
+    }
     const target = current.pipeline.stages.find((s) => s.name === exit.to);
     if (!target) return this.flag(ticket.id, "pipeline.missing", `Pipeline ${ticket.pipeline} has no Stage named ${exit.to} for Route ${exit.route}`);
     const now = new Date().toISOString();
@@ -243,10 +253,12 @@ export class Progress {
     if ("problem" in current) return this.flag(ticket.id, "pipeline.missing", current.problem);
     const visit = this.deps.visits.current(ticket.id);
     const by = current.stage.kind === "action" ? "action" : "agent";
-    const pick: RoutePick | null = visit?.picked_route ? { route: visit.picked_route, note: visit.picked_note, by } : null;
+    // A check's pick lives on its check result; one kept as the Visit's pick is a spent Route left pending, not the run's.
+    const own = visit?.picked_route && visit.picked_by !== "check" ? visit : null;
+    const pick: RoutePick | null = own ? { route: own.picked_route!, note: own.picked_note, by } : null;
     const result = checkOf(visit);
     const check: RoutePick | null = result?.result === "met" && result.route ? { route: result.route, note: result.note?.trim() || result.line, by: "check", run: visit!.check_run } : null;
-    const exit = decide({ stage: current.stage, pick, check, end: { succeeded: true, lastLine: null } });
+    const exit = decide({ stage: current.stage, pick, check, end: { succeeded: true, lastLine: null }, counts: this.deps.budgets.routes(ticket, current.stage) });
     if (exit.kind === "failed") return this.finished(ticket);
     return this.leave(ticket, exit);
   }
@@ -270,7 +282,7 @@ export class Progress {
     const { stage } = current;
     if (stage.kind !== "action") throw new TriggerError(`Stage ${stage.name} does not let its agent choose a Route`);
     declares(stage, route);
-    const picked = this.deps.visits.pick(ticket.id, route, note?.trim() || null)!;
+    const picked = this.deps.visits.pick(ticket.id, route, note?.trim() || null, "action")!;
     this.deps.log.info(route === null ? "route.cleared" : "route.picked", { ticket: ticket.id, stage: stage.name, session: sessionId, route });
     return { ticket: ticket.id, stage, route: picked.picked_route, note: picked.picked_note };
   }
@@ -315,6 +327,12 @@ export class Progress {
     this.entered(updated, target);
     this.deps.mirror.pushSoon(updated.id);
     return updated;
+  }
+
+  /** The Route the current Visit picked for leaving and has not taken yet, as when a spent Route Flagged it, or null. */
+  pendingPick(ticket: TicketRow): RoutePick | null {
+    const visit = this.deps.visits.current(ticket.id);
+    return visit?.picked_route ? { route: visit.picked_route, note: visit.picked_note, by: visit.picked_by ?? "action" } : null;
   }
 
   /** The Start trigger: release a holding Ticket into its current Stage. */

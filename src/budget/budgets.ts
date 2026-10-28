@@ -4,7 +4,7 @@ import type { TicketRow } from "../store/tickets.ts";
 import type { Sessions, SessionRow } from "../store/sessions.ts";
 import { roundDue, type PrLinks } from "../store/links.ts";
 import type { Visits } from "../store/visits.ts";
-import { resolveBudget, usageOf, refusalOf, budgetView, type Budget, type Usage, type Refusal, type BudgetView } from "./budget.ts";
+import { resolveBudget, usageOf, refusalOf, budgetView, routeBudgets, type Budget, type Usage, type Refusal, type BudgetView, type RouteBudget } from "./budget.ts";
 
 /** A Ticket's Budget and what it has used, read from the store on every ask so counters are never cached. */
 export class Budgets {
@@ -33,6 +33,11 @@ export class Budgets {
   refusal(ticket: TicketRow, pipeline: Pipeline, stage: Stage): Refusal | null {
     const opensRound = stage.kind === "runner" && stage.repeat !== null && roundDue(this.links.links(ticket.id));
     return refusalOf(this.resolve(ticket, pipeline, stage), this.usage(ticket, pipeline, stage), stage, opensRound);
+  }
+
+  /** Each of the Stage's Routes with how often it was taken for the Ticket and its resolved limit. */
+  routes(ticket: TicketRow, stage: Stage): Record<string, RouteBudget> {
+    return routeBudgets(this.config, stage, ticket, this.visits.routeCounts(ticket.id, stage.name));
   }
 
   view(ticket: TicketRow, pipeline: Pipeline | null, stage: Stage | null, rows?: SessionRow[]): BudgetView {

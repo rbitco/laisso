@@ -73,7 +73,7 @@ describe("attempts", () => {
     expect(extended.flag).toBeNull();
     expect(extended.budget.attempts).toEqual({ used: 3, limit: 3, source: "ticket" });
     expect(extended.budget.wallTime).toMatchObject({ limit: 120_000, source: "ticket", limitText: "2m" });
-    expect(extended.budget.ticket).toEqual({ rounds: null, attempts: 3, wallTime: "2m", spend: null });
+    expect(extended.budget.ticket).toEqual({ rounds: null, attempts: 3, wallTime: "2m", spend: null, routes: null });
     expect(extended.session).toMatchObject({ stage: "implement", ordinal: 3, startedBy: "auto" });
     // implement's end kicks the tick, so notes runs straight after; its attempts count from zero.
     const done = await waitFor(async () => { const d = await detailOf(lasso, ticket.id); return d.state === "done" ? d : null; }, "the Ticket to be done");

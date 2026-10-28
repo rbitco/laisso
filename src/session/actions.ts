@@ -12,6 +12,7 @@ import type { Visits } from "../store/visits.ts";
 import type { PrLinks } from "../store/links.ts";
 import type { ActionStage } from "../pipeline/load.ts";
 import type { Progress } from "./progress.ts";
+import type { Budgets } from "../budget/budgets.ts";
 import { actionLine, LatestMessageTracker } from "./latest-message.ts";
 import { decide } from "../route/route.ts";
 
@@ -25,6 +26,8 @@ export interface ActionsDeps {
   links: PrLinks;
   log: Logger;
   progress: Progress;
+  /** Each Route's count and limit, for the Route Budget. */
+  budgets: Budgets;
   /** Hears each chunk of a command's output once it is on disk, as Runs' stdoutWritten does. */
   stdoutWritten?: (ticket: string, session: string) => void;
   /** Hears a command Action end, so the tick can carry the Ticket on without waiting for the timer. */
@@ -152,8 +155,8 @@ export class Actions {
       if (how.shutdown) return;
       const fresh = tickets.get(ticket.id)!;
       const visit = visits.current(fresh.id);
-      const pick = visit?.picked_route ? { route: visit.picked_route, note: visit.picked_note, by: "action" as const } : null;
-      const exit = decide({ stage, pick, end: { succeeded: how.failure === null, lastLine: lastLine(how.tail) || null } });
+      const pick = visit?.picked_route ? { route: visit.picked_route, note: visit.picked_note, by: visit.picked_by ?? ("action" as const) } : null;
+      const exit = decide({ stage, pick, end: { succeeded: how.failure === null, lastLine: lastLine(how.tail) || null }, counts: this.deps.budgets.routes(fresh, stage) });
       if (exit.kind === "failed") await progress.flag(fresh.id, "outcome.failed", exit.untaken ? `${how.failure}; Route ${exit.untaken.route} not taken` : how.failure);
       else await progress.leave(fresh, exit);
     } finally {

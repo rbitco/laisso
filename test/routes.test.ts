@@ -44,8 +44,8 @@ const ACTIONS: LassoConfig["actions"] = {
   check: { run: 'sh "$(dirname "$(command -v lasso)")/check.sh"' },
 };
 
-async function lassoWith(pipeline = WORK) {
-  const { lasso } = await startLassoWithRepos({ app: { pipeline: "work" } }, { actions: ACTIONS }, { work: pipeline });
+async function lassoWith(pipeline = WORK, extra: LassoConfig = {}) {
+  const { lasso } = await startLassoWithRepos({ app: { pipeline: "work" } }, { actions: ACTIONS, ...extra }, { work: pipeline });
   running.push(lasso);
   // `lasso` inside a Session is this checkout's CLI, talking to this server.
   await writeFile(path.join(lasso.pathDir, "lasso"), `#!/bin/sh\nexec '${process.execPath}' '${BIN}' --port ${lasso.port} "$@"\n`, { mode: 0o755 });
@@ -88,6 +88,8 @@ interface Visit {
   note: string | null;
   replaces: number;
   picked_route: string | null;
+  picked_note: string | null;
+  picked_by: string | null;
   skipped_at: string | null;
   check_result: string | null;
   check_run: string | null;
@@ -96,7 +98,7 @@ interface Visit {
 function visitsOf(lasso: Lasso, ticket: string): Visit[] {
   const db = new DatabaseSync(path.join(lasso.home, "lasso.db"));
   try {
-    return db.prepare(`SELECT id, stage, arrived_by, from_visit, route, chosen_by, text, note, replaces, picked_route, skipped_at, check_result, check_run FROM visits WHERE ticket = ? ORDER BY id`).all(ticket) as unknown as Visit[];
+    return db.prepare(`SELECT id, stage, arrived_by, from_visit, route, chosen_by, text, note, replaces, picked_route, picked_note, picked_by, skipped_at, check_result, check_run FROM visits WHERE ticket = ? ORDER BY id`).all(ticket) as unknown as Visit[];
   } finally {
     db.close();
   }
@@ -116,31 +118,59 @@ describe("the Route decision", () => {
   const ok = { succeeded: true, lastLine: "all checks ran" };
 
   it("walks forward with no pick", () => {
-    expect(decide({ stage, pick: null, end: ok })).toEqual({ kind: "walk" });
+    expect(decide({ stage, pick: null, end: ok, counts: {} })).toEqual({ kind: "walk" });
   });
 
   it("takes the picked Route on success, with its append text and the pick's note", () => {
-    expect(decide({ stage, pick: pick("back", "tests fail"), end: ok })).toEqual({ kind: "route", route: "back", to: "implement", text: "Fix it.", replaces: false, note: "tests fail", chosenBy: "action" });
+    expect(decide({ stage, pick: pick("back", "tests fail"), end: ok, counts: {} })).toEqual({ kind: "route", route: "back", to: "implement", text: "Fix it.", replaces: false, note: "tests fail", chosenBy: "action" });
   });
 
   it("carries replace text as replacing, and no text for a Route with neither", () => {
-    expect(decide({ stage, pick: pick("redo"), end: ok })).toMatchObject({ text: "Start over.", replaces: true });
-    expect(decide({ stage, pick: pick("ahead"), end: ok })).toMatchObject({ to: "ship", text: null, replaces: false });
+    expect(decide({ stage, pick: pick("redo"), end: ok, counts: {} })).toMatchObject({ text: "Start over.", replaces: true });
+    expect(decide({ stage, pick: pick("ahead"), end: ok, counts: {} })).toMatchObject({ to: "ship", text: null, replaces: false });
   });
 
   it("notes the run's last line when the pick gives none or a blank one, and nothing when neither has one", () => {
-    expect(decide({ stage, pick: pick("back"), end: ok })).toMatchObject({ note: "all checks ran" });
-    expect(decide({ stage, pick: pick("back", "  "), end: ok })).toMatchObject({ note: "all checks ran" });
-    expect(decide({ stage, pick: pick("back"), end: { succeeded: true, lastLine: null } })).toMatchObject({ note: null });
+    expect(decide({ stage, pick: pick("back"), end: ok, counts: {} })).toMatchObject({ note: "all checks ran" });
+    expect(decide({ stage, pick: pick("back", "  "), end: ok, counts: {} })).toMatchObject({ note: "all checks ran" });
+    expect(decide({ stage, pick: pick("back"), end: { succeeded: true, lastLine: null }, counts: {} })).toMatchObject({ note: null });
   });
 
   it("fails a run that did not succeed, naming the pick it does not take", () => {
-    expect(decide({ stage, pick: pick("back"), end: { succeeded: false, lastLine: "boom" } })).toEqual({ kind: "failed", untaken: pick("back") });
-    expect(decide({ stage, pick: null, end: { succeeded: false, lastLine: null } })).toEqual({ kind: "failed", untaken: null });
+    expect(decide({ stage, pick: pick("back"), end: { succeeded: false, lastLine: "boom" }, counts: {} })).toEqual({ kind: "failed", untaken: pick("back") });
+    expect(decide({ stage, pick: null, end: { succeeded: false, lastLine: null }, counts: {} })).toEqual({ kind: "failed", untaken: null });
   });
 
   it("walks forward on a pick the Stage does not declare", () => {
-    expect(decide({ stage: { ...stage, routes: undefined }, pick: pick("back"), end: ok })).toEqual({ kind: "walk" });
+    expect(decide({ stage: { ...stage, routes: undefined }, pick: pick("back"), end: ok, counts: {} })).toEqual({ kind: "walk" });
+  });
+});
+
+describe("the Route decision's Budget rule", () => {
+  const stage: Stage = { kind: "action", name: "gate", action: "gate", with: {}, routes: { back: { to: "implement", append: "Fix it." }, ahead: { to: "ship" } } };
+  const ok = { succeeded: true, lastLine: "lint is red" };
+  const take = { kind: "route", route: "back", to: "implement", text: "Fix it.", replaces: false, note: "lint is red", chosenBy: "action" };
+  const exits = (by: RoutePick["by"], used: number, limit: number) => decide({ stage, pick: { route: "back", note: null, by }, end: ok, counts: { back: { used, limit } } });
+
+  it("takes a Route with Budget left", () => {
+    expect(exits("action", 0, 3)).toEqual(take);
+    expect(exits("action", 2, 3)).toEqual(take);
+  });
+
+  it("Flags budget.routes at the limit and past it, naming the Route and keeping it pending", () => {
+    expect(exits("action", 3, 3)).toEqual({ kind: "flag", reason: "budget.routes", detail: "Route back to implement: 3 of 3 used; Extend to take it", pending: take });
+    expect(exits("check", 5, 3)).toMatchObject({ kind: "flag", detail: "Route back to implement: 5 of 3 used; Extend to take it", pending: { chosenBy: "check" } });
+    expect(exits("agent", 0, 0)).toMatchObject({ kind: "flag", reason: "budget.routes" });
+  });
+
+  it("never refuses a human's pick", () => {
+    expect(exits("human", 3, 3)).toEqual({ ...take, chosenBy: "human" });
+  });
+
+  it("counts only the picked Route, leaves one with no count uncapped, and fails a failed run first", () => {
+    expect(decide({ stage, pick: { route: "ahead", note: null, by: "action" }, end: ok, counts: { back: { used: 3, limit: 3 } } })).toMatchObject({ kind: "route", route: "ahead" });
+    expect(decide({ stage, pick: { route: "back", note: null, by: "action" }, end: { succeeded: false, lastLine: null }, counts: { back: { used: 3, limit: 3 } } })).toMatchObject({ kind: "failed" });
+    expect(decide({ stage, pick: null, end: ok, counts: { back: { used: 3, limit: 3 } } })).toEqual({ kind: "walk" });
   });
 
   describe("with an agent's pick and a check's (LASSO-192)", () => {
@@ -149,29 +179,29 @@ describe("the Route decision", () => {
     const done = { succeeded: true, lastLine: null };
 
     it("takes a check's pick alone, chosen by the check", () => {
-      expect(decide({ stage, pick: null, check: checked("back", "flaky"), end: done })).toMatchObject({ kind: "route", route: "back", to: "implement", note: "flaky", chosenBy: "check" });
+      expect(decide({ stage, pick: null, check: checked("back", "flaky"), end: done, counts: {} })).toMatchObject({ kind: "route", route: "back", to: "implement", note: "flaky", chosenBy: "check" });
     });
 
     it("takes an agent's pick alone, with no check pick or a null one", () => {
-      expect(decide({ stage, pick: agent("ahead"), check: null, end: done })).toMatchObject({ kind: "route", route: "ahead", chosenBy: "agent" });
+      expect(decide({ stage, pick: agent("ahead"), check: null, end: done, counts: {} })).toMatchObject({ kind: "route", route: "ahead", chosenBy: "agent" });
     });
 
     it("takes the same Route once, as the agent's, its note falling back to the check's", () => {
-      expect(decide({ stage, pick: agent("back", "agent says"), check: checked("back", "check says"), end: done })).toMatchObject({ kind: "route", route: "back", note: "agent says", chosenBy: "agent" });
-      expect(decide({ stage, pick: agent("back", " "), check: checked("back", "check says"), end: done })).toMatchObject({ note: "check says", chosenBy: "agent" });
+      expect(decide({ stage, pick: agent("back", "agent says"), check: checked("back", "check says"), end: done, counts: {} })).toMatchObject({ kind: "route", route: "back", note: "agent says", chosenBy: "agent" });
+      expect(decide({ stage, pick: agent("back", " "), check: checked("back", "check says"), end: done, counts: {} })).toMatchObject({ note: "check says", chosenBy: "agent" });
     });
 
     it("is a conflict when the two pick different Routes, showing both", () => {
-      expect(decide({ stage, pick: agent("back", "again"), check: checked("ahead"), end: done })).toEqual({ kind: "conflict", pick: agent("back", "again"), check: checked("ahead") });
+      expect(decide({ stage, pick: agent("back", "again"), check: checked("ahead"), end: done, counts: {} })).toEqual({ kind: "conflict", pick: agent("back", "again"), check: checked("ahead") });
     });
 
     it("ignores a pick the Stage does not declare, so the other is taken alone", () => {
-      expect(decide({ stage, pick: agent("gone"), check: checked("ahead"), end: done })).toMatchObject({ kind: "route", route: "ahead", chosenBy: "check" });
-      expect(decide({ stage, pick: agent("back"), check: checked("gone"), end: done })).toMatchObject({ kind: "route", route: "back", chosenBy: "agent" });
+      expect(decide({ stage, pick: agent("gone"), check: checked("ahead"), end: done, counts: {} })).toMatchObject({ kind: "route", route: "ahead", chosenBy: "check" });
+      expect(decide({ stage, pick: agent("back"), check: checked("gone"), end: done, counts: {} })).toMatchObject({ kind: "route", route: "back", chosenBy: "agent" });
     });
 
     it("fails a run that did not succeed, naming the run's own pick", () => {
-      expect(decide({ stage, pick: agent("back"), check: checked("ahead"), end: { succeeded: false, lastLine: null } })).toEqual({ kind: "failed", untaken: agent("back") });
+      expect(decide({ stage, pick: agent("back"), check: checked("ahead"), end: { succeeded: false, lastLine: null }, counts: {} })).toEqual({ kind: "failed", untaken: agent("back") });
     });
   });
 });
@@ -541,5 +571,151 @@ describe("Send to Stage", () => {
     const abandoned = await lasso.api<TicketDetail>(`/api/tickets/${ticket.id}/abandon`, { method: "POST", body: "{}" });
     expect(abandoned.send).toBeNull();
     await expect(send(lasso, ticket.id, { stage: "ship" })).rejects.toThrow("is abandoned");
+  });
+});
+
+describe("the Route Budget", () => {
+  // back has no budget: of its own, so the global budget.routes caps it; again sets its own.
+  const LOOP = `stages:
+  - name: implement
+    prompt: Do the work.
+  - action: gate
+    routes:
+      back: { to: implement, append: Fix what the gate found. }
+      again: { to: implement, budget: 4 }
+  - name: polish
+    prompt: Polish.
+    human: true
+`;
+  const extend = (lasso: Lasso, id: string, body: unknown) => lasso.api<TicketDetail>(`/api/tickets/${id}/extend`, { method: "POST", body: json(body) });
+  const routeCount = (lasso: Lasso, id: string, route: string) => visitsOf(lasso, id).filter((v) => v.route === route).length;
+
+  it("takes a Route three times by default, then Flags budget.routes at the source without moving", async () => {
+    const lasso = await lassoWith(LOOP);
+    await gate(lasso, ...Array.from({ length: 4 }, (_, i) => `lasso route back --note "lap ${i + 1}"`));
+    const ticket = await add(lasso);
+    const detail = await rested(lasso, ticket.id);
+    expect(detail.stage.name).toBe("gate");
+    expect(detail.flag).toMatchObject({ reason: "budget.routes", detail: "Route back to implement: 3 of 3 used; Extend to take it" });
+    const visits = visitsOf(lasso, ticket.id);
+    // Each lap is a new Visit; the count carries across them.
+    expect(visits.map((v) => v.stage)).toEqual(["implement", "gate", "implement", "gate", "implement", "gate", "implement", "gate"]);
+    expect(visits.at(-1)).toMatchObject({ stage: "gate", picked_route: "back", picked_note: "lap 4", picked_by: "action" });
+    expect(routeCount(lasso, ticket.id, "back")).toBe(3);
+    expect(await lasso.runner.calls()).toHaveLength(4);
+    await waitFor(async () => ((await lasso.notifications()).some((n) => n.body === "budget.routes: Route back to implement: 3 of 3 used; Extend to take it") ? true : null), "the Flag's notification");
+  });
+
+  it("lets a Route's budget: beat the global limit, and the Ticket's limit beat both", async () => {
+    const lasso = await lassoWith(LOOP, { budget: { routes: 1 } });
+    await gate(lasso, "lasso route back", "lasso route back", "lasso route again", "lasso route again", "lasso route again");
+    const ticket = await add(lasso);
+    let detail = await rested(lasso, ticket.id);
+    expect(detail.flag).toMatchObject({ reason: "budget.routes", detail: "Route back to implement: 1 of 1 used; Extend to take it" });
+
+    // The Ticket's limit of 2 lets back go round once more, and caps again below its own budget: 4.
+    await extend(lasso, ticket.id, { routes: 2 });
+    detail = await rested(lasso, ticket.id);
+    expect(detail.flag).toMatchObject({ reason: "budget.routes", detail: "Route again to implement: 2 of 2 used; Extend to take it" });
+    expect(routeCount(lasso, ticket.id, "back")).toBe(2);
+    expect(routeCount(lasso, ticket.id, "again")).toBe(2);
+
+    // Cleared, the Ticket layer falls back to again's own budget: 4, and the pending Route is taken.
+    await extend(lasso, ticket.id, { routes: null });
+    detail = await rested(lasso, ticket.id);
+    expect(detail.flag).toBeNull();
+    expect(detail.stage.name).toBe("polish");
+    expect(routeCount(lasso, ticket.id, "again")).toBe(3);
+  });
+
+  it("Extend takes the pending Route once the Ticket's limit allows it, and leaves the Flag while it does not", async () => {
+    const lasso = await lassoWith(LOOP, { budget: { routes: 1 } });
+    await gate(lasso, "lasso route back", 'lasso route back; echo "still red"');
+    const ticket = await add(lasso);
+    await rested(lasso, ticket.id);
+
+    const unchanged = await extend(lasso, ticket.id, { routes: 1 });
+    expect(unchanged.flag).toMatchObject({ reason: "budget.routes" });
+    expect(visitsOf(lasso, ticket.id)).toHaveLength(4);
+
+    const extended = await extend(lasso, ticket.id, { routes: 2 });
+    expect(extended.flag).toBeNull();
+    expect(extended.stage.name).toBe("implement");
+    const visits = visitsOf(lasso, ticket.id);
+    // The pending pick is taken as the Action's, with the note it would have carried.
+    expect(visits.at(-1)).toMatchObject({ stage: "implement", arrived_by: "route", route: "back", chosen_by: "action", text: "Fix what the gate found.", note: "still red", from_visit: visits.at(-2)!.id });
+    expect(routeCount(lasso, ticket.id, "back")).toBe(2);
+    expect((await detailOf(lasso, ticket.id)).budget.ticket.routes).toBe(2);
+  });
+
+  it("refuses a Route limit that is not a whole number", async () => {
+    const lasso = await lassoWith(LOOP);
+    const ticket = await add(lasso);
+    await expect(extend(lasso, ticket.id, { routes: 1.5 })).rejects.toThrow(/routes must be a whole number of 0 or more/);
+  });
+
+  it("Mark done and Skip walk forward, leaving the pick unused", async () => {
+    for (const lever of ["done", "skip"]) {
+      const lasso = await lassoWith(LOOP, { budget: { routes: 0 } });
+      await gate(lasso, "lasso route back");
+      const ticket = await add(lasso);
+      expect((await rested(lasso, ticket.id)).flag).toMatchObject({ reason: "budget.routes", detail: "Route back to implement: 0 of 0 used; Extend to take it" });
+      const after = await lasso.api<TicketDetail>(`/api/tickets/${ticket.id}/${lever}`, { method: "POST", body: "{}" });
+      expect(after.flag).toBeNull();
+      expect(after.stage.name).toBe("polish");
+      const visits = visitsOf(lasso, ticket.id);
+      expect(visits.map((v) => [v.stage, v.arrived_by])).toEqual([["implement", "intake"], ["gate", "walk"], ["polish", "walk"]]);
+      expect(visits[1]!.picked_route).toBe("back");
+    }
+  });
+
+  it("Retry re-runs the source Stage, whose pick is judged afresh against counts that never reset", async () => {
+    const lasso = await lassoWith(LOOP, { budget: { routes: 1 } });
+    await gate(lasso, "lasso route back", "lasso route back", "lasso route back", 'echo "clean"');
+    const ticket = await add(lasso);
+    await rested(lasso, ticket.id);
+    expect(visitsOf(lasso, ticket.id)).toHaveLength(4);
+
+    // The retried gate picks back again: still spent, it Flags again on the same Visit.
+    await lasso.api(`/api/tickets/${ticket.id}/retry`, { method: "POST", body: "{}" });
+    let detail = await rested(lasso, ticket.id);
+    expect(detail.flag).toMatchObject({ reason: "budget.routes", detail: "Route back to implement: 1 of 1 used; Extend to take it" });
+    expect(visitsOf(lasso, ticket.id)).toHaveLength(4);
+
+    // A retry that picks nothing walks forward.
+    await lasso.api(`/api/tickets/${ticket.id}/retry`, { method: "POST", body: "{}" });
+    detail = await rested(lasso, ticket.id);
+    expect(detail.flag).toBeNull();
+    expect(detail.stage.name).toBe("polish");
+    expect(routeCount(lasso, ticket.id, "back")).toBe(1);
+  });
+
+  it("holds a met check's pick to the Budget too, and Extend takes it as the check's", async () => {
+    const lasso = await lassoWith(CHECKED, { budget: { routes: 1 } });
+    await check(lasso, 'lasso route again --note "first"', 'lasso route again --note "second"', 'echo "all good"');
+    const ticket = await add(lasso);
+    const flagged = await rested(lasso, ticket.id);
+    expect(flagged.flag).toMatchObject({ reason: "budget.routes", detail: "Route again to implement: 1 of 1 used; Extend to take it" });
+    expect(visitsOf(lasso, ticket.id).at(-1)).toMatchObject({ stage: "implement", picked_route: "again", picked_note: "second", picked_by: "check" });
+
+    await extend(lasso, ticket.id, { routes: 2 });
+    const detail = await rested(lasso, ticket.id);
+    expect(detail.flag).toBeNull();
+    expect(detail.stage.name).toBe("polish");
+    const visits = visitsOf(lasso, ticket.id);
+    expect(visits.map((v) => v.stage)).toEqual(["implement", "implement", "implement", "polish"]);
+    expect(visits[2]).toMatchObject({ arrived_by: "route", route: "again", chosen_by: "check", note: "second" });
+  });
+
+  it("does not take a spent check pick left pending once a retried run's check picks nothing", async () => {
+    const lasso = await lassoWith(CHECKED, { budget: { routes: 0 } });
+    await check(lasso, "lasso route again", 'echo "all good"');
+    const ticket = await add(lasso);
+    expect((await rested(lasso, ticket.id)).flag).toMatchObject({ reason: "budget.routes" });
+    await lasso.api(`/api/tickets/${ticket.id}/retry`, { method: "POST", body: "{}" });
+    const detail = await rested(lasso, ticket.id);
+    expect(detail.flag).toBeNull();
+    expect(detail.stage.name).toBe("polish");
+    expect(visitsOf(lasso, ticket.id).map((v) => [v.stage, v.arrived_by])).toEqual([["implement", "intake"], ["polish", "walk"]]);
   });
 });

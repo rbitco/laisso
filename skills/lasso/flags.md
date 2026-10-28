@@ -13,6 +13,7 @@ own log is `<Lasso home>/lasso.log` (one JSON line per event, e.g.
 | `outcome.exhausted` / `outcome.interrupted` | the Runner hit its own limit, or the process died; retried while attempts remain | raise `attempts` or `wallTime`, then Retry or Resume |
 | `budget.wall_time` | a headless Session ran past `wallTime` | raise the Stage's `budget.wallTime`, or Extend |
 | `budget.attempts` / `budget.rounds` / `budget.cost` | the Ticket used up its attempts, Rounds, or `spend` | Extend, or raise the Budget in the Pipeline or config.yaml |
+| `budget.routes` | an Action picked a Route already taken as many times as its limit allows; the Ticket stays at that Stage and the detail names the Route | Extend with a higher `routes` limit, which then takes the Route; or Mark done or Skip to walk forward instead, or Retry the Stage |
 | `artifact.missing` | the Session succeeded but the Stage's artifact is not there | check the prompt produces it; `tracker-spec` and `tracker-comment` always land here (see [pipelines.md](pipelines.md#artifacts)) |
 | `artifact.error` | the Stage's [check Action](pipelines.md#check-actions) broke: it exited other than 0 or 1, timed out, or could not start (an Action missing for the repo, a param not supplied, the worktree gone) | run the Action's `run` by hand in the worktree with the `LASSO_*` variables set; fix it, then Retry, or Mark done |
 | `route.conflict` | the Stage's agent and its check Action picked different [Routes](pipelines.md#routes); the detail names both picks | decide which way the Ticket goes: Mark done to walk forward, or Retry, Skip, or Abandon |
@@ -30,7 +31,8 @@ than `open` or `closed` is a Pipeline mistake, not a tracker one: see
 
 The exits, in the dashboard and the API: **Retry** (a fresh Session of the
 current Stage), **Resume** (re-enter the held Session where the Runner
-allows), **Extend** (raise the Ticket's own Budget), **Mark done** (accept
+allows), **Extend** (raise the Ticket's own Budget; on a `budget.routes` Flag, raising
+`routes` far enough also takes the Route that was picked), **Mark done** (accept
 and advance), **Skip** (drop the Stage and advance; also offered on a Stage that has not started, see [pipelines.md](pipelines.md#runner-stage)), **Take over in
 terminal** (re-enter the Session in a terminal and work the Stage as a human
 Stage, until Hand back returns it to Lasso), **Send to Stage** (move the

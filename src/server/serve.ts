@@ -131,7 +131,8 @@ export async function serve(opts: ServeOptions): Promise<number> {
   const prs = new PullRequests(log);
   const teardown = new Teardown({ config, home, tickets, links, log, prs });
   const checks = new ActionChecks({ config, home, links, visits, log });
-  const progress: Progress = new Progress({ home, tickets, versions, sessions, visits, links, log, notifier, mirror, prProbe: (ticket) => () => review.probe(ticket), actionProbe: (ticket, stage) => checks.probe(ticket, stage), checkRun: (id) => checks.liveRun(id), teardown });
+  const budgets = new Budgets({ config, sessions, links, visits });
+  const progress: Progress = new Progress({ home, tickets, versions, sessions, visits, links, budgets, log, notifier, mirror, prProbe: (ticket) => () => review.probe(ticket), actionProbe: (ticket, stage) => checks.probe(ticket, stage), checkRun: (id) => checks.liveRun(id), teardown });
   // review: is read from the live config per Ticket, so a Config page save applies on the next poll; the gh login is read once.
   const ignored = async (ticket: TicketRow) => {
     const rules = reviewFor(config, ticket.repo);
@@ -139,7 +140,6 @@ export async function serve(opts: ServeOptions): Promise<number> {
   };
   const review: Review = new Review({ tickets, sessions, feedback, links, progress, prs, checks, log, ignored });
   const terminal = new Terminal({ config, home, sessions, visits, links, log, flag: (ticket, reason, detail) => progress.flag(ticket, reason, detail) });
-  const budgets = new Budgets({ config, sessions, links, visits });
   const queue = new Queue({ home, tickets, sessions, progress, log, cap: config.concurrency });
   const runs = new Runs({ config, home, tickets, links, sessions, visits, log, progress, budgets, queue, review, checks, stdoutWritten: (ticket, session) => changes.emit({ kind: "stdout", ticket, session }), ended: () => tick.kick("session-end") });
   const actions = new Actions({
@@ -151,6 +151,7 @@ export async function serve(opts: ServeOptions): Promise<number> {
     links,
     log,
     progress,
+    budgets,
     stdoutWritten: (ticket, session) => changes.emit({ kind: "stdout", ticket, session }),
     ended: () => tick.kick("session-end"),
   });

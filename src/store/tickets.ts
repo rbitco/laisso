@@ -32,6 +32,8 @@ export interface TicketRow {
   budget_attempts: number | null;
   budget_wall_time: string | null;
   budget_spend: number | null;
+  /** The Ticket's one limit for each of its Routes, over the Route's own budget: and the global budget.routes. */
+  budget_routes: number | null;
   /** When a tick first found a headless Stage of this Ticket ready to start; the queue is ordered by it. Cleared when a Session starts or the Ticket stops being runnable. */
   runnable_since: string | null;
   /** When the Ticket became done or Abandoned; the retention sweep counts from it. */

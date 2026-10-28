@@ -19,6 +19,8 @@ export interface Budget {
   attempts: Resolved<number>;
   wallTime: Resolved<string>;
   spend: Resolved<number>;
+  /** The Route limit before any Route's own budget: (see routeBudgets): the Ticket's, else the global one. */
+  routes: Resolved<number>;
 }
 
 /** The Ticket layer as set: a null dimension defers to the Pipeline and the global default. */
@@ -27,6 +29,8 @@ export interface TicketBudget {
   attempts: number | null;
   wallTime: string | null;
   spend: number | null;
+  /** One limit for every Route of the Ticket, over each Route's own budget:. */
+  routes: number | null;
 }
 
 /** What the Ticket has consumed, derived from its Session rows and never reset; a new Visit counts attempts and Rounds afresh. */
@@ -46,7 +50,27 @@ export interface Refusal {
 }
 
 export function ticketBudget(ticket: TicketRow): TicketBudget {
-  return { rounds: ticket.budget_rounds, attempts: ticket.budget_attempts, wallTime: ticket.budget_wall_time, spend: ticket.budget_spend };
+  return { rounds: ticket.budget_rounds, attempts: ticket.budget_attempts, wallTime: ticket.budget_wall_time, spend: ticket.budget_spend, routes: ticket.budget_routes };
+}
+
+/** A Route's Budget for a Ticket: times taken by an agent, Action or check, and its limit with the layer it came from. */
+export interface RouteBudget {
+  used: number;
+  limit: number;
+  source: BudgetLayer;
+}
+
+/**
+ * The Route Budget of each of a Stage's Routes: the Ticket's Route limit, else the Route's own `budget:`, else the
+ * global `budget.routes`. `used` is the count by Route name from the Visit ledger (LASSO-191).
+ */
+export function routeBudgets(config: Config, stage: Stage, ticket: TicketRow, used: Record<string, number>): Record<string, RouteBudget> {
+  return Object.fromEntries(
+    Object.entries(stage.routes ?? {}).map(([name, route]) => {
+      const { value, source } = pick(ticket.budget_routes, route.budget, config.budget.routes);
+      return [name, { used: used[name] ?? 0, limit: value, source }];
+    }),
+  );
 }
 
 export function resolveBudget(config: Config, pipeline: Pipeline | null, stage: Stage | null, ticket: TicketRow): Budget {
@@ -57,6 +81,7 @@ export function resolveBudget(config: Config, pipeline: Pipeline | null, stage: 
     attempts: pick(own.attempts, stageBudget.attempts, config.budget.attempts),
     wallTime: pick(own.wallTime, stageBudget.wallTime, config.budget.wallTime),
     spend: pick(own.spend, pipeline?.budget.spend, config.budget.spend),
+    routes: pick(own.routes, undefined, config.budget.routes),
   };
 }
 
@@ -149,6 +174,8 @@ export interface BudgetView {
   attempts: GaugeView;
   wallTime: GaugeView & { limitText: string };
   spend: GaugeView;
+  /** The Route limit the Ticket layer editor shows when the Ticket sets none; not a gauge. */
+  routes: Resolved<number>;
   ticket: TicketBudget;
 }
 
@@ -159,6 +186,7 @@ export function budgetView(budget: Budget, usage: Usage, ticket: TicketRow, stag
     attempts: { used: usage.attempts, limit: budget.attempts.value, source: budget.attempts.source },
     wallTime: { used: usage.wallTimeMs, limit: parseDuration(budget.wallTime.value), source: budget.wallTime.source, limitText: budget.wallTime.value, ...untracked },
     spend: { used: usage.spend, limit: budget.spend.value, source: budget.spend.source, ...untracked },
+    routes: budget.routes,
     ticket: ticketBudget(ticket),
   };
 }

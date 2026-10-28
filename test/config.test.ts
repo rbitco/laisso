@@ -53,6 +53,13 @@ describe("loadConfig", () => {
     expect(loadConfig(homeWith("")).concurrency).toBe(3);
   });
 
+  it("caps each Route at 3 by default, and reads budget.routes as a whole number", () => {
+    expect(loadConfig(homeWith("")).budget.routes).toBe(3);
+    expect(loadConfig(homeWith(DEFAULT_CONFIG_YAML)).budget.routes).toBe(3);
+    expect(loadConfig(homeWith("budget: { routes: 0 }\n")).budget.routes).toBe(0);
+    expect(() => loadConfig(homeWith("budget: { routes: 1.5 }\n"))).toThrow(/budget\.routes/);
+  });
+
   it("reads Actions, with params and a timeout defaulting to 5m, and refuses a malformed one", () => {
     const yaml = (actions: string) => `actions:\n${actions}`;
     expect(loadConfig(homeWith(yaml("  notify:\n    params: [channel]\n    run: echo hi\n  slack.post:\n    timeout: 30s\n    run: ./post\n"))).actions).toEqual({

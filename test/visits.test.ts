@@ -172,8 +172,9 @@ describe("the Visits migration", () => {
         DROP INDEX sessions_visit;
         ALTER TABLE sessions DROP COLUMN visit;
         DROP TABLE visits;
+        ALTER TABLE tickets DROP COLUMN budget_routes;
       `);
-      db.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run(String(SCHEMA_VERSION - 2));
+      db.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run(String(SCHEMA_VERSION - 3));
     });
   }
 

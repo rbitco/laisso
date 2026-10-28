@@ -25,6 +25,12 @@ export interface RunEnd {
   lastLine: string | null;
 }
 
+/** How often a Route has been taken for the Ticket by an agent, Action or check, and how often it may be. */
+export interface RouteCount {
+  used: number;
+  limit: number;
+}
+
 export interface Leaving {
   /** The Stage being left, with its Routes. */
   stage: Stage;
@@ -36,6 +42,8 @@ export interface Leaving {
    */
   check?: RoutePick | null;
   end: RunEnd;
+  /** The Stage's Routes by name, each counted and with its resolved limit (the Route Budget). One missing is not capped. */
+  counts: Record<string, RouteCount>;
 }
 
 /** The Ticket takes a Route: the Visit it starts at `to` records these. */
@@ -59,11 +67,24 @@ export interface Conflict {
 }
 
 /**
- * Where the Ticket goes: walk forward to the next Stage as before Routes,
- * take a Route, Flag `route.conflict` when two picks disagree, or Flag
- * `outcome.failed` because the run failed, naming the pick that was not taken.
+ * The Ticket stays at the Stage, Flagged: an agent, Action or check picked a
+ * Route whose Budget is spent. `pending` is the Route it would have taken,
+ * which Extend takes once the Ticket's Route limit allows it.
  */
-export type Exit = { kind: "walk" } | TakeRoute | Conflict | { kind: "failed"; untaken: RoutePick | null };
+export interface RouteFlag {
+  kind: "flag";
+  reason: "budget.routes";
+  detail: string;
+  pending: TakeRoute;
+}
+
+/**
+ * Where the Ticket goes: walk forward to the next Stage as before Routes,
+ * take a Route, Flag `route.conflict` when two picks disagree, Flag
+ * `budget.routes` for a spent Route, or Flag `outcome.failed` because the
+ * run failed, naming the pick that was not taken.
+ */
+export type Exit = { kind: "walk" } | TakeRoute | Conflict | RouteFlag | { kind: "failed"; untaken: RoutePick | null };
 
 /**
  * An Action's pick is taken only when it exits 0; a failed run Flags as it
@@ -74,8 +95,13 @@ export type Exit = { kind: "walk" } | TakeRoute | Conflict | { kind: "failed"; u
  * When the Stage's own run and its check both pick: one pick, or the same
  * Route, is taken (the run's pick, its note falling back to the check's);
  * different Routes are a conflict for a human to settle.
+ *
+ * The Route to be taken, whoever picked it, is then held to its Budget: a
+ * pick by an agent, Action or check of a Route already taken up to its limit
+ * is not taken, and the Ticket Flags `budget.routes` with the Route pending.
+ * A human's pick is never counted and never refused.
  */
-export function decide({ stage, pick, check = null, end }: Leaving): Exit {
+export function decide({ stage, pick, check = null, end, counts }: Leaving): Exit {
   if (!end.succeeded) return { kind: "failed", untaken: pick };
   const own = declared(stage, pick);
   const checked = declared(stage, check);
@@ -84,7 +110,7 @@ export function decide({ stage, pick, check = null, end }: Leaving): Exit {
   if (!taken) return { kind: "walk" };
   const route = stage.routes![taken.route]!;
   const note = taken.note?.trim() || (taken === own ? checked?.note?.trim() : null) || end.lastLine?.trim() || null;
-  return {
+  const take: TakeRoute = {
     kind: "route",
     route: taken.route,
     to: route.to,
@@ -93,7 +119,13 @@ export function decide({ stage, pick, check = null, end }: Leaving): Exit {
     note,
     chosenBy: taken.by,
   };
+  const count = counts[taken.route];
+  if (taken.by !== "human" && count && count.used >= count.limit) {
+    return { kind: "flag", reason: "budget.routes", detail: `Route ${taken.route} to ${route.to}: ${count.used} of ${count.limit} used; Extend to take it`, pending: take };
+  }
+  return take;
 }
+
 
 /** The pick when the Stage declares its Route, else null. */
 function declared(stage: Stage, pick: RoutePick | null): RoutePick | null {

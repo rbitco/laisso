@@ -6,7 +6,7 @@ import { api } from "../api.ts";
 import { showNotice } from "../notice.tsx";
 import { message, ticketRoute } from "./ticket.ts";
 
-type GaugeKey = keyof TicketBudget;
+type GaugeKey = Exclude<keyof TicketBudget, "routes">;
 
 /**
  * The four gauges in the order shown: key, name, and the used/limit text. On a human Stage wall time and spend are
@@ -84,13 +84,17 @@ export function Gauges({ budget, onOpen }: { budget: BudgetView; onOpen: () => v
   );
 }
 
-const SUFFIX: Partial<Record<GaugeKey, string>> = { spend: " (USD)", wallTime: " (30m, 1h)" };
+const SUFFIX: Partial<Record<keyof TicketBudget, string>> = { spend: " (USD)", wallTime: " (30m, 1h)" };
 
-type Draft = Record<GaugeKey, string>;
+type Field = keyof TicketBudget;
+type Draft = Record<Field, string>;
 const draftOf = (t: TicketDetail): Draft => {
-  const v = (k: GaugeKey) => (t.budget.ticket[k] === null ? "" : String(t.budget.ticket[k]));
-  return { rounds: v("rounds"), attempts: v("attempts"), wallTime: v("wallTime"), spend: v("spend") };
+  const v = (k: Field) => (t.budget.ticket[k] === null ? "" : String(t.budget.ticket[k]));
+  return { rounds: v("rounds"), attempts: v("attempts"), wallTime: v("wallTime"), spend: v("spend"), routes: v("routes") };
 };
+
+/** The editor's fields: the four gauges, then the one limit for each of the Ticket's Routes (it has no gauge). */
+const FIELDS: Array<[Field, string]> = [...GAUGES.map(([k, name]): [Field, string] => [k, name]), ["routes", "times each Route"]];
 
 /**
  * The Ticket layer of the Budget, edited inline: a blank falls back to the Pipeline or global value. Save sends Extend
@@ -105,7 +109,7 @@ export function BudgetEditor({ ticket, onClose, onSaved }: { ticket: TicketDetai
   const submit = async (ev: FormEvent) => {
     ev.preventDefault();
     const body: Record<string, string | number | null> = {};
-    for (const [k] of GAUGES) {
+    for (const [k] of FIELDS) {
       const raw = draft[k].trim();
       if (raw !== "" && k !== "wallTime" && !/^\d+(\.\d+)?$/.test(raw)) {
         showNotice(k + " must be a number");
@@ -127,12 +131,12 @@ export function BudgetEditor({ ticket, onClose, onSaved }: { ticket: TicketDetai
 
   return (
     <form ref={form} className="editor" data-role="budget-editor" onSubmit={submit}>
-      {GAUGES.map(([k, name]) => {
-        const g = ticket.budget[k];
+      {FIELDS.map(([k, name]) => {
+        const placeholder = k === "wallTime" ? ticket.budget.wallTime.limitText : k === "routes" ? String(ticket.budget.routes.value) : String(ticket.budget[k].limit);
         return (
           <label key={k}>
             {name + (SUFFIX[k] ?? "")}
-            <input name={k} placeholder={k === "wallTime" ? ticket.budget.wallTime.limitText : String(g.limit)} value={draft[k]} onChange={(ev) => setDraft((d) => ({ ...d, [k]: ev.target.value }))} />
+            <input name={k} placeholder={placeholder} value={draft[k]} onChange={(ev) => setDraft((d) => ({ ...d, [k]: ev.target.value }))} />
           </label>
         );
       })}

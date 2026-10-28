@@ -304,6 +304,13 @@ const MIGRATIONS: Array<(db: DatabaseSync) => void> = [
   (db) => {
     db.exec(`ALTER TABLE visits ADD COLUMN replaces INTEGER NOT NULL DEFAULT 0;`);
   },
+  // The Route Budget (LASSO-191): the Ticket's Route limit, and who picked the Route a Visit is to leave by.
+  (db) => {
+    db.exec(`
+      ALTER TABLE tickets ADD COLUMN budget_routes INTEGER;
+      ALTER TABLE visits ADD COLUMN picked_by TEXT CHECK (picked_by IN ('agent', 'action', 'check', 'human'));
+    `);
+  },
 ];
 
 /**

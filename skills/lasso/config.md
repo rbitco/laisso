@@ -17,6 +17,7 @@ Unknown top-level keys are ignored.
 | `budget.attempts` | `2` | whole number, 0 or more: attempts per Stage |
 | `budget.wallTime` | `30m` | duration: wall time per headless Session |
 | `budget.spend` | `25` | number, 0 or more: agent spend per Ticket, USD |
+| `budget.routes` | `3` | whole number, 0 or more: times an agent, Action or check may take each Route of a Ticket (see [pipelines.md](pipelines.md#routes)) |
 | `tick` | `60` | whole number, 1 or more: seconds between Ticks |
 | `concurrency` | `3` | whole number, 1 or more: headless Sessions at once across all Tickets |
 | `retention` | `30` | whole number, 0 or more: days a done or Abandoned Ticket's directory is kept |

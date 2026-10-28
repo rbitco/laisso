@@ -34,7 +34,8 @@ const BUDGET: BudgetView = {
   attempts: { used: 1, limit: 3, source: "global" },
   wallTime: { used: 60_000, limit: 1_800_000, source: "global", limitText: "30m" },
   spend: { used: 0, limit: 5, source: "global" },
-  ticket: { rounds: null, attempts: null, wallTime: null, spend: null },
+  routes: { value: 3, source: "global" },
+  ticket: { rounds: null, attempts: null, wallTime: null, spend: null, routes: null },
 };
 
 const ago = (seconds: number) => new Date(Date.now() - seconds * 1000).toISOString();

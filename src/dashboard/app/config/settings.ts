@@ -6,6 +6,7 @@ export interface Draft {
   attempts: string;
   wallTime: string;
   spend: string;
+  routes: string;
   tick: string;
   concurrency: string;
   retention: string;
@@ -19,7 +20,7 @@ export type TextField = Exclude<keyof Draft, "notifications" | "terminal">;
 
 /** What PATCH /api/config takes from this form: only the keys that changed; null clears a key back to its default. */
 export interface SettingsPatch {
-  budget?: Partial<Record<"rounds" | "attempts" | "spend", number | null> & { wallTime: string | null }>;
+  budget?: Partial<Record<"rounds" | "attempts" | "spend" | "routes", number | null> & { wallTime: string | null }>;
   tick?: number | null;
   concurrency?: number | null;
   retention?: number | null;
@@ -46,6 +47,7 @@ export function draftOf(config: Config): Draft {
     attempts: String(budget.attempts),
     wallTime: budget.wallTime,
     spend: String(budget.spend),
+    routes: String(budget.routes),
     tick: String(config.tick),
     concurrency: String(config.concurrency),
     retention: String(config.retention),
@@ -90,7 +92,7 @@ function numberOrNull(draft: Draft, field: TextField): number | null {
 export function settingsPatch(config: Config, draft: Draft): SettingsPatch {
   const patch: SettingsPatch = {};
   const budget: NonNullable<SettingsPatch["budget"]> = {};
-  for (const key of ["rounds", "attempts", "spend"] as const) {
+  for (const key of ["rounds", "attempts", "spend", "routes"] as const) {
     const value = numberOrNull(draft, key);
     if (value !== config.budget[key]) budget[key] = value;
   }

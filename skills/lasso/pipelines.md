@@ -151,7 +151,7 @@ hyphens, unique in the Stage).
 | `when` | optional text: when to choose this Route |
 | `append` | optional text added after the target Stage's prompt |
 | `replace` | optional text used in place of the target Stage's prompt; give `append` or `replace`, not both |
-| `budget` | optional whole number, 0 or more: how many times the Route may be taken (not yet enforced) |
+| `budget` | optional whole number, 0 or more: how many times an agent, Action or check may take the Route for a Ticket (see [Route Budget](#route-budget)) |
 
 Saving from the dashboard, loading the file, and Intake all refuse a
 Pipeline whose Route breaks a rule, naming the Stage and Route.
@@ -179,6 +179,18 @@ that Visit gets the Route's `append` text after the Stage's prompt, or its
 line naming the Route and its note: the `--note`, else the command's last
 line of output. A later Visit to the Stage gets none of it. Stages a Route
 passes over are not run and not marked skipped.
+
+### Route Budget
+
+Each Route counts how often it was taken for the Ticket by an agent, Action
+or check; a human's choice never counts. Counts never reset, and are matched
+by the source Stage's name and the Route's name. The limit is the Ticket's
+own (set by Extend, one value for all its Routes), else the Route's
+`budget:`, else config.yaml's `budget.routes` (default 3). A pick of a Route
+already at its limit is not taken: the Ticket Flags `budget.routes` at the
+source Stage, naming the Route. Extend with a higher `routes` limit takes
+the Route; Mark done and Skip walk forward instead; Retry runs the Stage
+again.
 
 ```yaml lasso-pipeline
 stages:

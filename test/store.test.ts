@@ -43,37 +43,46 @@ function storeAt(file: string, schema: number): void {
   db.close();
 }
 
-/** A store one migration behind: the last migration (a Visit's replaces) undone. */
+/** A store one migration behind: the last migration (the Route Budget's columns) undone. */
 function storeOneBehind(file: string): DatabaseSync {
   new Store(file).close();
   const db = new DatabaseSync(file);
   db.exec("PRAGMA journal_mode = WAL");
-  db.exec(`ALTER TABLE visits DROP COLUMN replaces;`);
+  db.exec(`ALTER TABLE tickets DROP COLUMN budget_routes;
+           ALTER TABLE visits DROP COLUMN picked_by;`);
   db.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run(String(SCHEMA_VERSION - 1));
   return db;
 }
 
-/** A store from before Visits: the last two migrations undone, so checks and Skips are kept on the Ticket again. */
-function storeBeforeVisits(file: string): DatabaseSync {
+/** A store from before a Visit's replaces: the last two migrations undone. */
+function storeBeforeReplaces(file: string): DatabaseSync {
   const db = storeOneBehind(file);
+  db.exec(`ALTER TABLE visits DROP COLUMN replaces;`);
+  db.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run(String(SCHEMA_VERSION - 2));
+  return db;
+}
+
+/** A store from before Visits: the last three migrations undone, so checks and Skips are kept on the Ticket again. */
+function storeBeforeVisits(file: string): DatabaseSync {
+  const db = storeBeforeReplaces(file);
   db.exec(`DROP INDEX sessions_visit;
            ALTER TABLE sessions DROP COLUMN visit;
            DROP TABLE visits;
            ALTER TABLE tickets ADD COLUMN artifact_checks TEXT;
            ALTER TABLE tickets ADD COLUMN skipped_stages TEXT;`);
-  db.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run(String(SCHEMA_VERSION - 2));
-  return db;
-}
-
-/** A store from before each Feedback item named its PR: the last three migrations undone. */
-function storeBeforeItemPrs(file: string): DatabaseSync {
-  const db = storeBeforeVisits(file);
-  db.exec(`ALTER TABLE feedback_item DROP COLUMN pr;`);
   db.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run(String(SCHEMA_VERSION - 3));
   return db;
 }
 
-/** A store from before PR links: the last four migrations undone, so each Ticket holds its one PR again. */
+/** A store from before each Feedback item named its PR: the last four migrations undone. */
+function storeBeforeItemPrs(file: string): DatabaseSync {
+  const db = storeBeforeVisits(file);
+  db.exec(`ALTER TABLE feedback_item DROP COLUMN pr;`);
+  db.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run(String(SCHEMA_VERSION - 4));
+  return db;
+}
+
+/** A store from before PR links: the last five migrations undone, so each Ticket holds its one PR again. */
 function storeBeforeLinks(file: string): DatabaseSync {
   const db = storeBeforeItemPrs(file);
   db.exec(`DROP TABLE ticket_prs;
@@ -81,7 +90,7 @@ function storeBeforeLinks(file: string): DatabaseSync {
            ALTER TABLE tickets ADD COLUMN feedback_watermark TEXT;
            ALTER TABLE tickets ADD COLUMN feedback_due TEXT;
            ALTER TABLE tickets ADD COLUMN pr_status TEXT;`);
-  db.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run(String(SCHEMA_VERSION - 4));
+  db.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run(String(SCHEMA_VERSION - 5));
   return db;
 }
 
@@ -137,7 +146,7 @@ describe("the store backup before migrating", () => {
     try {
       expect(db.prepare(`SELECT pipeline FROM pipeline_versions`).all()).toEqual([{ pipeline: "work" }]);
       const columns = (db.prepare(`PRAGMA table_info(visits)`).all() as Array<{ name: string }>).map((c) => c.name);
-      expect(columns).not.toContain("replaces");
+      expect(columns).not.toContain("picked_by");
     } finally {
       db.close();
     }

@@ -91,6 +91,7 @@ export function SettingsForm({ config, onSaved }: { config: Config; onSaved: (sa
           {text("attempts", "Attempts per Stage")}
           {text("wallTime", "Time per Session", { numeric: false, placeholder: "30m" })}
           {text("spend", "Spend per Ticket (USD)")}
+          {text("routes", "Times each Route may be taken")}
         </div>
       </Setting>
       <Setting title="Server" about="How often Lasso checks for work, how much it runs at once, and how long it keeps finished Tickets.">

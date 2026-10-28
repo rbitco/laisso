@@ -11,6 +11,7 @@ import type { Runs } from "./runs.ts";
 import type { Terminal } from "./terminal.ts";
 import type { Teardown } from "./teardown.ts";
 import { resumeRefusal, type Overrides } from "./overrides.ts";
+import { decide } from "../route/route.ts";
 
 export interface ExitsDeps {
   tickets: Tickets;
@@ -31,6 +32,8 @@ export interface ExtendRequest {
   attempts?: number | null;
   wallTime?: string | null;
   spend?: number | null;
+  /** The Ticket's limit for each of its Routes. */
+  routes?: number | null;
 }
 
 /**
@@ -162,19 +165,25 @@ export class Exits {
     return tickets.get(ticket.id)!;
   }
 
-  /** Extend: set the Ticket layer of the Budget. A Flag for a budget.* reason clears once the next Session is affordable again. */
+  /**
+   * Extend: set the Ticket layer of the Budget. A Flag for a budget.* reason clears once the next Session is
+   * affordable again; a budget.routes one once the pending Route may be taken, which the Ticket then takes.
+   */
   async extend(ticket: TicketRow, request: ExtendRequest): Promise<TicketRow> {
     const { tickets, progress, budgets, log, tick } = this.deps;
     if (ticket.state !== "active") throw new TriggerError(`Ticket ${ticket.reference ?? ticket.id} is ${ticket.state}`);
-    if (typeof request !== "object" || request === null) throw new TriggerError("nothing to extend: pass rounds, attempts, wallTime or spend");
+    const nothing = "nothing to extend: pass rounds, attempts, wallTime, spend or routes";
+    if (typeof request !== "object" || request === null) throw new TriggerError(nothing);
     const patch: Partial<TicketRow> = {};
     if ("rounds" in request) patch.budget_rounds = count(request.rounds, "rounds");
     if ("attempts" in request) patch.budget_attempts = count(request.attempts, "attempts");
     if ("wallTime" in request) patch.budget_wall_time = duration(request.wallTime);
     if ("spend" in request) patch.budget_spend = money(request.spend);
-    if (Object.keys(patch).length === 0) throw new TriggerError("nothing to extend: pass rounds, attempts, wallTime or spend");
+    if ("routes" in request) patch.budget_routes = count(request.routes, "routes");
+    if (Object.keys(patch).length === 0) throw new TriggerError(nothing);
     let updated = tickets.update(ticket.id, patch);
     log.info("ticket.extended", { ticket: ticket.id, ...patch });
+    if (updated.flagged_at && updated.flag_reason === "budget.routes") return this.takePending(updated);
     if (updated.flagged_at && updated.flag_reason?.startsWith("budget.")) {
       const current = progress.current(updated);
       if (!("problem" in current) && !budgets.refusal(updated, current.pipeline, current.stage)) {
@@ -182,6 +191,21 @@ export class Exits {
       }
     }
     return updated;
+  }
+
+  /**
+   * A `budget.routes` Flag after Extend: the Route decision is asked again for the pending pick, and once the
+   * Ticket's limit allows it the Flag clears and the Ticket takes the Route, counted as its picker's. Still spent,
+   * or with no pick the Stage still declares, the Ticket stays Flagged.
+   */
+  private async takePending(ticket: TicketRow): Promise<TicketRow> {
+    const { progress, budgets } = this.deps;
+    const current = progress.current(ticket);
+    const pick = progress.pendingPick(ticket);
+    if ("problem" in current || !pick) return ticket;
+    const exit = decide({ stage: current.stage, pick, end: { succeeded: true, lastLine: null }, counts: budgets.routes(ticket, current.stage) });
+    if (exit.kind !== "route") return ticket;
+    return this.cleared(ticket, "extend", (cleared) => progress.leave(cleared, exit));
   }
 
   /**
