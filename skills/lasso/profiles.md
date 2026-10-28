@@ -30,6 +30,11 @@ How `permission` maps, per Runner:
 | `edits` | `acceptEdits` | `-s workspace-write` |
 | `full` | `bypassPermissions` | `--dangerously-bypass-approvals-and-sandbox` |
 
+Codex's workspace-write sandbox (every row but `full`) also gets
+`-c sandbox_workspace_write.network_access=true`: without it a Codex
+Session cannot reach Lasso on localhost, so `lasso route` and
+`lasso pr link` fail.
+
 Headless Claude Sessions always run with permission prompts off, whatever
 the permission, since nobody is there to answer.
 

@@ -18,6 +18,9 @@ interface Item {
  * are link-form mentions by absolute path, which Codex resolves itself:
  * a path outside its skill roots is ignored without a word, so a Stage
  * whose skills live elsewhere runs under a profile with `skills_dir`.
+ * Its workspace-write sandbox turns the network off, loopback included, so
+ * every workspace-write form turns it back on: `lasso route` and
+ * `lasso pr link` call Lasso on localhost from inside the Session.
  */
 
 /** A profile's permission as Codex's flags, each accepted top-level, on exec and on resume (research/runner-cli-flags). */
@@ -26,6 +29,9 @@ const PERMISSION_FLAGS: Record<Permission, string[]> = {
   edits: ["-s", "workspace-write"],
   full: ["--dangerously-bypass-approvals-and-sandbox"],
 };
+
+/** Network on under workspace-write (the baseline, edits, and auto's review); full has no sandbox to open. Probed on Codex 0.162. */
+const NETWORK = ["-c", "sandbox_workspace_write.network_access=true"];
 
 /** Codex's thread index; the name carries its schema version, so a newer Codex leaves resume finding nothing. */
 const STATE_DB = "state_5.sqlite";
@@ -43,7 +49,7 @@ export const codexAdapter: RunnerAdapter = {
     // Codex refuses a repeated -m, -s or -a, so a profile's permission is emitted alone in place of the baseline,
     // and the baseline -a never (a no-op under exec) goes with it: --dangerously-bypass-approvals-and-sandbox refuses -a.
     const permission = request.profile.permission;
-    const sandbox = permission ? PERMISSION_FLAGS[permission] : ["-s", "workspace-write"];
+    const sandbox = [...(permission ? PERMISSION_FLAGS[permission] : ["-s", "workspace-write"]), ...(permission === "full" ? [] : NETWORK)];
     const approval = permission ? [] : ["-a", "never"];
     if (request.mode === "terminal") {
       if (request.resume) return { argv: ["codex", "resume", request.runnerSessionId ?? request.sessionId, ...sandbox, ...args], cwd: request.cwd, env };

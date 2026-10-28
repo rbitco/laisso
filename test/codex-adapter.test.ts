@@ -25,9 +25,9 @@ const request: RunRequest = {
 };
 
 describe("codex adapter command", () => {
-  it("builds a headless codex exec with approvals never, workspace-write, JSON, the worktree, and skills as link-form mentions", () => {
+  it("builds a headless codex exec with approvals never, workspace-write with network, JSON, the worktree, and skills as link-form mentions", () => {
     const cmd = codexAdapter.command(request);
-    expect(cmd.argv.slice(0, 9)).toEqual(["codex", "-a", "never", "exec", "--json", "-C", "/tmp/lasso-fixture/worktree", "-s", "workspace-write"]);
+    expect(cmd.argv.slice(0, 11)).toEqual(["codex", "-a", "never", "exec", "--json", "-C", "/tmp/lasso-fixture/worktree", "-s", "workspace-write", "-c", "sandbox_workspace_write.network_access=true"]);
     const skills = path.join(homedir(), ".agents", "skills");
     expect(cmd.argv.at(-1)).toBe(
       [
@@ -44,7 +44,7 @@ describe("codex adapter command", () => {
         "Do the work described by the Ticket.",
       ].join("\n"),
     );
-    expect(cmd.argv).toHaveLength(10);
+    expect(cmd.argv).toHaveLength(12);
     expect(cmd.cwd).toBe(request.cwd);
     expect(cmd.env.LASSO_SESSION).toBe(request.sessionId);
     expect(cmd.stdin).toBeUndefined();
@@ -55,8 +55,8 @@ describe("codex adapter command", () => {
 
   it("takes the skills directory from the profile's skills_dir, its model under -m, and its args after", () => {
     const cmd = codexAdapter.command({ ...request, profile: { runner: "codex", skills_dir: "/repo/.agents/skills", model: "gpt-5-codex", args: ["-c", "x=1"] } });
-    expect(cmd.argv.slice(9, 13)).toEqual(["-m", "gpt-5-codex", "-c", "x=1"]);
-    expect(cmd.argv).toHaveLength(14);
+    expect(cmd.argv.slice(11, 15)).toEqual(["-m", "gpt-5-codex", "-c", "x=1"]);
+    expect(cmd.argv).toHaveLength(16);
     expect(cmd.argv.at(-1)!.startsWith("[$implement](/repo/.agents/skills/implement/SKILL.md)\n[$tdd](/repo/.agents/skills/tdd/SKILL.md)\n\n")).toBe(true);
   });
 
@@ -69,13 +69,13 @@ describe("codex adapter command", () => {
       codexAdapter.command({ ...request, profile, mode: "terminal", resume: true, runnerSessionId: "t" }),
     ];
     for (const cmd of forms) expect(cmd.argv.filter((a) => a === "-m")).toHaveLength(1);
-    expect(forms[3]!.argv).toEqual(["codex", "resume", "t", "-s", "workspace-write", "-m", "gpt-5-codex"]);
+    expect(forms[3]!.argv).toEqual(["codex", "resume", "t", "-s", "workspace-write", "-c", "sandbox_workspace_write.network_access=true", "-m", "gpt-5-codex"]);
     expect(codexAdapter.command(request).argv).not.toContain("-m");
   });
 
   it("resumes a headless run through exec resume on the thread id Codex assigned, with the sandbox set top-level", () => {
     const cmd = codexAdapter.command({ ...request, resume: true, runnerSessionId: "01a0e17d-746e-7123-93ce-e3f3b05e8375" });
-    expect(cmd.argv.slice(0, 9)).toEqual(["codex", "-a", "never", "-s", "workspace-write", "exec", "resume", "--json", "01a0e17d-746e-7123-93ce-e3f3b05e8375"]);
+    expect(cmd.argv.slice(0, 11)).toEqual(["codex", "-a", "never", "-s", "workspace-write", "-c", "sandbox_workspace_write.network_access=true", "exec", "resume", "--json", "01a0e17d-746e-7123-93ce-e3f3b05e8375"]);
     expect(cmd.argv).not.toContain("-C");
     expect(cmd.cwd).toBe(request.cwd);
     expect(cmd.env.LASSO_SESSION).toBe(request.sessionId);
@@ -87,7 +87,7 @@ describe("codex adapter command", () => {
     expect(opened.argv.at(-1)!.startsWith("[$grilling](")).toBe(true);
     expect(opened.argv).not.toContain("exec");
     const resumed = codexAdapter.command({ ...request, mode: "terminal", resume: true, runnerSessionId: "01a0e17d-746e-7123-93ce-e3f3b05e8375", name: "Lasso: APP-12 grill" });
-    expect(resumed.argv).toEqual(["codex", "resume", "01a0e17d-746e-7123-93ce-e3f3b05e8375", "-s", "workspace-write"]);
+    expect(resumed.argv).toEqual(["codex", "resume", "01a0e17d-746e-7123-93ce-e3f3b05e8375", "-s", "workspace-write", "-c", "sandbox_workspace_write.network_access=true"]);
     // LASSO_SESSION always names Lasso's own row, whatever Codex calls the thread.
     expect(resumed.env.LASSO_SESSION).toBe(request.sessionId);
   });
@@ -114,7 +114,9 @@ describe("codex adapter effort and permission", () => {
     ["codex", ...permission, ...extra, "<prompt>"],
     ["codex", "resume", "t", ...permission, ...extra],
   ];
-  const baseline = ["-s", "workspace-write"];
+  /** Workspace-write turns the network off; Lasso turns it on so `lasso route` reaches localhost. */
+  const network = ["-c", "sandbox_workspace_write.network_access=true"];
+  const baseline = ["-s", "workspace-write", ...network];
   const never = ["-a", "never"];
   /** Codex refuses a single-value flag given twice in one scope; Lasso never gives one twice at all. */
   const repeats = (argv: string[]) => ["-m", "-s", "-a", "--approve-for-me", "--dangerously-bypass-approvals-and-sandbox"].filter((flag) => argv.filter((a) => a === flag).length > 1);
@@ -128,10 +130,16 @@ describe("codex adapter effort and permission", () => {
     expect(forms({ runner: "codex", model: "gpt-5-codex", effort, args: ["-c", "x=1"] })).toEqual(shapes(baseline, never, ["-m", "gpt-5-codex", "-c", `model_reasoning_effort=${effort}`, "-c", "x=1"]));
   });
 
-  const flags = { auto: ["--approve-for-me"], edits: ["-s", "workspace-write"], full: ["--dangerously-bypass-approvals-and-sandbox"] } as const;
+  const flags = { auto: ["--approve-for-me", ...network], edits: ["-s", "workspace-write", ...network], full: ["--dangerously-bypass-approvals-and-sandbox"] };
   it.each(PERMISSIONS)("emits only %s's flag in place of the baseline sandbox and approval, top-level for exec resume", (permission) => {
     expect(forms({ runner: "codex", permission })).toEqual(shapes([...flags[permission]], []));
     expect(forms({ runner: "codex", model: "m", effort: "high", permission })).toEqual(shapes([...flags[permission]], [], ["-m", "m", "-c", "model_reasoning_effort=high"]));
+  });
+
+  it("turns the network on in every workspace-write form, and leaves it alone under full", () => {
+    const on = (argv: string[]) => argv.includes("sandbox_workspace_write.network_access=true");
+    for (const permission of [undefined, "auto", "edits"] as const) for (const argv of forms({ runner: "codex", permission })) expect(on(argv), argv.join(" ")).toBe(true);
+    for (const argv of forms({ runner: "codex", permission: "full" })) expect(on(argv), argv.join(" ")).toBe(false);
   });
 
   it("never repeats -m, -s or -a in any form, whatever model, effort and permission the profile sets", () => {

@@ -102,7 +102,7 @@ stages:
     const d = await finished(lasso, ticket.id);
     expect(d.session).toMatchObject({ outcome: "succeeded", finalMessage: "OK", transcriptPath: null, costUsd: null, runnerSessionId: "01a0e18c-51ac-7eb2-a6c9-cea33285e2d4" });
     const [call] = await lasso.runner.calls();
-    expect(call!.argv.slice(0, 9)).toEqual(["codex", "-a", "never", "exec", "--json", "-C", ticket.worktree, "-s", "workspace-write"]);
+    expect(call!.argv.slice(0, 11)).toEqual(["codex", "-a", "never", "exec", "--json", "-C", ticket.worktree, "-s", "workspace-write", "-c", "sandbox_workspace_write.network_access=true"]);
     expect(call!.argv.at(-1)).toMatch(/^\[\$implement\]\(\/.*\/implement\/SKILL\.md\)\n\nYou are working Lasso Ticket/);
     // The worktree is gone once the Ticket is done, so its real path is resolved through the home directory.
     expect(call!.cwd).toBe(path.join(realpathSync(lasso.home), path.relative(lasso.home, ticket.worktree)));
@@ -154,7 +154,7 @@ describe("a human Stage on another Runner", () => {
     expect(opened.session!.transcriptPath).toBeNull();
     const [first] = await lasso.terminals();
     const launched = readFileSync(first!.launcher!, "utf8");
-    expect(launched).toContain(`exec 'codex' '-s' 'workspace-write' '[$grilling](`);
+    expect(launched).toContain(`exec 'codex' '-s' 'workspace-write' '-c' 'sandbox_workspace_write.network_access=true' '[$grilling](`);
     // The window runs under the same Codex home Lasso will read the thread from.
     expect(launched).toContain(`export CODEX_HOME=${JSON.stringify(codexHome).replace(/"/g, "'")}`);
 
@@ -176,7 +176,7 @@ describe("a human Stage on another Runner", () => {
     expect(resumed.session!.runnerSessionId).toBe("01a0e17d-746e-7123-93ce-e3f3b05e8375");
     expect(resumed.sessions).toHaveLength(1);
     calls = await lasso.terminals();
-    expect(readFileSync(calls[2]!.launcher!, "utf8")).toContain(`exec 'codex' 'resume' '01a0e17d-746e-7123-93ce-e3f3b05e8375' '-s' 'workspace-write'\n`);
+    expect(readFileSync(calls[2]!.launcher!, "utf8")).toContain(`exec 'codex' 'resume' '01a0e17d-746e-7123-93ce-e3f3b05e8375' '-s' 'workspace-write' '-c' 'sandbox_workspace_write.network_access=true'\n`);
 
     // The found id is kept on the row: the next open re-enters it without the thread table.
     await rm(path.join(codexHome, "state_5.sqlite"));
@@ -218,7 +218,7 @@ ${stageProfile ? `    profile: ${stageProfile}\n` : ""}    artifact: commits-on-
 
     const [pi, codex] = await lasso.runner.calls();
     expect(pi!.argv.slice(0, 11)).toEqual(["pi", "-p", "--mode", "json", "--session-id", s.sessions.find((x) => x.stage === "implement")!.id, "-a", "--model", "openai/gpt-5", "--thinking", "high"]);
-    expect(codex!.argv.slice(0, 11)).toEqual(["codex", "-a", "never", "exec", "--json", "-C", staged.worktree, "-s", "workspace-write", "-m", "gpt-5-codex"]);
+    expect(codex!.argv.slice(0, 13)).toEqual(["codex", "-a", "never", "exec", "--json", "-C", staged.worktree, "-s", "workspace-write", "-c", "sandbox_workspace_write.network_access=true", "-m", "gpt-5-codex"]);
     expect(s.sessions.find((x) => x.stage === "implement")!.profile).toEqual({ name: "pi-gpt", runner: "pi", model: "openai/gpt-5", effort: null, permission: null, args: ["--thinking", "high"] });
     expect(s.sessions.find((x) => x.stage === "notes")!.profile).toEqual({ name: "codex-fast", runner: "codex", model: "gpt-5-codex", effort: null, permission: null, args: [] });
 
@@ -275,7 +275,7 @@ ${stageProfile ? `    profile: ${stageProfile}\n` : ""}    artifact: commits-on-
     const [claude, codex] = await lasso.runner.calls();
     expect(claude!.argv.slice(6, 10)).toEqual(["--permission-mode", "bypassPermissions", "--permission-prompts", "none"]);
     expect(claude!.argv.slice(-2)).toEqual(["--effort", "max"]);
-    expect(codex!.argv.slice(0, 11)).toEqual(["codex", "exec", "--json", "-C", staged.worktree, "--approve-for-me", "-m", "gpt-5-codex", "-c", "model_reasoning_effort=xhigh", codex!.argv[10]]);
+    expect(codex!.argv.slice(0, 13)).toEqual(["codex", "exec", "--json", "-C", staged.worktree, "--approve-for-me", "-c", "sandbox_workspace_write.network_access=true", "-m", "gpt-5-codex", "-c", "model_reasoning_effort=xhigh", codex!.argv[12]]);
     expect(s.sessions.find((x) => x.stage === "implement")!.profile).toEqual({ name: "claude-max", runner: "claude", model: null, effort: "max", permission: "full", args: [] });
     expect(s.sessions.find((x) => x.stage === "notes")!.profile).toEqual({ name: "codex-auto", runner: "codex", model: "gpt-5-codex", effort: "xhigh", permission: "auto", args: [] });
 
