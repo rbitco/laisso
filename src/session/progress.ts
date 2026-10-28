@@ -3,14 +3,15 @@ import type { Logger } from "../server/log.ts";
 import type { Tickets, TicketRow } from "../store/tickets.ts";
 import type { PipelineVersions } from "../store/versions.ts";
 import type { Sessions, EndedReason } from "../store/sessions.ts";
-import type { Visits, VisitRow } from "../store/visits.ts";
+import { checkOf, type Visits } from "../store/visits.ts";
 import { roundDue, type PrLinks } from "../store/links.ts";
 import type { Notifier } from "../notify/notifier.ts";
 import { type ActionStage, type Pipeline, type RunnerStage, type Stage } from "../pipeline/load.ts";
 import type { Mirror } from "../tracker/mirror.ts";
 import { checkArtifact, type ActionProbe, type PrProbe } from "../artifact/check.ts";
 import type { Teardown } from "./teardown.ts";
-import type { Exit } from "../route/route.ts";
+import { decide, type Exit, type RoutePick } from "../route/route.ts";
+import type { CheckRun } from "../artifact/action-check.ts";
 
 /** A Trigger that cannot pull right now, with the reason for the human. */
 export class TriggerError extends Error {}
@@ -48,6 +49,8 @@ export interface ProgressDeps {
   prProbe: (ticket: TicketRow) => PrProbe;
   /** Runs a check Action artifact for the Ticket at a Stage (ADR 0014). */
   actionProbe: (ticket: TicketRow, stage: string) => ActionProbe;
+  /** The check run under way with this id (its LASSO_SESSION), or null: where a check's `lasso route` pick goes. */
+  checkRun: (id: string) => CheckRun | null;
   teardown: Teardown;
 }
 
@@ -211,6 +214,7 @@ export class Progress {
    */
   async leave(ticket: TicketRow, exit: Exclude<Exit, { kind: "failed" }>): Promise<void> {
     if (exit.kind === "walk") return this.finished(ticket);
+    if (exit.kind === "conflict") return this.flag(ticket.id, "route.conflict", `${pickLine(exit.pick)}; ${pickLine(exit.check)}`);
     const current = this.current(ticket);
     if ("problem" in current) return this.flag(ticket.id, "pipeline.missing", current.problem);
     const target = current.pipeline.stages.find((s) => s.name === exit.to);
@@ -224,13 +228,33 @@ export class Progress {
   }
 
   /**
-   * `lasso route`: a running Session picks the Route its Stage is to leave by, over any it picked before, or with
-   * null drops its pick. The Route decision takes it when the run ends. Only an action Stage's Action may pick
-   * for now, and only a Route its Stage declares.
+   * A Stage finished as one that advances (a headless Session met its Artifact, or a repeating Stage's check was
+   * met): leave by the Route decision over the Visit's picks, the agent's and the latest check's when it was met.
    */
-  pick(sessionId: string, route: string | null, note: string | null): { stage: Stage; visit: VisitRow } {
+  async advance(ticket: TicketRow): Promise<void> {
+    const current = this.current(ticket);
+    if ("problem" in current) return this.flag(ticket.id, "pipeline.missing", current.problem);
+    const visit = this.deps.visits.current(ticket.id);
+    const by = current.stage.kind === "action" ? "action" : "agent";
+    const pick: RoutePick | null = visit?.picked_route ? { route: visit.picked_route, note: visit.picked_note, by } : null;
+    const result = checkOf(visit);
+    const check: RoutePick | null = result?.result === "met" && result.route ? { route: result.route, note: result.note?.trim() || result.line, by: "check", run: visit!.check_run } : null;
+    const exit = decide({ stage: current.stage, pick, check, end: { succeeded: true, lastLine: null } });
+    if (exit.kind === "failed") return this.finished(ticket);
+    return this.leave(ticket, exit);
+  }
+
+  /**
+   * `lasso route`: a running Session or check run picks the Route its Stage is to leave by, over any it picked
+   * before, or with null drops its pick. The Route decision takes it when the run ends. Only an action Stage's
+   * Action and a check Action may pick for now, and only a Route its Stage declares. A check run's pick is held
+   * with the run and kept on the Visit's check result only when the run is met (LASSO-192).
+   */
+  pick(sessionId: string, route: string | null, note: string | null): { ticket: string; stage: Stage; route: string | null; note: string | null } {
+    const run = this.deps.checkRun(sessionId);
+    if (run) return this.checkPick(run, route, note);
     const session = this.deps.sessions.get(sessionId);
-    if (!session) throw new TriggerError(`no Session ${sessionId}`);
+    if (!session) throw new TriggerError(`no running Session or check run ${sessionId}; a Route is picked while it runs`);
     if (session.ended_at) throw new TriggerError(`Session ${sessionId} has ended; a Route is picked while it runs`);
     const ticket = this.deps.tickets.get(session.ticket)!;
     const current = this.currentForTrigger(ticket);
@@ -238,13 +262,22 @@ export class Progress {
     if (!visit || session.visit !== visit.id) throw new TriggerError(`Session ${sessionId} is not working ${ticket.stage} on this Visit`);
     const { stage } = current;
     if (stage.kind !== "action") throw new TriggerError(`Stage ${stage.name} does not let its agent choose a Route`);
-    if (route !== null && !stage.routes?.[route]) {
-      const names = Object.keys(stage.routes ?? {});
-      throw new TriggerError(`no Route named ${route} on Stage ${stage.name}; ${names.length ? `it has ${names.join(", ")}` : "it declares none"}`);
-    }
+    declares(stage, route);
     const picked = this.deps.visits.pick(ticket.id, route, note?.trim() || null)!;
     this.deps.log.info(route === null ? "route.cleared" : "route.picked", { ticket: ticket.id, stage: stage.name, session: sessionId, route });
-    return { stage, visit: picked };
+    return { ticket: ticket.id, stage, route: picked.picked_route, note: picked.picked_note };
+  }
+
+  /** A check run's `lasso route`: the run must be checking the Ticket's current Stage on its current Visit. */
+  private checkPick(run: CheckRun, route: string | null, note: string | null): { ticket: string; stage: Stage; route: string | null; note: string | null } {
+    const ticket = this.deps.tickets.get(run.ticket)!;
+    const current = this.current(ticket);
+    if ("problem" in current) throw new TriggerError(current.problem);
+    if (current.stage.name !== run.stage || this.deps.visits.current(ticket.id)?.id !== run.visit) throw new TriggerError(`check run ${run.id} is not checking ${ticket.stage} on this Visit`);
+    declares(current.stage, route);
+    run.pick = route === null ? null : { route, note: note?.trim() || null };
+    this.deps.log.info(route === null ? "route.cleared" : "route.picked", { ticket: ticket.id, stage: run.stage, check_run: run.id, route });
+    return { ticket: ticket.id, stage: current.stage, route, note: run.pick?.note ?? null };
   }
 
   /** The Start trigger: release a holding Ticket into its current Stage. */
@@ -325,6 +358,18 @@ export class Progress {
       this.deps.sessions.end(row.id, { ended_by: "human", ended_reason: reason, outcome: null, final_message: null, usage: null, cost_usd: null, transcript_path: row.transcript_path });
     }
   }
+}
+
+/** Refuse a Route the Stage does not declare; null (dropping the pick) always passes. */
+function declares(stage: Stage, route: string | null): void {
+  if (route === null || stage.routes?.[route]) return;
+  const names = Object.keys(stage.routes ?? {});
+  throw new TriggerError(`no Route named ${route} on Stage ${stage.name}; ${names.length ? `it has ${names.join(", ")}` : "it declares none"}`);
+}
+
+/** One side of a route.conflict Flag: who picked which Route, with its note. */
+function pickLine(pick: RoutePick): string {
+  return `the ${pick.by} picked Route ${pick.route}${pick.note?.trim() ? ` (${pick.note.trim()})` : ""}`;
 }
 
 /** The fields that clear a Flag, when there is one to clear; the reason goes with it. */

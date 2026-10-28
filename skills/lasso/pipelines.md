@@ -162,7 +162,16 @@ An action Stage's command picks a Route by running
 only when the command exits 0. A non-zero exit Flags the Ticket
 (`outcome.failed`) and names the Route not taken. With no pick the Ticket
 walks on to the next Stage as before. `lasso route` refuses a name the
-Stage does not declare, and works only in an action Stage's Session.
+Stage does not declare, and works only in an action Stage's Session or a
+check run.
+
+A [check Action](#check-actions) can pick a Route the same way. Each check
+run gets its own `LASSO_SESSION`, and its pick counts only when that run is
+met (exit 0): a not-met or broken run's pick is dropped, and a call that
+arrives after its run has ended is refused. A met run without a call walks
+forward. Without `--note` the note is the check's last line of output. When
+the Stage's agent and its check both pick, one pick or the same Route is
+taken; different Routes Flag the Ticket `route.conflict`, naming both.
 
 Taking a Route starts a new Visit at its target. Every Runner Session of
 that Visit gets the Route's `append` text after the Stage's prompt, or its
@@ -224,7 +233,9 @@ successful headless Session, and on Mark done. The exit code is the verdict:
 The last line of output is the detail. Params go under `with:` on the
 artifact, and must be exactly the Action's `params`, as for an action
 Stage; the shorthand `action <name>` is for an Action with none. Lasso keeps
-only the latest result per Stage (no Session row), shown on the Ticket page.
+only the latest result per Visit (no Session row), shown on the Ticket page.
+A met check may also send the Ticket along a Route with `lasso route`; see
+[Routes](#routes).
 
 On a repeating Stage, a check Action is the end condition in place of the
 merge. It runs after each Round, and on each poll while the Ticket waits

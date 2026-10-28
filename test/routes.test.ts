@@ -6,6 +6,7 @@ import { startLassoWithRepos, runCli, waitFor, claudeFixture, type Lasso, type L
 import type { TicketDetail, IntakeResult, PipelineListing, PipelineFile } from "../src/api/views.ts";
 import type { TickChange } from "../src/server/tick.ts";
 import { decide, type RoutePick } from "../src/route/route.ts";
+import { Visits } from "../src/store/visits.ts";
 import type { Stage } from "../src/pipeline/load.ts";
 
 // Routes (LASSO-190): a Stage declares Routes to other Stages, an Action picks
@@ -37,8 +38,11 @@ const WORK = `stages:
     human: true
 `;
 
-// The gate runs gate.sh beside the lasso shim, so each test writes what it does.
-const ACTIONS: LassoConfig["actions"] = { gate: { run: 'sh "$(dirname "$(command -v lasso)")/gate.sh"' } };
+// The gate runs gate.sh beside the lasso shim, and the check check.sh, so each test writes what they do.
+const ACTIONS: LassoConfig["actions"] = {
+  gate: { run: 'sh "$(dirname "$(command -v lasso)")/gate.sh"' },
+  check: { run: 'sh "$(dirname "$(command -v lasso)")/check.sh"' },
+};
 
 async function lassoWith(pipeline = WORK) {
   const { lasso } = await startLassoWithRepos({ app: { pipeline: "work" } }, { actions: ACTIONS }, { work: pipeline });
@@ -49,12 +53,16 @@ async function lassoWith(pipeline = WORK) {
   return lasso;
 }
 
-/** gate.sh: run n of the gate does the n-th script, counting from 1; past the last it does nothing. */
-const gate = (lasso: Lasso, ...runs: string[]) =>
+/** <name>.sh: run n of the Action does the n-th script, counting from 1; past the last it does nothing. Each run's LASSO_SESSION goes on a line of <name>-ids. */
+const script = (lasso: Lasso, name: string, runs: string[]) =>
   writeFile(
-    path.join(lasso.pathDir, "gate.sh"),
-    `dir=$(dirname "$(command -v lasso)")\nn=$(( $(cat "$dir/gate-count" 2>/dev/null || echo 0) + 1 ))\necho $n > "$dir/gate-count"\ncase $n in\n${runs.map((r, i) => `${i + 1}) ${r} ;;`).join("\n")}\nesac\n`,
+    path.join(lasso.pathDir, `${name}.sh`),
+    `dir=$(dirname "$(command -v lasso)")\nn=$(( $(cat "$dir/${name}-count" 2>/dev/null || echo 0) + 1 ))\necho $n > "$dir/${name}-count"\necho "$LASSO_SESSION" >> "$dir/${name}-ids"\ncase $n in\n${runs.map((r, i) => `${i + 1}) ${r} ;;`).join("\n")}\nesac\n`,
   );
+const gate = (lasso: Lasso, ...runs: string[]) => script(lasso, "gate", runs);
+const check = (lasso: Lasso, ...runs: string[]) => script(lasso, "check", runs);
+/** The LASSO_SESSION of each run of the Action so far. */
+const idsOf = async (lasso: Lasso, name: string) => (await readFile(path.join(lasso.pathDir, `${name}-ids`), "utf8")).trim().split("\n");
 
 const json = (body: unknown) => JSON.stringify(body);
 const add = (lasso: Lasso, input = "Add dark mode") => lasso.api<IntakeResult>("/api/tickets", { method: "POST", body: json({ input, repo: "app", pipeline: "work" }) });
@@ -81,12 +89,14 @@ interface Visit {
   replaces: number;
   picked_route: string | null;
   skipped_at: string | null;
+  check_result: string | null;
+  check_run: string | null;
 }
 
 function visitsOf(lasso: Lasso, ticket: string): Visit[] {
   const db = new DatabaseSync(path.join(lasso.home, "lasso.db"));
   try {
-    return db.prepare(`SELECT id, stage, arrived_by, from_visit, route, chosen_by, text, note, replaces, picked_route, skipped_at FROM visits WHERE ticket = ? ORDER BY id`).all(ticket) as unknown as Visit[];
+    return db.prepare(`SELECT id, stage, arrived_by, from_visit, route, chosen_by, text, note, replaces, picked_route, skipped_at, check_result, check_run FROM visits WHERE ticket = ? ORDER BY id`).all(ticket) as unknown as Visit[];
   } finally {
     db.close();
   }
@@ -131,6 +141,38 @@ describe("the Route decision", () => {
 
   it("walks forward on a pick the Stage does not declare", () => {
     expect(decide({ stage: { ...stage, routes: undefined }, pick: pick("back"), end: ok })).toEqual({ kind: "walk" });
+  });
+
+  describe("with an agent's pick and a check's (LASSO-192)", () => {
+    const agent = (route: string, note: string | null = null): RoutePick => ({ route, note, by: "agent" });
+    const checked = (route: string, note: string | null = null): RoutePick => ({ route, note, by: "check", run: "run-1" });
+    const done = { succeeded: true, lastLine: null };
+
+    it("takes a check's pick alone, chosen by the check", () => {
+      expect(decide({ stage, pick: null, check: checked("back", "flaky"), end: done })).toMatchObject({ kind: "route", route: "back", to: "implement", note: "flaky", chosenBy: "check" });
+    });
+
+    it("takes an agent's pick alone, with no check pick or a null one", () => {
+      expect(decide({ stage, pick: agent("ahead"), check: null, end: done })).toMatchObject({ kind: "route", route: "ahead", chosenBy: "agent" });
+    });
+
+    it("takes the same Route once, as the agent's, its note falling back to the check's", () => {
+      expect(decide({ stage, pick: agent("back", "agent says"), check: checked("back", "check says"), end: done })).toMatchObject({ kind: "route", route: "back", note: "agent says", chosenBy: "agent" });
+      expect(decide({ stage, pick: agent("back", " "), check: checked("back", "check says"), end: done })).toMatchObject({ note: "check says", chosenBy: "agent" });
+    });
+
+    it("is a conflict when the two pick different Routes, showing both", () => {
+      expect(decide({ stage, pick: agent("back", "again"), check: checked("ahead"), end: done })).toEqual({ kind: "conflict", pick: agent("back", "again"), check: checked("ahead") });
+    });
+
+    it("ignores a pick the Stage does not declare, so the other is taken alone", () => {
+      expect(decide({ stage, pick: agent("gone"), check: checked("ahead"), end: done })).toMatchObject({ kind: "route", route: "ahead", chosenBy: "check" });
+      expect(decide({ stage, pick: agent("back"), check: checked("gone"), end: done })).toMatchObject({ kind: "route", route: "back", chosenBy: "agent" });
+    });
+
+    it("fails a run that did not succeed, naming the run's own pick", () => {
+      expect(decide({ stage, pick: agent("back"), check: checked("ahead"), end: { succeeded: false, lastLine: null } })).toEqual({ kind: "failed", untaken: agent("back") });
+    });
   });
 });
 
@@ -270,5 +312,123 @@ describe("an Action that picks a Route", () => {
     const ticket = await add(lasso);
     const detail = await rested(lasso, ticket.id);
     expect(await readFile(path.join(detail.worktree, "refused.txt"), "utf8")).toBe("Stage implement does not let its agent choose a Route\nexit 1\n");
+  });
+});
+
+// A check Action as a Runner Stage's Artifact may run `lasso route` too (LASSO-192): each check run has its own
+// LASSO_SESSION, and its pick counts only when the run is met.
+const CHECKED = `stages:
+  - name: implement
+    prompt: Do the work.
+    artifact: action check
+    routes:
+      again: { to: implement, append: Look again. }
+      ahead: { to: ship }
+  - name: polish
+    prompt: Polish.
+    human: true
+  - name: ship
+    prompt: Ship it.
+    human: true
+`;
+
+describe("a check Action that picks a Route", () => {
+  it("takes the Route a met check picked, then walks on after a met run without a call", async () => {
+    const lasso = await lassoWith(CHECKED);
+    await check(lasso, 'lasso route again --note "missed a case"; echo "looked"', 'echo "all good"');
+    const ticket = await add(lasso);
+    const detail = await rested(lasso, ticket.id);
+    expect(detail.flag).toBeNull();
+    expect(detail.stage.name).toBe("polish");
+
+    const ids = await idsOf(lasso, "check");
+    expect(ids).toHaveLength(2);
+    expect(ids[0]).toMatch(/\S/);
+    expect(ids[1]).not.toBe(ids[0]);
+    const visits = visitsOf(lasso, ticket.id);
+    expect(visits.map((v) => v.stage)).toEqual(["implement", "implement", "polish"]);
+    expect(visits[1]).toMatchObject({ arrived_by: "route", from_visit: visits[0]!.id, route: "again", chosen_by: "check", text: "Look again.", note: "missed a case" });
+    // The pick and the run that made it are kept on the Visit's check result.
+    expect(visits[0]!.check_run).toBe(ids[0]);
+    expect(JSON.parse(visits[0]!.check_result!)).toMatchObject({ action: "check", result: "met", line: "looked", route: "again", note: "missed a case" });
+    expect(visits[1]!.check_run).toBe(ids[1]);
+    expect(JSON.parse(visits[1]!.check_result!)).not.toHaveProperty("route");
+
+    const calls = await prompts(lasso);
+    expect(calls[1]).toContain("Do the work.\n\nLook again.\n\nLasso sent this Ticket here by Route again, chosen by a check");
+  });
+
+  it("notes the check's last line when the call gives no note", async () => {
+    const lasso = await lassoWith(CHECKED);
+    await check(lasso, 'lasso route ahead; echo "nothing left to do"');
+    const ticket = await add(lasso);
+    const detail = await rested(lasso, ticket.id);
+    expect(detail.stage.name).toBe("ship");
+    expect(visitsOf(lasso, ticket.id)[1]).toMatchObject({ arrived_by: "route", route: "ahead", chosen_by: "check", note: "nothing left to do" });
+  });
+
+  it("discards a not-met run's pick, never counts a stale call from it, and walks on after a later met run", async () => {
+    const lasso = await lassoWith(CHECKED);
+    await check(lasso, 'lasso route ahead --note "skip polish"; echo "not yet"; exit 1', 'echo "all good"');
+    const ticket = await add(lasso);
+    const flagged = await rested(lasso, ticket.id);
+    expect(flagged.flag).toMatchObject({ reason: "artifact.missing", detail: "action check: not yet" });
+    const [first] = await idsOf(lasso, "check");
+    const [visit] = visitsOf(lasso, ticket.id);
+    expect(visit!.check_run).toBe(first);
+    expect(JSON.parse(visit!.check_result!)).toEqual({ action: "check", result: "not_met", at: expect.any(String), code: 1, line: "not yet" });
+
+    // The run has ended: a late call carrying its id is refused and records nothing.
+    const stale = await runCli(["route", "ahead"], { ...lasso, env: { LASSO_SESSION: first! } });
+    expect(stale).toMatchObject({ code: 1, stderr: `no running Session or check run ${first}; a Route is picked while it runs\n` });
+
+    await lasso.api(`/api/tickets/${ticket.id}/retry`, { method: "POST", body: "{}" });
+    const detail = await rested(lasso, ticket.id);
+    expect(detail.flag).toBeNull();
+    expect(detail.stage.name).toBe("polish");
+    expect(visitsOf(lasso, ticket.id).map((v) => [v.stage, v.arrived_by])).toEqual([["implement", "intake"], ["polish", "walk"]]);
+  });
+
+  it("refuses a Route the Stage does not declare", async () => {
+    const lasso = await lassoWith(CHECKED);
+    await check(lasso, 'out="$(dirname "$(command -v lasso)")/out.txt"; lasso route nowhere > "$out" 2>&1; echo "exit $?" >> "$out"');
+    const ticket = await add(lasso);
+    const detail = await rested(lasso, ticket.id);
+    expect(detail.stage.name).toBe("polish");
+    expect(await readFile(path.join(lasso.pathDir, "out.txt"), "utf8")).toBe("no Route named nowhere on Stage implement; it has again, ahead\nexit 1\n");
+  });
+
+  describe("beside an agent's pick", () => {
+    // The agent's pick stands in for an opted-in agent's `lasso route` (LASSO-193): it is written on the Visit while
+    // the check waits for it, then the check picks and is met.
+    const waitForAgent = 'while [ ! -f "$dir/agent-$LASSO_TICKET" ]; do sleep 0.1; done';
+    async function agentPicks(lasso: Lasso, ticket: string, route: string, note: string | null) {
+      const db = new DatabaseSync(path.join(lasso.home, "lasso.db"));
+      try {
+        db.exec("PRAGMA busy_timeout = 5000");
+        new Visits(db).pick(ticket, route, note);
+      } finally {
+        db.close();
+      }
+      await writeFile(path.join(lasso.pathDir, `agent-${ticket}`), "");
+    }
+
+    it("Flags route.conflict showing both when they pick different Routes, and takes the Route once when they agree", async () => {
+      const lasso = await lassoWith(CHECKED);
+      await check(lasso, `${waitForAgent}; lasso route ahead; echo "ready to ship"`, `${waitForAgent}; lasso route ahead --note "check agrees"`);
+      const split = await add(lasso);
+      await agentPicks(lasso, split.id, "again", "another pass needed");
+      const flagged = await rested(lasso, split.id);
+      expect(flagged.stage.name).toBe("implement");
+      expect(flagged.flag).toMatchObject({ reason: "route.conflict", detail: "the agent picked Route again (another pass needed); the check picked Route ahead (ready to ship)" });
+      expect(visitsOf(lasso, split.id).map((v) => v.stage)).toEqual(["implement"]);
+
+      const agreed = await add(lasso, "Add light mode");
+      await agentPicks(lasso, agreed.id, "ahead", null);
+      const detail = await rested(lasso, agreed.id);
+      expect(detail.flag).toBeNull();
+      expect(detail.stage.name).toBe("ship");
+      expect(visitsOf(lasso, agreed.id)[1]).toMatchObject({ arrived_by: "route", route: "ahead", chosen_by: "agent", note: "check agrees" });
+    });
   });
 });

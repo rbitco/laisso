@@ -131,7 +131,7 @@ export async function serve(opts: ServeOptions): Promise<number> {
   const prs = new PullRequests(log);
   const teardown = new Teardown({ config, home, tickets, links, log, prs });
   const checks = new ActionChecks({ config, home, links, visits, log });
-  const progress: Progress = new Progress({ home, tickets, versions, sessions, visits, links, log, notifier, mirror, prProbe: (ticket) => () => review.probe(ticket), actionProbe: (ticket, stage) => checks.probe(ticket, stage), teardown });
+  const progress: Progress = new Progress({ home, tickets, versions, sessions, visits, links, log, notifier, mirror, prProbe: (ticket) => () => review.probe(ticket), actionProbe: (ticket, stage) => checks.probe(ticket, stage), checkRun: (id) => checks.liveRun(id), teardown });
   // review: is read from the live config per Ticket, so a Config page save applies on the next poll; the gh login is read once.
   const ignored = async (ticket: TicketRow) => {
     const rules = reviewFor(config, ticket.repo);

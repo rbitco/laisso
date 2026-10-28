@@ -489,8 +489,8 @@ describe("a repeating Stage that ends on a check Action", () => {
 `;
   const READY = 'if [ -f .ready ]; then echo "ready to go"; else echo "no .ready yet"; exit 1; fi';
 
-  async function lassoWithCheck(run = READY) {
-    const started = await startLassoWithRepos({ app: { pipeline: "checked" } }, { actions: { ready: { run } } }, { checked: CHECKED });
+  async function lassoWithCheck(run = READY, pipeline = CHECKED) {
+    const started = await startLassoWithRepos({ app: { pipeline: "checked" } }, { actions: { ready: { run } } }, { checked: pipeline });
     running.push(started.lasso);
     const ticket = await started.lasso.api<IntakeResult>("/api/tickets", { method: "POST", body: JSON.stringify({ input: "Add dark mode", repo: "app", pipeline: "checked" }) });
     return { ...started, ticket };
@@ -556,5 +556,18 @@ describe("a repeating Stage that ends on a check Action", () => {
     await Promise.all([checkNow(lasso), checkNow(lasso), checkNow(lasso)]);
     expect(existsSync(path.join(ticket.worktree, "..", "overlaps"))).toBe(false);
     expect((await detailOf(lasso, ticket.id)).check).toMatchObject({ result: "not_met" });
+  });
+
+  it("takes the Route a met check picked with lasso route (LASSO-192)", async () => {
+    const routed = `${CHECKED}    routes:\n      ahead: { to: later }\n  - name: next\n    prompt: Next.\n    human: true\n  - name: later\n    prompt: Later.\n    human: true\n`;
+    const { lasso, ticket } = await lassoWithCheck('if [ -f .ready ]; then lasso route ahead --note "ready early"; else echo "no .ready yet"; exit 1; fi', routed);
+    // `lasso` inside the check is this checkout's CLI, talking to this server.
+    await writeFile(path.join(lasso.pathDir, "lasso"), `#!/bin/sh\nexec '${process.execPath}' '${path.join(import.meta.dirname, "..", "bin", "lasso.js")}' --port ${lasso.port} "$@"\n`, { mode: 0o755 });
+    await setScene(lasso, ticket.branch, green);
+    await ready(ticket.worktree);
+    expect((await checkNow(lasso)).changes.map((c) => c.summary)).toEqual(["PR #7 found", "action ready met; review finished"]);
+    const d = await detailOf(lasso, ticket.id);
+    expect(d.flag).toBeNull();
+    expect(d.stage.name).toBe("later");
   });
 });

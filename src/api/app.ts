@@ -289,7 +289,7 @@ export function createApp(deps: AppDeps): Hono {
     return c.json(prView(link));
   });
 
-  // `lasso route` (LASSO-190): the Session the x-lasso-session header names picks the Route its Stage leaves by,
+  // `lasso route` (LASSO-190): the Session or check run (LASSO-192) the x-lasso-session header names picks the Route its Stage leaves by,
   // over any it picked before; { route: null } drops the pick. The name is checked against the Stage's Routes now,
   // so the caller can fix it at once; the pick is taken, or not, when the run ends.
   app.post("/api/route", async (c) => {
@@ -298,9 +298,9 @@ export function createApp(deps: AppDeps): Hono {
     const body = ((await c.req.json().catch(() => null)) ?? {}) as { route?: unknown; note?: unknown };
     if (body.route !== null && (typeof body.route !== "string" || !body.route)) return c.json({ error: "route must name a Route, or be null to drop the pick" }, 400);
     if (body.note !== undefined && body.note !== null && typeof body.note !== "string") return c.json({ error: "note must be text" }, 400);
-    const { stage, visit } = deps.progress.pick(session, body.route, typeof body.note === "string" ? body.note : null);
-    const to = visit.picked_route ? (stage.routes?.[visit.picked_route]?.to ?? null) : null;
-    return c.json({ ticket: visit.ticket, stage: stage.name, route: visit.picked_route, to, note: visit.picked_note } satisfies RoutePickView);
+    const picked = deps.progress.pick(session, body.route, typeof body.note === "string" ? body.note : null);
+    const to = picked.route ? (picked.stage.routes?.[picked.route]?.to ?? null) : null;
+    return c.json({ ticket: picked.ticket, stage: picked.stage.name, route: picked.route, to, note: picked.note } satisfies RoutePickView);
   });
 
   // A Session of a Ticket, or the 404 that says which is unknown.

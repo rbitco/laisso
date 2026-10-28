@@ -115,7 +115,8 @@ quoting stays the shell's job.
 An Action can also be a Stage's artifact, run as a check: exit 0 is met,
 exit 1 is not met, anything else is a broken check. See
 [Check Actions](pipelines.md#check-actions). A check gets the same
-variables, with `LASSO_SESSION` empty. Write a check so it only looks.
+variables, with `LASSO_SESSION` naming that check run, so it can pick a
+[Route](pipelines.md#routes) with `lasso route`. Write a check so it only looks.
 
 ```yaml lasso-config
 actions:

@@ -36,6 +36,9 @@ Actions to Artifacts and loosens ADR 0004's merge-only end of Review.
   run, so polling does not bury a Ticket's history. A Ticket back at a
   Stage starts its new Visit with no verdict from the last. (Amended by
   LASSO-189; it was the latest per Ticket and Stage.)
+- A check run has its own id in `LASSO_SESSION` and may pick a Route
+  with `lasso route`; the pick is kept on the Visit's check result only
+  when the run is met. (Added by LASSO-192.)
 - A closed, unmerged PR still Flags `review.pr_closed`.
 - Nothing stops a check Action from changing things; checks should only
   look.

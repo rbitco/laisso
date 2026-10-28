@@ -147,7 +147,7 @@ export class Review {
       const fresh = tickets.get(ticket.id);
       if (!fresh || fresh.state !== "active" || fresh.stage !== stage.name || sessions.running(ticket.id).some((s) => s.mode === "headless")) return changes;
       if (verdict === "advance") {
-        await progress.finished(fresh);
+        await progress.advance(fresh);
         changes.push({ ticket: ticket.id, summary: `${stage.artifact} met; ${stage.name} finished` });
         return changes;
       }

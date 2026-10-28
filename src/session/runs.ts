@@ -400,7 +400,7 @@ export class Runs {
     const { tickets, progress, budgets, log } = this.deps;
     const ticket = tickets.get(row.ticket);
     if (!ticket || ticket.state !== "active") return;
-    if (verdict === "advance") return progress.finished(ticket);
+    if (verdict === "advance") return progress.advance(ticket);
     if (verdict === "wait") return;
     // Interrupted and exhausted runs try again while attempts remain; a run a human stopped, or one that failed, asks instead.
     const retryable = verdict.retry !== false && row.ended_by === "outcome" && (row.outcome === "interrupted" || row.outcome === "exhausted");

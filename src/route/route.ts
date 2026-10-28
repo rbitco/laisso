@@ -13,6 +13,8 @@ export interface RoutePick {
   /** The `--note` given; null or blank leaves the note to the run's last line. */
   note: string | null;
   by: ChosenBy;
+  /** The check run that picked it, for a check's pick. */
+  run?: string | null;
 }
 
 /** How the run that would have the Ticket leave the Stage ended. */
@@ -26,8 +28,13 @@ export interface RunEnd {
 export interface Leaving {
   /** The Stage being left, with its Routes. */
   stage: Stage;
-  /** The current Visit's pick, or null when nothing picked one. */
+  /** The current Visit's pick by the Stage's own run (its Action or agent), or null when it picked none. */
   pick: RoutePick | null;
+  /**
+   * The pick of the Stage's check Action, from its latest run only when that run was met; null or absent when it
+   * picked none. Its note already falls back to the check's last line.
+   */
+  check?: RoutePick | null;
   end: RunEnd;
 }
 
@@ -44,31 +51,51 @@ export interface TakeRoute {
   chosenBy: ChosenBy;
 }
 
+/** The Stage's own run and its check picked different Routes: the Ticket is Flagged `route.conflict` showing both. */
+export interface Conflict {
+  kind: "conflict";
+  pick: RoutePick;
+  check: RoutePick;
+}
+
 /**
  * Where the Ticket goes: walk forward to the next Stage as before Routes,
- * take a Route, or Flag `outcome.failed` because the run failed, naming the
- * pick that was not taken.
+ * take a Route, Flag `route.conflict` when two picks disagree, or Flag
+ * `outcome.failed` because the run failed, naming the pick that was not taken.
  */
-export type Exit = { kind: "walk" } | TakeRoute | { kind: "failed"; untaken: RoutePick | null };
+export type Exit = { kind: "walk" } | TakeRoute | Conflict | { kind: "failed"; untaken: RoutePick | null };
 
 /**
  * An Action's pick is taken only when it exits 0; a failed run Flags as it
  * always has, with the pick shown but not taken. No pick walks forward. A
  * pick the Stage does not declare cannot be recorded (`lasso route` checks
- * the name), so one met here is ignored and the Ticket walks forward.
+ * the name), so one met here is ignored.
+ *
+ * When the Stage's own run and its check both pick: one pick, or the same
+ * Route, is taken (the run's pick, its note falling back to the check's);
+ * different Routes are a conflict for a human to settle.
  */
-export function decide({ stage, pick, end }: Leaving): Exit {
+export function decide({ stage, pick, check = null, end }: Leaving): Exit {
   if (!end.succeeded) return { kind: "failed", untaken: pick };
-  const route = pick ? stage.routes?.[pick.route] : undefined;
-  if (!pick || !route) return { kind: "walk" };
-  const note = pick.note?.trim() || end.lastLine?.trim() || null;
+  const own = declared(stage, pick);
+  const checked = declared(stage, check);
+  if (own && checked && own.route !== checked.route) return { kind: "conflict", pick: own, check: checked };
+  const taken = own ?? checked;
+  if (!taken) return { kind: "walk" };
+  const route = stage.routes![taken.route]!;
+  const note = taken.note?.trim() || (taken === own ? checked?.note?.trim() : null) || end.lastLine?.trim() || null;
   return {
     kind: "route",
-    route: pick.route,
+    route: taken.route,
     to: route.to,
     text: route.replace ?? route.append ?? null,
     replaces: route.replace !== undefined,
     note,
-    chosenBy: pick.by,
+    chosenBy: taken.by,
   };
+}
+
+/** The pick when the Stage declares its Route, else null. */
+function declared(stage: Stage, pick: RoutePick | null): RoutePick | null {
+  return pick && stage.routes?.[pick.route] ? pick : null;
 }
