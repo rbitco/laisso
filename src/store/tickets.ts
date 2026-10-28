@@ -106,10 +106,14 @@ export class Tickets {
     return this.get(ticket.id)!;
   }
 
-  /** The Ticket arrives at a Stage: the row moves there, with `patch`, and a new Visit starts as the current one is left. */
+  /**
+   * The Ticket arrives at a Stage: the row moves there, with `patch`, and a new Visit starts as the current one is left.
+   * A Round made due on the Visit left is dropped with it; each PR's watermark stays, so what it held is new on return.
+   */
   arrive(id: string, arrival: Arrival, patch: Partial<Omit<TicketRow, "id" | "created_at" | "stage">> = {}, now: string = new Date().toISOString()): TicketRow {
     return together(this.db, () => {
       const row = this.get(id)!;
+      this.db.prepare(`UPDATE ticket_prs SET feedback_due = NULL WHERE ticket = ? AND feedback_due IS NOT NULL`).run(id);
       this.visits.arrive(id, patch.pipeline_version !== undefined ? patch.pipeline_version : row.pipeline_version, arrival, now);
       return this.update(id, { ...patch, stage: arrival.stage }, now);
     });

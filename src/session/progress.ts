@@ -105,13 +105,13 @@ export class Progress {
     const current = this.current(ticket);
     if ("problem" in current) return current;
     if (current.stage.kind !== "runner" || current.stage.human) return null;
-    if (current.stage.repeat && !roundDue(this.deps.links.links(ticket.id)) &&!this.roundToRerun(ticket, current.stage)) return null;
+    if (current.stage.repeat && !roundDue(this.deps.links.links(ticket.id)) && !this.roundToRerun(ticket, current.stage)) return null;
     return { pipeline: current.pipeline, stage: current.stage };
   }
 
-  /** The latest Round's Session ended interrupted (shutdown included) or exhausted on its own: the Round is run again (spec: Budget). */
+  /** This Visit's latest Round ended interrupted (shutdown included) or exhausted on its own: the Round is run again (spec: Budget). */
   private roundToRerun(ticket: TicketRow, stage: RunnerStage): boolean {
-    const last = this.deps.sessions.latestRound(ticket.id, stage.name);
+    const last = this.deps.sessions.latestRound(ticket.id, stage.name, this.deps.visits.current(ticket.id)?.id ?? null);
     return last !== null && last.ended_by === "outcome" && (last.outcome === "interrupted" || last.outcome === "exhausted");
   }
 

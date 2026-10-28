@@ -157,6 +157,23 @@ describe("Visits", () => {
     expect(d.budget.rounds).toEqual({ used: 1, limit: 2, source: "pipeline" });
     expect(d.prs.map((p) => p.url)).toEqual([PR_URL]);
   });
+
+  it("never re-runs an earlier lap's interrupted Round on a new Visit", async () => {
+    const lasso = await lassoWith(REVIEW);
+    const ticket = await add(lasso);
+    earlierLap(lasso, ticket.id, "review", [1, 2]);
+    // The lap's last Round was cut off; this Visit walked in, so it waits for new Feedback rather than re-running it.
+    withStore(lasso, (db) => {
+      db.prepare(`UPDATE sessions SET outcome = 'interrupted' WHERE id = 'lap-1'`).run();
+      db.prepare(`UPDATE visits SET arrived_by = 'walk', route = NULL, chosen_by = NULL WHERE ticket = ? AND left_at IS NULL`).run(ticket.id);
+    });
+    await setScene(lasso, ticket.branch, { tag: "green", checks: [] });
+    await lasso.runner.script({ stdout: claudeFixture("success.json") });
+    expect((await checkNow(lasso)).changes.map((c) => c.summary)).toEqual(["PR #7 found"]);
+    const d = await detailOf(lasso, ticket.id);
+    expect(d.display.state).toBe("quiet");
+    expect(await lasso.runner.calls()).toEqual([]);
+  });
 });
 
 describe("the Visits migration", () => {

@@ -8,7 +8,7 @@ import type { Verdict } from "../session/runs.ts";
 import { actionArtifact, type RunnerStage } from "../pipeline/load.ts";
 import type { ActionChecks } from "../artifact/action-check.ts";
 import type { OwnedPr } from "../artifact/check.ts";
-import type { ArtifactCheck, Visits } from "../store/visits.ts";
+import type { ArtifactCheck, Visits, VisitRow } from "../store/visits.ts";
 import { ownedOf, type PrLinkFacts, type PrLinks, type PrLinkRow } from "../store/links.ts";
 import { parsePrUrl, type PullRequests, type PrRef } from "./github.ts";
 import { addressedEvidence, checkFailed, describe, fresh, logSlice, marker, outstanding, ownMark, repeatedChecks, watermarkOf, withoutIgnored, type FeedbackItem, type IgnoredAuthor, type PrFacts, type PrFeedback, type Seen } from "./feedback.ts";
@@ -84,6 +84,8 @@ export class Review {
       const current = this.deps.progress.current(ticket);
       if ("problem" in current || current.stage.kind !== "runner" || !current.stage.repeat) continue;
       if (this.deps.sessions.running(ticket.id).some((s) => s.mode === "headless")) continue;
+      // Holding before a Route, the Stage has finished: nothing more is read or run until Start takes the Route.
+      if (ticket.holding_since && this.deps.progress.heldRoute(ticket, current.stage)) continue;
       try {
         changes.push(...(await this.pollTicket(ticket, current.stage)));
       } catch (error) {
@@ -98,7 +100,10 @@ export class Review {
     const changes: TickChange[] = [];
     const found = await this.branchPr(ticket);
     if (found) changes.push({ ticket: ticket.id, summary: `PR #${found.number} found` });
-    if (!links.links(ticket.id).some((l) => l.role === "owned")) return changes;
+    if (!links.links(ticket.id).some((l) => l.role === "owned")) {
+      if (this.arrivalOwed(ticket, stage) && !ticket.flagged_at && !ticket.holding_since) changes.push(await this.noOpenPr(ticket, stage));
+      return changes;
+    }
     const own = ownMark(ticket.id, stage.name);
     // A merged PR is done with; a closed one is still read, so a reopen or a merge is seen.
     const read: Array<{ link: PrLinkRow; ref: PrRef; facts: PrFacts }> = [];
@@ -123,10 +128,18 @@ export class Review {
       if (this.record(ticket, link, status) && facts.state === "OPEN") changes.push({ ticket: ticket.id, summary: `PR #${ref.number}: checks ${status.checks}` });
       return { link, ref, facts, seen, items, freshItems };
     });
-    // Review is done when every Owned PR has merged; one merging early leaves the rest to their Rounds.
+    // Arrived by Route or send, the Visit owes a Round at once, which needs an open Owned PR to work on (LASSO-200).
+    const owed = this.arrivalOwed(ticket, stage);
+    const arriving = owed !== null && !ticket.flagged_at && !ticket.holding_since;
+    if (arriving && !polled.some((p) => p.facts.state === "OPEN")) {
+      changes.push(await this.noOpenPr(ticket, stage));
+      return changes;
+    }
+    // Review is done when every Owned PR has merged; one merging early leaves the rest to their Rounds. A Visit
+    // still owing its arrival Round does not finish this way: the Route sent the Ticket here for that Round.
     const merged = links.links(ticket.id).filter((l) => l.role === "owned").every((l) => l.state === "MERGED");
     const mergedNow = polled.filter((p) => p.facts.state === "MERGED").map((p) => `PR #${p.ref.number}`);
-    if (merged && !stage.artifactWith) {
+    if (merged && !stage.artifactWith && !owed) {
       await progress.finished(ticket);
       changes.push({ ticket: ticket.id, summary: `${mergedNow.join(", ") || "every Owned PR"} merged; ${stage.name} finished` });
       return changes;
@@ -141,6 +154,12 @@ export class Review {
       }
       return changes;
     }
+    // The arrival Round carries everything standing on each open PR, new or not, and the check runs after it.
+    if (arriving) {
+      changes.push(await this.arrivalRound(ticket, stage, owed, polled));
+      return changes;
+    }
+    if (owed) return changes;
     // A check Action ends the Stage, not the merge: it runs each poll while the Ticket waits, unless a human has it or one is running.
     if (stage.artifactWith) {
       if (ticket.flagged_at || this.deps.checks.running(ticket.id)) return changes;
@@ -188,6 +207,42 @@ export class Review {
   }
 
   /**
+   * The current Visit when it owes its arrival Round (LASSO-200): it arrived at this Stage by Route, or by a human's
+   * send, and no Round has run on it yet. Walking forward in owes none; that Visit waits for new Feedback as ever.
+   */
+  private arrivalOwed(ticket: TicketRow, stage: RunnerStage): VisitRow | null {
+    const visit = this.deps.visits.current(ticket.id);
+    if (!visit || visit.stage !== stage.name || (visit.arrived_by !== "route" && visit.arrived_by !== "send")) return null;
+    return this.deps.sessions.latestRound(ticket.id, stage.name, visit.id) ? null : visit;
+  }
+
+  /** Arrived by Route or send with no open Owned PR: a Round would have nothing to work on, so a human is asked. */
+  private async noOpenPr(ticket: TicketRow, stage: RunnerStage): Promise<TickChange> {
+    const visit = this.deps.visits.current(ticket.id)!;
+    const how = visit.arrived_by === "route" ? `by Route ${visit.route}` : "by send";
+    const detail = `${stage.name}: arrived ${how} with no open Owned PR to work on`;
+    await this.deps.progress.flag(ticket.id, "route.no_open_pr", detail);
+    return { ticket: ticket.id, summary: `Flagged: ${detail}` };
+  }
+
+  /**
+   * Make the arrival Round due: each open Owned PR's part holds everything standing on it, seen by an earlier Round
+   * or not (what a routing Round left unaddressed included), so the Round starts even with no new Feedback. Its
+   * prompt carries the Visit's Route text and note as every Session of the Visit does.
+   */
+  private async arrivalRound(ticket: TicketRow, stage: RunnerStage, visit: VisitRow, polled: Array<{ link: PrLinkRow; ref: PrRef; facts: PrFacts; items: FeedbackItem[] }>): Promise<TickChange> {
+    let count = 0;
+    for (const { link, ref, facts, items } of polled) {
+      if (facts.state !== "OPEN") continue;
+      const due: DueRound = { pr: { number: ref.number, url: ref.url }, headSha: facts.headSha, items: await this.withLogs(ref, items, null), watermark: watermarkOf(facts, link.feedback_watermark) };
+      this.deps.links.update(ticket.id, link.url, { feedback_due: JSON.stringify(due) });
+      count += items.length;
+    }
+    const how = visit.arrived_by === "route" ? `by Route ${visit.route}` : "by send";
+    return { ticket: ticket.id, summary: `${stage.name}: arrived ${how}; Round due with ${count} outstanding Feedback item${count === 1 ? "" : "s"}` };
+  }
+
+  /**
    * The Tick's way of finding a PR: the one on the Ticket's own branch, linked
    * as Owned when it is new (and was never unlinked). Skipped while an open
    * Owned PR is on the branch. Returns the PR when this call linked it.
@@ -203,13 +258,14 @@ export class Review {
 
   /**
    * What the next Session of the Stage works: the due snapshots as a new
-   * Round, one part per PR, else the latest Round again when it did not get
-   * through (a retry re-runs the same snapshot), else nothing: a repeating
-   * Stage without Feedback has nothing to do, and a Round that got through is
-   * not run twice.
+   * Round, one part per PR, numbered on from the Stage's highest across every
+   * Visit, else this Visit's latest Round again when it did not get through (a
+   * retry re-runs the same snapshot), else nothing: a repeating Stage without
+   * Feedback has nothing to do, a Round that got through is not run twice, and
+   * an earlier Visit's Round is never re-run.
    */
   plan(ticket: TicketRow, stage: RunnerStage): RoundPlan | null {
-    const { sessions, feedback, links } = this.deps;
+    const { sessions, feedback, links, visits } = this.deps;
     const linked = links.links(ticket.id);
     const pending = linked.filter((l) => l.feedback_due !== null);
     if (pending.length) {
@@ -221,7 +277,7 @@ export class Review {
       });
       return { round, prs, marker: marker(ticket.id, stage.name, round), fromDue: true };
     }
-    const previous = sessions.latestRound(ticket.id, stage.name);
+    const previous = sessions.latestRound(ticket.id, stage.name, visits.current(ticket.id)?.id ?? null);
     if (!previous) return null;
     const rows = feedback.forSession(previous.id);
     const gotThrough = previous.outcome === "succeeded" && rows.every((r) => r.addressed !== null);
@@ -251,13 +307,19 @@ export class Review {
    * After a Round that succeeded: read the PRs again, record what was
    * addressed on each, and say whether the Stage is done (every Owned PR
    * merged), waits for more Feedback, or Flags (spec: Addressed;
-   * review.unaddressed; review.pr_closed).
+   * review.unaddressed; review.pr_closed). A routing Round, one whose agent
+   * picked a Route on an opted-in Stage (LASSO-200), has what it addressed
+   * recorded and then advances at once to leave by that Route: no check runs
+   * and nothing need be addressed, as what stands stays on the PR for the
+   * next Visit's first Round.
    */
   async judge(ticket: TicketRow, stage: RunnerStage, sessionId: string): Promise<Verdict> {
-    const { prs, feedback, links } = this.deps;
+    const { prs, feedback, links, visits, sessions } = this.deps;
+    const visit = visits.current(ticket.id);
+    const routing = stage.agentRoutes === true && visit !== null && visit.picked_route !== null && visit.picked_by === "agent" && sessions.get(sessionId)?.visit === visit.id;
     await this.branchPr(ticket);
     const owned = links.links(ticket.id).filter((l) => l.role === "owned");
-    if (!owned.length) return { flag: "artifact.missing", detail: `${stage.artifact}: no PR for branch ${ticket.branch}` };
+    if (!owned.length) return routing ? "advance" : { flag: "artifact.missing", detail: `${stage.artifact}: no PR for branch ${ticket.branch}` };
     const rows = feedback.forSession(sessionId);
     const fallback = ownedOf(owned)!.url;
     const prOf = (row: FeedbackRow) => row.pr ?? fallback;
@@ -271,7 +333,7 @@ export class Review {
     for (const [url, f] of facts) links.update(ticket.id, url, aboutOf(f));
     const now = links.links(ticket.id).filter((l) => l.role === "owned");
     const merged = now.length > 0 && now.every((l) => l.state === "MERGED");
-    if (merged && !stage.artifactWith) return "advance";
+    if (merged && (!stage.artifactWith || routing)) return "advance";
     if (merged) return this.endCheck(ticket, stage, true);
     const evidence = new Map<number, string | null>();
     for (const url of new Set(rows.map(prOf))) {
@@ -296,6 +358,7 @@ export class Review {
       const items = outstanding(f, own);
       this.record(ticket, link, statusOf(f, fresh(items, link.feedback_watermark, seenBy(stageRows, link.url)).length, items.length));
     }
+    if (routing) return "advance";
     const closed = now.find((l) => l.state === "CLOSED");
     if (closed) return { flag: "review.pr_closed", detail: `PR #${parsePrUrl(closed.url)?.number ?? 0} closed without merging` };
     if (stage.artifactWith) {

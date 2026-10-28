@@ -287,6 +287,8 @@ export function renderFeedback(prs: PrFeedback[], round: number, mark: string): 
       if (item.log) lines.push("   log:", ...item.log.split("\n").map((l) => `   | ${l}`));
     }
   }
+  // A Round started on arrival by a Route may find nothing standing: the Route's instructions are its work.
+  if (count === 0) lines.push("", "Nothing stands on the PR right now; work from the instructions above.");
   lines.push("", `Reply to each comment separately, and end every comment you post on the PR with this marker, on its own line: ${mark}`);
   return lines.join("\n");
 }

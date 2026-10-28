@@ -65,7 +65,11 @@ export class Exits {
       else if (stage.human) {
         progress.endHumanSessions(cleared);
         await terminal.open(cleared, pipeline, stage);
-      } else await runs.launch(cleared, pipeline, stage, "human");
+      } else {
+        await runs.launch(cleared, pipeline, stage, "human");
+        // A repeating Stage with no Round to re-run (route.no_open_pr, say) polls at once, so an arrival Round starts now.
+        if (stage.repeat && !this.deps.sessions.running(cleared.id).some((s) => s.mode === "headless")) await tick.run("start");
+      }
     });
   }
 

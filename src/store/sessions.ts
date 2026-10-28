@@ -131,12 +131,16 @@ export class Sessions {
     return this.touched(id);
   }
 
-  /** The newest headless Session of the Stage that worked a Round, or null before the first. */
-  latestRound(ticket: string, stage: string): SessionRow | null {
-    return (this.db.prepare(`SELECT * FROM sessions WHERE ticket = ? AND stage = ? AND mode = 'headless' AND round IS NOT NULL ORDER BY started_at DESC, ordinal DESC LIMIT 1`).get(ticket, stage) as SessionRow | undefined) ?? null;
+  /**
+   * The newest headless Session of the Stage that worked a Round on this Visit, or null before the Visit's first. An
+   * earlier lap's Round is never re-run: what it left standing is still on the PR, owed by the new Visit's Rounds.
+   */
+  latestRound(ticket: string, stage: string, visit: number | null): SessionRow | null {
+    if (visit === null) return null;
+    return (this.db.prepare(`SELECT * FROM sessions WHERE ticket = ? AND stage = ? AND visit = ? AND mode = 'headless' AND round IS NOT NULL ORDER BY started_at DESC, ordinal DESC LIMIT 1`).get(ticket, stage, visit) as SessionRow | undefined) ?? null;
   }
 
-  /** The highest Round any Session of the Stage worked, or 0 before the first. */
+  /** The highest Round any Session of the Stage worked, across every Visit, or 0 before the first: numbers run on so Markers stay unique. */
   lastRound(ticket: string, stage: string): number {
     const row = this.db.prepare(`SELECT MAX(round) AS n FROM sessions WHERE ticket = ? AND stage = ?`).get(ticket, stage) as { n: number | null };
     return row.n ?? 0;

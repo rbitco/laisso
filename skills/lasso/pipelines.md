@@ -112,6 +112,8 @@ is resolved. The Stage finishes when every Owned PR has merged, or, when its art
 a [check Action](#check-actions), once that check is met; `budget.rounds` caps the
 Rounds. The prompt should tell the Runner to reply with the marker, push,
 and resolve what it fixed, as the default Pipeline's `review` Stage does.
+Arriving by a Route or a send starts a Round at once; see
+[Routes and repeating Stages](#routes-and-repeating-stages).
 
 ### Action Stage
 
@@ -222,9 +224,10 @@ and its `when:` text, and tells it how to call `lasso route` and that with
 no call the Ticket continues to the next Stage. A Route at its limit stays
 listed, marked "choosing it Flags the Ticket for a human", and the call
 accepts it. The pick is taken only when the Session ends as one that would
-advance: a headless Session that succeeded with its Artifact met. On a human
-or taken-over Stage the terminal agent's pick only pre-selects its entry in
-the [Mark done menu](#routes-on-human-stages), with its note; the human
+advance: a headless Session that succeeded with its Artifact met, or a Round
+that succeeded (see [Routes and repeating Stages](#routes-and-repeating-stages)).
+On a human or taken-over Stage the terminal agent's pick only pre-selects its
+entry in the [Mark done menu](#routes-on-human-stages), with its note; the human
 confirms it or chooses otherwise. A failed Session Flags as before and
 routes nothing; Skip, Send, and Mark done on a Flag walk or send as
 before. A new Session picks afresh: a pick an earlier Session of the Visit
@@ -343,6 +346,28 @@ forward, or `{ "route": "...", "note": "..." }` to take a Route.
 When a Route lands on a human Stage, its notification names the Route and
 where it came from ("review needs you: Route fix from publish"), and the
 terminal opened there starts on the prompt with the Route's text and note.
+
+### Routes and repeating Stages
+
+A [repeating Stage](#repeating-stage-repeat-feedback) with `agentRoutes: true`
+lets each Round's agent pick a Route. A Round that succeeds with a pick
+leaves at once: Lasso records what it addressed, skips the check that every
+item was addressed, and takes the Route without the Stage's artifact being
+met. Whatever it left standing stays on the PR, and the first Round of the
+Stage's next Visit carries it.
+
+While the Ticket is elsewhere no Round runs, and each Owned PR keeps its
+Feedback watermark, so Feedback posted meanwhile is new when the Ticket
+returns. Round numbers run on across Visits, so markers never repeat;
+`budget.rounds` counts the Rounds of the current Visit only.
+
+Arriving at a repeating Stage by a Route, or by a human's
+[send](#send-to-stage), starts a Round on the next Tick even with no new
+Feedback. It carries the Route's text and note (or the send's
+instructions) and everything still standing on each open Owned PR. Its
+check, if the Stage has one, runs after that Round as usual. With no open
+Owned PR the Ticket is Flagged `route.no_open_pr` instead. Walking forward
+into a repeating Stage waits for new Feedback as before.
 
 ### Send to Stage
 
