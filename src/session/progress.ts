@@ -13,6 +13,13 @@ import type { Teardown } from "./teardown.ts";
 import { decide, type Exit, type RoutePick } from "../route/route.ts";
 import type { CheckRun } from "../artifact/action-check.ts";
 
+/** What Send to Stage asks for: the target Stage, the human's instructions, and a declared Route to reuse, if any. */
+export interface SendRequest {
+  stage: string;
+  note: string | null;
+  route: string | null;
+}
+
 /** A Trigger that cannot pull right now, with the reason for the human. */
 export class TriggerError extends Error {}
 
@@ -278,6 +285,36 @@ export class Progress {
     run.pick = route === null ? null : { route, note: note?.trim() || null };
     this.deps.log.info(route === null ? "route.cleared" : "route.picked", { ticket: ticket.id, stage: run.stage, check_run: run.id, route });
     return { ticket: ticket.id, stage: current.stage, route, note: run.pick?.note ?? null };
+  }
+
+  /**
+   * Send to Stage (LASSO-197): a human moves the Ticket to any Stage of its Pipeline, the current one included, on
+   * a new Visit that arrived by send and was chosen by a human. The instructions are that Visit's note; a declared
+   * Route of the current Stage that goes to the target may be reused for its append or replace text. A human's
+   * choice never counts against a Route Budget and is never refused for one. It works from a Flag, a hold, a human
+   * or taken-over Stage (whose terminal Sessions end, as Mark done ends them), and any Stage not running a Session;
+   * a pick left on the Visit being left stays there, overridden by this send.
+   */
+  send(ticket: TicketRow, request: SendRequest): TicketRow {
+    if (ticket.state !== "active") throw new TriggerError(`Ticket ${ticket.reference ?? ticket.id} is ${ticket.state}`);
+    const current = this.current(ticket);
+    if ("problem" in current) throw new TriggerError(current.problem);
+    const running = this.deps.sessions.running(ticket.id).find((s) => s.mode !== "terminal");
+    if (running) throw new TriggerError(`${running.stage} has a Session running; stop it or let it end before sending the Ticket elsewhere`);
+    const target = current.pipeline.stages.find((s) => s.name === request.stage);
+    if (!target) throw new TriggerError(`Pipeline ${ticket.pipeline} has no Stage named ${request.stage}`);
+    const route = request.route === null ? null : current.stage.routes?.[request.route];
+    if (request.route !== null && !route) throw new TriggerError(`Stage ${current.stage.name} declares no Route named ${request.route}`);
+    if (route && route.to !== target.name) throw new TriggerError(`Route ${request.route} goes to ${route.to}, not ${target.name}`);
+    const overridden = this.deps.visits.current(ticket.id)?.picked_route ?? null;
+    this.endHumanSessions(ticket);
+    const now = new Date().toISOString();
+    const arrival = { stage: target.name, arrived_by: "send" as const, route: request.route, chosen_by: "human" as const, text: route ? (route.replace ?? route.append ?? null) : null, note: request.note, replaces: route?.replace !== undefined };
+    const updated = this.deps.tickets.arrive(ticket.id, arrival, { holding_since: null, runnable_since: null, ...unflagPatch(ticket, now) }, now);
+    this.deps.log.info("ticket.sent", { ticket: ticket.id, from: current.stage.name, stage: target.name, route: request.route, overridden, flagged: ticket.flagged_at !== null, holding: ticket.holding_since !== null });
+    this.entered(updated, target);
+    this.deps.mirror.pushSoon(updated.id);
+    return updated;
   }
 
   /** The Start trigger: release a holding Ticket into its current Stage. */

@@ -432,3 +432,114 @@ describe("a check Action that picks a Route", () => {
     });
   });
 });
+
+describe("Send to Stage", () => {
+  const send = (lasso: Lasso, id: string, body: Record<string, unknown>) => lasso.api<TicketDetail>(`/api/tickets/${id}/send`, { method: "POST", body: json(body) });
+
+  it("sends a Ticket back from a human Stage with instructions that reach the target prompt, and it walks on from there", async () => {
+    const lasso = await lassoWith();
+    await gate(lasso);
+    const ticket = await add(lasso);
+    const at = await rested(lasso, ticket.id);
+    expect(at.stage.name).toBe("polish");
+    // polish declares no Routes: any Stage can still be sent to, with only the human's words.
+    expect(at.send).toEqual({ unavailable: null, routes: [] });
+
+    await send(lasso, ticket.id, { stage: "implement", instructions: "  Handle the empty list too. " });
+    const detail = await rested(lasso, ticket.id);
+    expect(detail.stage.name).toBe("polish");
+    const visits = visitsOf(lasso, ticket.id);
+    expect(visits.map((v) => v.stage)).toEqual(["implement", "gate", "polish", "implement", "gate", "polish"]);
+    expect(visits[3]).toMatchObject({ arrived_by: "send", from_visit: visits[2]!.id, route: null, chosen_by: "human", text: null, note: "Handle the empty list too.", replaces: 0 });
+    // The instructions last for that Visit only; the walk on from it is ordinary.
+    expect(visits[4]).toMatchObject({ arrived_by: "walk", note: null });
+
+    const [first, second] = await prompts(lasso);
+    expect(first).not.toContain("A human sent this Ticket here");
+    expect(second).toContain("Do the work.\n\nA human sent this Ticket here, with these instructions: Handle the empty list too.");
+  });
+
+  it("reuses a declared Route's text from a Flag, keeping the pick it overrides on the Visit it leaves", async () => {
+    const lasso = await lassoWith();
+    await gate(lasso, 'lasso route back; echo "broke"; exit 2');
+    const ticket = await add(lasso);
+    const flagged = await rested(lasso, ticket.id);
+    expect(flagged.flag).toMatchObject({ reason: "outcome.failed" });
+    expect(flagged.send).toEqual({
+      unavailable: null,
+      routes: [
+        { name: "back", to: "implement", text: "Fix what the gate found.", replaces: false },
+        { name: "redo", to: "implement", text: "Start over.", replaces: true },
+        { name: "ahead", to: "ship", text: null, replaces: false },
+      ],
+    });
+
+    const sent = await send(lasso, ticket.id, { stage: "implement", route: "redo", instructions: "Try a smaller change." });
+    expect(sent.flag).toBeNull();
+    const detail = await rested(lasso, ticket.id);
+    expect(detail.stage.name).toBe("polish");
+    const visits = visitsOf(lasso, ticket.id);
+    expect(visits.map((v) => v.stage)).toEqual(["implement", "gate", "implement", "gate", "polish"]);
+    expect(visits[1]).toMatchObject({ picked_route: "back" });
+    expect(visits[2]).toMatchObject({ arrived_by: "send", route: "redo", chosen_by: "human", text: "Start over.", note: "Try a smaller change.", replaces: 1 });
+
+    const second = (await prompts(lasso))[1]!;
+    expect(second).toContain("Start over.\n\nA human sent this Ticket here by Route redo, with these instructions: Try a smaller change.");
+    expect(second).not.toContain("Do the work.");
+  });
+
+  it("is never refused for a Route's Budget, and refuses only what it cannot do", async () => {
+    const lasso = await lassoWith(WORK.replace("budget: 3", "budget: 0"));
+    await gate(lasso, "exit 2");
+    const ticket = await add(lasso);
+    expect((await rested(lasso, ticket.id)).flag).toMatchObject({ reason: "outcome.failed" });
+
+    await expect(send(lasso, ticket.id, {})).rejects.toThrow("stage must name the Stage to send the Ticket to");
+    await expect(send(lasso, ticket.id, { stage: "nowhere" })).rejects.toThrow("Pipeline work has no Stage named nowhere");
+    await expect(send(lasso, ticket.id, { stage: "implement", route: "nope" })).rejects.toThrow("Stage gate declares no Route named nope");
+    await expect(send(lasso, ticket.id, { stage: "implement", route: "ahead" })).rejects.toThrow("Route ahead goes to ship, not implement");
+    expect(visitsOf(lasso, ticket.id)).toHaveLength(2);
+
+    // back allows an agent, Action or check no laps at all; a human's send takes it anyway, and counts nothing.
+    await send(lasso, ticket.id, { stage: "implement", route: "back" });
+    const detail = await rested(lasso, ticket.id);
+    expect(detail.stage.name).toBe("polish");
+    expect(visitsOf(lasso, ticket.id)[2]).toMatchObject({ arrived_by: "send", route: "back", chosen_by: "human", text: "Fix what the gate found.", note: null });
+    // With no instructions the Route's text is all the prompt gains.
+    const second = (await prompts(lasso))[1]!;
+    expect(second).toContain("Do the work.\n\nFix what the gate found.");
+    expect(second).not.toContain("A human sent this Ticket here");
+  });
+
+  it("releases a holding Ticket into the Stage it is sent to", async () => {
+    const lasso = await lassoWith(`stages:\n  - name: implement\n    prompt: Do the work.\n    advance: false\n  - name: polish\n    prompt: Polish.\n    human: true\n`);
+    const ticket = await add(lasso);
+    const holding = await rested(lasso, ticket.id);
+    expect(holding.display.state).toBe("holding");
+
+    await send(lasso, ticket.id, { stage: "implement", instructions: "" });
+    await waitFor(async () => ((await lasso.runner.calls()).length === 2 ? true : null), "implement to run again");
+    // implement runs and, saying advance: false, holds before polish again.
+    expect((await rested(lasso, ticket.id)).display.state).toBe("holding");
+    expect(visitsOf(lasso, ticket.id).map((v) => [v.stage, v.arrived_by, v.note])).toEqual([["implement", "intake", null], ["polish", "walk", null], ["implement", "send", null], ["polish", "walk", null]]);
+    // Blank instructions are none: the prompt is the Stage's own.
+    expect((await prompts(lasso))[1]).not.toContain("A human sent this Ticket here");
+  });
+
+  it("is refused while a Session runs, and for a Ticket that has ended", async () => {
+    const lasso = await lassoWith();
+    await lasso.runner.script({ hang: true });
+    const ticket = await add(lasso);
+    const runningNow = await waitFor(async () => {
+      await checkNow(lasso);
+      const d = await detailOf(lasso, ticket.id);
+      return d.sessions.some((s) => s.running) ? d : null;
+    }, "implement to start");
+    expect(runningNow.send).toEqual({ unavailable: "implement has a Session running; stop it or let it end first", routes: [] });
+    await expect(send(lasso, ticket.id, { stage: "ship" })).rejects.toThrow("implement has a Session running; stop it or let it end before sending the Ticket elsewhere");
+
+    const abandoned = await lasso.api<TicketDetail>(`/api/tickets/${ticket.id}/abandon`, { method: "POST", body: "{}" });
+    expect(abandoned.send).toBeNull();
+    await expect(send(lasso, ticket.id, { stage: "ship" })).rejects.toThrow("is abandoned");
+  });
+});

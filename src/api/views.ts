@@ -203,6 +203,25 @@ export interface TicketDetail extends TicketView {
   pipelineDrift: Drift | null;
   /** Each Runner Stage of the Ticket's Version and the profile it runs under now, override included. */
   profiles: StageProfileView[];
+  /** Send here (LASSO-197): null when the Ticket cannot be sent anywhere (done, Abandoned, or its Pipeline not loading). */
+  send: SendView | null;
+}
+
+/** What the Send here popover offers on any station of an active Ticket. */
+export interface SendView {
+  /** Why no send can go now (a Session is running), else null. */
+  unavailable: string | null;
+  /** The current Stage's declared Routes, each offered as "Use Route <name>" on the Stage it goes to. */
+  routes: SendRoute[];
+}
+
+/** A declared Route a send may reuse, with the text it adds to its target's prompt. A human's send never counts against its Budget. */
+export interface SendRoute {
+  name: string;
+  to: string;
+  /** Its append or replace text; null when it has neither. */
+  text: string | null;
+  replaces: boolean;
 }
 
 /** What intake returns: the new Ticket's view plus whether its branch was found rather than made. */
@@ -416,7 +435,18 @@ export function ticketDetail(ticket: TicketRow, ctx: ViewContext): TicketDetail 
   const sessions = ctx.sessionsFor(ticket).map((row) => sessionView(row, Date.now(), ctx.feedbackFor(row)));
   const pipeline = ctx.pipelineFor(ticket);
   const profiles = (pipeline?.stages ?? []).flatMap((stage) => (stage.kind === "runner" ? [stageProfileView(ctx.profiles, ticket, pipeline!, stage)] : []));
-  return { ...ticketView(ticket, ctx), session: sessions[0] ?? null, sessions, pipelineDrift: ctx.driftFor(ticket), profiles };
+  return { ...ticketView(ticket, ctx), session: sessions[0] ?? null, sessions, pipelineDrift: ctx.driftFor(ticket), profiles, send: sendView(ticket, pipeline, sessions) };
+}
+
+/** Send here as it stands: refused only while a Session other than a terminal runs; Flags, holds and Budgets never stop it. */
+function sendView(ticket: TicketRow, pipeline: Pipeline | null, sessions: SessionView[]): SendView | null {
+  const stage = pipeline?.stages.find((s) => s.name === ticket.stage);
+  if (ticket.state !== "active" || !stage) return null;
+  const running = sessions.find((s) => s.running && s.mode !== "terminal");
+  return {
+    unavailable: running ? `${running.stage} has a Session running; stop it or let it end first` : null,
+    routes: Object.entries(stage.routes ?? {}).map(([name, r]) => ({ name, to: r.to, text: r.replace ?? r.append ?? null, replaces: r.replace !== undefined })),
+  };
 }
 
 /** A Runner Stage's profile as its next Session would resolve it, with both modes' settings for the summary lines. */

@@ -129,19 +129,26 @@ interface StageLike {
   skills: string[];
 }
 
-type VisitLike = Pick<VisitRow, "stage" | "route" | "chosen_by" | "text" | "note" | "replaces">;
+type VisitLike = Pick<VisitRow, "stage" | "arrived_by" | "route" | "chosen_by" | "text" | "note" | "replaces">;
 
 const CHOOSERS: Record<NonNullable<VisitRow["chosen_by"]>, string> = { agent: "the agent", action: "an Action", check: "a check", human: "a human" };
 
 /**
- * The Stage prompt for a Visit that arrived by Route: the Route's text after the prompt, or in place of its text
- * (skills and the preamble are not part of it, so they stay), then the note it carried. It lasts for the Visit,
- * retries and Rounds included; any other Visit runs the Stage prompt as written.
+ * The Stage prompt for a Visit that arrived by Route, or that a human sent here (LASSO-197): the Route's text after
+ * the prompt, or in place of its text (skills and the preamble are not part of it, so they stay), then the note it
+ * carried, which for a send is the human's instructions. It lasts for the Visit, retries and Rounds included; any
+ * other Visit runs the Stage prompt as written.
  */
 export function visitPrompt(prompt: string | null, visit: Omit<VisitLike, "stage">): string | null {
-  if (!visit.route) return prompt;
-  const note = visit.note ? `Lasso sent this Ticket here by Route ${visit.route}, chosen by ${visit.chosen_by ? CHOOSERS[visit.chosen_by] : "Lasso"}, with this note: ${visit.note}` : null;
-  const parts = [visit.replaces ? null : prompt?.trim(), visit.text?.trim(), note].filter(Boolean);
+  const sent = visit.arrived_by === "send";
+  if (!visit.route && !(sent && visit.note)) return prompt;
+  const by = visit.route ? ` by Route ${visit.route}` : "";
+  const note = !visit.note
+    ? null
+    : sent
+      ? `A human sent this Ticket here${by}, with these instructions: ${visit.note}`
+      : `Lasso sent this Ticket here${by}, chosen by ${visit.chosen_by ? CHOOSERS[visit.chosen_by] : "Lasso"}, with this note: ${visit.note}`;
+  const parts = [visit.replaces ? null : prompt?.trim(), visit.route ? visit.text?.trim() : null, note].filter(Boolean);
   return parts.length ? parts.join("\n\n") : null;
 }
 

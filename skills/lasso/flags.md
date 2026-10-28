@@ -33,6 +33,8 @@ current Stage), **Resume** (re-enter the held Session where the Runner
 allows), **Extend** (raise the Ticket's own Budget), **Mark done** (accept
 and advance), **Skip** (drop the Stage and advance; also offered on a Stage that has not started, see [pipelines.md](pipelines.md#runner-stage)), **Take over in
 terminal** (re-enter the Session in a terminal and work the Stage as a human
-Stage, until Hand back returns it to Lasso), **Abandon** (final; the Ticket cannot be reopened, though its issue
+Stage, until Hand back returns it to Lasso), **Send to Stage** (move the
+Ticket to any Stage with optional instructions; see
+[pipelines.md](pipelines.md#send-to-stage)), **Abandon** (final; the Ticket cannot be reopened, though its issue
 can be intaken again; the branch is kept, and the dashboard asks which open Owned PRs to close, all ticked by default). Retry and Resume count against attempts. Fixing config.yaml or a Pipeline does not
 clear the Flag on its own; a human still picks an exit.

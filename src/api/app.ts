@@ -214,6 +214,17 @@ export function createApp(deps: AppDeps): Hono {
     await deps.tick.run("start");
     return deps.tickets.get(released.id)!;
   });
+  // Send to Stage (LASSO-197): { stage, instructions?, route? } moves the Ticket to any Stage of its Pipeline on a
+  // new Visit, the instructions its note and a declared Route of the current Stage to that Stage reused for its text.
+  // Refused only while a Session other than a terminal runs; never for a Route Budget.
+  trigger("send", async (ticket, body) => {
+    if (typeof body.stage !== "string" || !body.stage) throw new TriggerError("stage must name the Stage to send the Ticket to");
+    if (body.instructions !== undefined && body.instructions !== null && typeof body.instructions !== "string") throw new TriggerError("instructions must be text");
+    if (body.route !== undefined && body.route !== null && (typeof body.route !== "string" || !body.route)) throw new TriggerError("route must name a declared Route, or be left out to send with only your words");
+    const sent = deps.progress.send(ticket, { stage: body.stage, note: typeof body.instructions === "string" ? body.instructions.trim() || null : null, route: typeof body.route === "string" ? body.route : null });
+    await deps.tick.run("start");
+    return deps.tickets.get(sent.id)!;
+  });
   // The six exits from a Flag; Mark done and Skip above accept a Flagged Ticket too, and Abandon any active one.
   // Retry with { profile } ("retry with…") sets the Stage's override to it first, then retries under it.
   trigger("retry", (ticket, body) => deps.exits.retry(ticket, body.profile));

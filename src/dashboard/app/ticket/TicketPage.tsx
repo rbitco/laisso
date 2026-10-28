@@ -185,7 +185,7 @@ function TicketBody({ ticket: t, select, refresh }: { ticket: TicketDetail; sele
       <TitleBar ticket={t} refresh={refresh}>
         {!t.flag && triggers}
       </TitleBar>
-      <Flow ticket={t} focus={narrowed} onFocus={setFocus} />
+      <Flow ticket={t} focus={narrowed} onFocus={setFocus} refresh={refresh} />
       {t.flag && <FlagBox ticket={t}>{triggers}</FlagBox>}
       <div className="dgrid">
         <div className="stack">

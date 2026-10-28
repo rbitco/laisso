@@ -72,7 +72,7 @@ function ticket(id: string, over: Partial<TicketDetail> = {}): TicketDetail {
     ],
     mirrorPending: false, createdAt: T0, updatedAt: T0, url: `http://lasso/#${id}`,
     session: s, sessions: [session({ ticket: id, id: "S2", stage: "implement", outcome: "failed" }), s], pipelineDrift: "same",
-    profiles: [profile("plan", "claude-opus"), profile("implement", "claude-opus")],
+    profiles: [profile("plan", "claude-opus"), profile("implement", "claude-opus")], send: { unavailable: null, routes: [] },
     ...over,
   };
 }
@@ -656,6 +656,89 @@ describe("the Ticket's exits", () => {
     await showPage("A");
     await userEvent.setup().click(within(triggers()).getByRole("button", { name: "Check PR now" }));
     await waitFor(() => expect(lasso.sent).toEqual([{ method: "POST", route: "/api/check-now", body: null }]));
+  });
+});
+
+describe("sending a Ticket to a Stage (LASSO-197)", () => {
+  const station = (stage: string) => document.querySelector<Element>(`[data-role="flow"] [data-stage="${stage}"]`)!;
+  const sendHere = () => document.querySelector<HTMLButtonElement>('[data-role="send-here"]');
+  const sendPop = (stage: string) => screen.queryByRole("dialog", { name: `Send to ${stage}` });
+
+  it("offers Send here on a hovered station, and sends the instructions typed in its popover", async () => {
+    const lasso = fakeLasso([ticket("A")]);
+    await showPage("A");
+    const user = userEvent.setup();
+    expect(sendHere()).toBeNull();
+    await user.hover(station("plan"));
+    expect(sendHere()!.dataset.stage).toBe("plan");
+    await user.hover(station("implement"));
+    expect(sendHere()!.dataset.stage).toBe("implement");
+    await user.hover(station("plan"));
+    await user.click(sendHere()!);
+    const pop = sendPop("plan")!;
+    // plan is no Route's target: there is nothing to tick, only room for words.
+    expect(within(pop).queryAllByRole("checkbox")).toEqual([]);
+    await user.type(within(pop).getByRole("textbox", { name: "Instructions" }), "Plan for the empty list too.");
+    await user.click(within(pop).getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(lasso.sent).toEqual([{ method: "POST", route: "/api/tickets/A/send", body: { stage: "plan", instructions: "Plan for the empty list too." } }]));
+    await waitFor(() => expect(sendPop("plan")).toBeNull());
+    await waitFor(() => expect(detailReads(lasso, "A")).toBe(2));
+  });
+
+  it("offers Use Route pre-ticked with its text where a declared Route goes, never as one that would Flag, and sends without it when unticked", async () => {
+    const send = { unavailable: null, routes: [{ name: "back", to: "plan", text: "Fix what review found.", replaces: false }, { name: "ahead", to: "ship", text: null, replaces: false }] };
+    const lasso = fakeLasso([ticket("A", { send })]);
+    await showPage("A");
+    const user = userEvent.setup();
+    await user.hover(station("plan"));
+    await user.click(sendHere()!);
+    const pop = sendPop("plan")!;
+    const use = within(pop).getByRole("checkbox", { name: "Use Route back" }) as HTMLInputElement;
+    expect(use.checked).toBe(true);
+    expect(within(pop).getByText("Adds to the prompt: Fix what review found.")).toBeTruthy();
+    expect(pop.textContent).not.toMatch(/Flag/);
+    await user.click(within(pop).getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(lasso.sent).toEqual([{ method: "POST", route: "/api/tickets/A/send", body: { stage: "plan", route: "back" } }]));
+
+    await waitFor(() => expect(sendPop("plan")).toBeNull());
+    await user.hover(station("plan"));
+    await user.click(sendHere()!);
+    await user.click(within(sendPop("plan")!).getByRole("checkbox", { name: "Use Route back" }));
+    await user.click(within(sendPop("plan")!).getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(lasso.sent.at(-1)).toEqual({ method: "POST", route: "/api/tickets/A/send", body: { stage: "plan" } }));
+  });
+
+  it("closes the popover on Cancel or Escape without sending, and shows a refusal", async () => {
+    const lasso = fakeLasso([ticket("A")]);
+    lasso.state.refuse.send = { status: 400, body: { error: "Pipeline default has no Stage named plan" } };
+    await showPage("A");
+    const user = userEvent.setup();
+    const open = async () => {
+      await user.hover(station("implement"));
+      await user.click(sendHere()!);
+      return screen.getByRole("dialog", { name: "Send to implement" });
+    };
+    await user.click(within(await open()).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await open();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(lasso.sent).toEqual([]);
+    await user.click(within(await open()).getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(notice().textContent).toBe("Pipeline default has no Stage named plan"));
+  });
+
+  it("shows Send here disabled, saying why, while a Session runs, and not at all once the Ticket has ended", async () => {
+    fakeLasso([ticket("A", { send: { unavailable: "implement has a Session running; stop it or let it end first", routes: [] } }), ticket("B", { state: "done", send: null })]);
+    const a = await showPage("A");
+    const user = userEvent.setup();
+    await user.hover(station("plan"));
+    expect(sendHere()!.disabled).toBe(true);
+    expect(sendHere()!.title).toBe("implement has a Session running; stop it or let it end first");
+    a.unmount();
+    await showPage("B");
+    await user.hover(station("plan"));
+    expect(sendHere()).toBeNull();
   });
 });
 

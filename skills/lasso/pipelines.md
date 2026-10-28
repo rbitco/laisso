@@ -199,6 +199,22 @@ With an Action `ci` whose command is
 failing test run sends the Ticket back to `implement` with that note, and a
 passing one walks on to `ship`.
 
+### Send to Stage
+
+A human can move a Ticket to any Stage of its Pipeline, the current one
+included: on the Ticket page, hover a station on the Stage track and choose
+**Send here**, or `POST /api/tickets/<id>/send` with
+`{ "stage": "...", "instructions": "...", "route": "..." }` (only `stage` is
+required). The Ticket starts a new Visit there and walks on from it. The
+instructions reach every Runner Session of that Visit as "A human sent this
+Ticket here, with these instructions: ...". Where a Route of the current
+Stage goes to that Stage, the popover offers **Use Route <name>**, ticked,
+showing its `append` or `replace` text; untick it to send only your words
+(through the API, name it in `route`). A send never counts against a
+Route's `budget` and is never refused for one. It works on a Flagged,
+holding, human or not-yet-started Stage, and is refused only while a
+headless or action Session runs.
+
 ## Artifacts
 
 | Artifact | Present when |
