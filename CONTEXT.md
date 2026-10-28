@@ -70,8 +70,9 @@ _Avoid_: blocked, stuck, escalated
 
 **Attention**:
 The condition of a Ticket that is waiting on a human: Flagged, running a
-human-in-the-loop Stage, or holding at a Stage that does not auto-advance.
-The dashboard lists these first and Lasso notifies once as each begins.
+human-in-the-loop Stage, or holding after a Stage, or before a Route, that
+does not auto-advance. A Route firing is not Attention by itself. The
+dashboard lists these first and Lasso notifies once as each begins.
 _Avoid_: pending, waiting, needs review, action required
 
 **Queued**:
