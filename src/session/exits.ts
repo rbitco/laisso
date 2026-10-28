@@ -98,7 +98,7 @@ export class Exits {
    */
   async takeOver(ticket: TicketRow): Promise<TicketRow> {
     const { progress, sessions, terminal, runs, tickets } = this.deps;
-    if (ticket.holding_since && !ticket.flagged_at) throw new TriggerError(`Ticket ${ticket.reference ?? ticket.id} is holding; Start ${ticket.stage} or open the draft`);
+    if (ticket.holding_since && !ticket.flagged_at) throw new TriggerError(`Ticket ${ticket.reference ?? ticket.id} is holding; ${progress.startLabel(ticket, progress.currentForTrigger(ticket).stage)} or open the draft`);
     const { pipeline, stage } = ticket.flagged_at ? progress.flaggedStage(ticket) : progress.currentForTrigger(ticket);
     if (stage.kind !== "runner") throw new TriggerError(`${stage.name} is an action Stage; there is no Session to take over`);
     if (stage.human) throw new TriggerError(`${stage.name} is a human Stage; Open terminal works it`);
@@ -150,13 +150,14 @@ export class Exits {
 
   /**
    * Open the draft: while a Ticket holds for Start, a terminal on the Stage that just finished, to read or steer
-   * what it made before approving it. Start, not this, releases the next Stage.
+   * what it made before approving it. Start, not this, releases the next Stage. Holding before a Route, the Stage
+   * that finished is the current one, the Route's source.
    */
   async openDraft(ticket: TicketRow): Promise<TicketRow> {
     const { progress, sessions, terminal, tickets } = this.deps;
-    const { pipeline, index } = progress.currentForTrigger(ticket);
+    const { pipeline, stage, index } = progress.currentForTrigger(ticket);
     if (!ticket.holding_since) throw new TriggerError(`Ticket ${ticket.reference ?? ticket.id} is not holding for Start`);
-    const finished = pipeline.stages[index - 1];
+    const finished = progress.heldRoute(ticket, stage) ? stage : pipeline.stages[index - 1];
     if (!finished || finished.kind !== "runner") throw new TriggerError(`nothing before ${ticket.stage} has a Session to open`);
     const from = sessions.forTicket(ticket.id).find((s) => s.mode === "headless" && s.stage === finished.name) ?? null;
     if (!from) throw new TriggerError(`${finished.name} has no headless Session to open`);

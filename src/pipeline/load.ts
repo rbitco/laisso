@@ -32,6 +32,8 @@ export interface Route {
   replace?: string;
   /** How many times an agent, Action or check may take it; parsed here, enforced by the Route Budget. */
   budget?: number;
+  /** false holds the Ticket before taking this Route, on this exit only, until a human presses Start (LASSO-196). */
+  advance?: boolean;
 }
 
 /** A Stage's Routes by name; absent when it declares none. */
@@ -117,7 +119,7 @@ export function loadPipeline(dir: string, name: string): Pipeline {
 const PIPELINE_FIELDS = new Set(["profile", "budget", "stages"]);
 const RUNNER_STAGE_FIELDS = new Set(["name", "prompt", "skills", "profile", "human", "advance", "artifact", "repeat", "budget", "routes"]);
 const ACTION_STAGE_FIELDS = new Set(["action", "name", "with", "routes"]);
-const ROUTE_FIELDS = new Set(["to", "when", "append", "replace", "budget"]);
+const ROUTE_FIELDS = new Set(["to", "when", "append", "replace", "budget", "advance"]);
 
 export function parsePipeline(name: string, text: string): Pipeline {
   let raw: unknown;
@@ -227,6 +229,10 @@ function parseRoutes(value: unknown, where: string): { routes?: Routes } {
     if (raw.append !== undefined) route.append = text(raw.append, `${at}: append`, fail);
     if (raw.replace !== undefined) route.replace = text(raw.replace, `${at}: replace`, fail);
     if (raw.budget !== undefined) route.budget = count(raw.budget, `${at}: budget`, fail);
+    if (raw.advance !== undefined) {
+      if (typeof raw.advance !== "boolean") throw new PipelineError(`${at}: advance must be true or false`);
+      route.advance = raw.advance;
+    }
     routes[name] = route;
   }
   return Object.keys(routes).length ? { routes } : {};

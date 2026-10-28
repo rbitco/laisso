@@ -39,7 +39,7 @@ names are lowercase letters, digits and hyphens, unique in the Pipeline.
 | `skills` | `[]` | list of skill names, invoked in the Runner's own form (Claude `/name`, Codex `$name` linked to `<skills_dir>/<name>/SKILL.md`, Pi `/skill:name`), ahead of everything else in the prompt. The skill must be installed where that Runner finds it. |
 | `profile` | inherit | the Agent Profile this Stage runs under; see [profiles.md](profiles.md#which-profile-a-stage-runs-under) |
 | `human` | `false` | `true` opens the Runner in a terminal for the human, who marks the Stage done from the dashboard |
-| `advance` | `true` | `false` holds the Ticket after this Stage until a human presses Start on the next one |
+| `advance` | `true` | `false` holds the Ticket after this Stage until a human presses Start on the next one, or on the Route it picked; see [Holding before a Route](#holding-before-a-route) |
 | `artifact` | none | what must exist for the Stage to count as done; see [Artifacts](#artifacts) |
 | `repeat` | none | only `feedback`: the Review loop. Needs an `artifact` as its end condition: `pr-merged`, or a [check Action](#check-actions). |
 | `budget` | inherit | `rounds`, `attempts` (whole numbers, 0 or more), `wallTime` (duration). `spend` belongs on the Pipeline. |
@@ -152,6 +152,7 @@ hyphens, unique in the Stage).
 | `append` | optional text added after the target Stage's prompt |
 | `replace` | optional text used in place of the target Stage's prompt; give `append` or `replace`, not both |
 | `budget` | optional whole number, 0 or more: how many times an agent, Action or check may take the Route for a Ticket (see [Route Budget](#route-budget)) |
+| `advance` | optional `true` or `false`: `false` holds the Ticket before taking this Route until a human presses Start (see [Holding before a Route](#holding-before-a-route)) |
 
 Saving from the dashboard, loading the file, and Intake all refuse a
 Pipeline whose Route breaks a rule, naming the Stage and Route.
@@ -210,6 +211,25 @@ With an Action `ci` whose command is
 `pnpm test || { lasso route fix --note "pnpm test failed"; exit 0; }`, a
 failing test run sends the Ticket back to `implement` with that note, and a
 passing one walks on to `ship`.
+
+### Holding before a Route
+
+A Stage with `advance: false` holds on every way out: walking forward, or a
+Route an agent, Action or check picked. A Route with its own
+`advance: false` holds on that way out only. The Ticket holds when either
+says so. Holding before a Route, the Ticket stays at the source Stage, which
+shows Holding with "Start <target> via <route> when ready", and the gate
+notification names the Route the same way. **Start <target> via <route>**
+takes it. Stages a forward Route passes over never hold it.
+
+The pick is checked against the [Route Budget](#route-budget) at once: a
+spent Route Flags `budget.routes` instead of holding. The Route counts only
+when Start takes it. Instead of Start, a human may Send the Ticket
+elsewhere, Skip, or Abandon it; none of these counts, and the source Visit
+keeps the pick it overrode. **Skip <source>** declines the Route: the source
+Stage is marked skipped and the Ticket walks on to the next Stage without
+holding again, even when the source says `advance: false`, since Skip was
+the human's decision at the gate. A Route taken without a hold posts no notification.
 
 ### Send to Stage
 

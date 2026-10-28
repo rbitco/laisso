@@ -57,6 +57,11 @@ export interface TakeRoute {
   replaces: boolean;
   note: string | null;
   chosenBy: ChosenBy;
+  /**
+   * Present when the Ticket holds before taking it: the source Stage or the Route says `advance: false`. The pick
+   * waits on the source Visit, naming the Route, and Start takes it then (LASSO-196).
+   */
+  holds?: true;
 }
 
 /** The Stage's own run and its check picked different Routes: the Ticket is Flagged `route.conflict` showing both. */
@@ -100,6 +105,11 @@ export type Exit = { kind: "walk" } | TakeRoute | Conflict | RouteFlag | { kind:
  * pick by an agent, Action or check of a Route already taken up to its limit
  * is not taken, and the Ticket Flags `budget.routes` with the Route pending.
  * A human's pick is never counted and never refused.
+ *
+ * A Route with Budget left that an agent, Action or check picked holds before
+ * it is taken when the source Stage or the Route itself says `advance: false`:
+ * the Stage's on every exit, the Route's on that exit only. Holds of Stages a
+ * forward Route passes over play no part. A human's pick never holds.
  */
 export function decide({ stage, pick, check = null, end, counts }: Leaving): Exit {
   if (!end.succeeded) return { kind: "failed", untaken: pick };
@@ -123,7 +133,17 @@ export function decide({ stage, pick, check = null, end, counts }: Leaving): Exi
   if (taken.by !== "human" && count && count.used >= count.limit) {
     return { kind: "flag", reason: "budget.routes", detail: `Route ${taken.route} to ${route.to}: ${count.used} of ${count.limit} used; Extend to take it`, pending: take };
   }
-  return take;
+  const gated = (stage.kind === "runner" && !stage.advance) || route.advance === false;
+  return taken.by !== "human" && gated ? { ...take, holds: true } : take;
+}
+
+/**
+ * The Route a holding Ticket waits to take: the current Visit's pick, when its Stage declares it. A Ticket holding
+ * after walking forward has arrived at the next Stage, whose new Visit has no pick, so this is null for it.
+ */
+export function heldRoute(stage: Stage, picked: string | null): { route: string; to: string } | null {
+  const route = picked ? stage.routes?.[picked] : undefined;
+  return route ? { route: picked!, to: route.to } : null;
 }
 
 

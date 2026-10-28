@@ -6,6 +6,7 @@ import type { PipelineSource } from "../pipeline/files.ts";
 import type { Drift, VersionRow } from "../store/versions.ts";
 import type { ActionConfig, Config, ProfileScope, ProfileSettings, ProfileSource } from "../server/config.ts";
 import { resumeRefusal, ticketProfile } from "../session/overrides.ts";
+import { heldRoute } from "../route/route.ts";
 import type { BudgetView } from "../budget/budget.ts";
 import { adapterFor } from "../runner/adapters.ts";
 import type { FeedbackRow } from "../store/feedback.ts";
@@ -386,11 +387,13 @@ export function ticketView(ticket: TicketRow, ctx: ViewContext): TicketView {
   const takenOver = stage?.kind === "runner" && !stage.human && rows.some((r) => r.mode === "terminal" && r.ended_at === null && r.stage === stage.name);
   const visits = ctx.visitsFor(ticket);
   const check = checkOf(latestVisit(visits, ticket.stage));
-  const display = displayState(ticket, links, stage, rows[0] ?? null, queue, budget.rounds.limit, takenOver, check);
+  // Holding before a Route (LASSO-196), the Ticket waits at the Route's source, its Visit's pick naming the Route.
+  const held = ticket.holding_since && stage ? heldRoute(stage, visits.find((v) => v.left_at === null)?.picked_route ?? null) : null;
+  const display = displayState(ticket, links, stage, rows[0] ?? null, queue, budget.rounds.limit, takenOver, check, held);
   const resume = stage?.kind === "runner" ? (last: SessionRow) => resumeRefusal(stage.name, last, ticketProfile(ctx.profiles, ticket, pipeline!, stage)) : () => null;
-  const finished = index > 0 ? pipeline!.stages[index - 1]! : null;
+  const finished = held ? stage : index > 0 ? pipeline!.stages[index - 1]! : null;
   const draft = ticket.holding_since && finished?.kind === "runner" && !finished.human && resumableHeadless(rows, finished.name) ? finished.name : null;
-  const triggers = ticketTriggers(ticket, stage, rows, resume, takenOver, draft);
+  const triggers = ticketTriggers(ticket, stage, rows, resume, takenOver, draft, held);
   return {
     id: ticket.id,
     shortId: shortId(ticket.id),
@@ -512,7 +515,7 @@ export function prView(link: PrLinkRow): PrView {
   };
 }
 
-function displayState(ticket: TicketRow, links: PrLinkRow[], stage: Stage | null, latest: SessionRow | null, queue: number | null, rounds: number, takenOver = false, check: ArtifactCheck | null = null): { state: DisplayState; why: string } {
+function displayState(ticket: TicketRow, links: PrLinkRow[], stage: Stage | null, latest: SessionRow | null, queue: number | null, rounds: number, takenOver = false, check: ArtifactCheck | null = null, held: HeldRoute | null = null): { state: DisplayState; why: string } {
   const human = stage?.kind === "runner" && stage.human;
   const name = stage ? stageLabel(stage) : ticket.stage;
   if (ticket.state === "done") return { state: "done", why: "done" };
@@ -520,7 +523,7 @@ function displayState(ticket: TicketRow, links: PrLinkRow[], stage: Stage | null
   if (ticket.flagged_at) return { state: "flagged", why: ticket.flag_reason ?? "flagged" };
   if (latest?.ended_at === null && latest.mode === "action") return { state: "running", why: `${latest.stage}, running its command` };
   if (headlessRunning(latest)) return { state: "running", why: latest.round !== null ? `${latest.stage}, Round ${latest.round} of ${rounds}` : `${latest.stage}, run ${latest.ordinal}` };
-  if (ticket.holding_since) return { state: "holding", why: `Start ${name} when ready` };
+  if (ticket.holding_since) return { state: "holding", why: held ? `Start ${held.to} via ${held.route} when ready` : `Start ${name} when ready` };
   if (human || takenOver) {
     const opened = latest && latest.ended_at === null && latest.mode === "terminal" && latest.stage === ticket.stage ? latest.opened_at : null;
     const why = opened ? `terminal opened ${clockTime(opened)}` : "not started";
@@ -532,6 +535,9 @@ function displayState(ticket: TicketRow, links: PrLinkRow[], stage: Stage | null
   return { state: "ready", why: `${name} starts on the next tick` };
 }
 
+/** The Route a Ticket holding at its source Stage waits to take (LASSO-196). */
+type HeldRoute = { route: string; to: string };
+
 /** The last headless Session of the Stage, when there is one Resume could re-enter. */
 function resumableHeadless(rows: SessionRow[], stage: string): SessionRow | null {
   const last = rows.find((r) => r.stage === stage && r.mode === "headless");
@@ -542,9 +548,10 @@ function resumableHeadless(rows: SessionRow[], stage: string): SessionRow | null
 
 /**
  * `refusal` says why Resume cannot re-enter a Session under the profile the Stage runs now, or null. `takenOver`: a
- * human works this headless Stage in a terminal; `draft`: the finished Stage a holding Ticket can open in a terminal.
+ * human works this headless Stage in a terminal; `draft`: the finished Stage a holding Ticket can open in a terminal;
+ * `held`: the Route a Ticket holding at its source waits to take, which Start takes.
  */
-function ticketTriggers(ticket: TicketRow, stage: Stage | null, rows: SessionRow[], refusal: (last: SessionRow) => string | null, takenOver = false, draft: string | null = null): Trigger[] {
+function ticketTriggers(ticket: TicketRow, stage: Stage | null, rows: SessionRow[], refusal: (last: SessionRow) => string | null, takenOver = false, draft: string | null = null, held: HeldRoute | null = null): Trigger[] {
   if (ticket.state !== "active") return [];
   const abandon: Trigger = { action: "abandon", label: "Abandon" };
   if (!stage) return [abandon];
@@ -573,7 +580,7 @@ function ticketTriggers(ticket: TicketRow, stage: Stage | null, rows: SessionRow
     ];
   }
   const skip: Trigger = { action: "skip", label: `Skip ${stage.name}` };
-  if (ticket.holding_since) return [{ action: "start", label: `Start ${stage.name}` }, ...(draft ? [{ action: "draft" as const, label: `Open ${draft} in terminal` }] : []), skip, abandon];
+  if (ticket.holding_since) return [{ action: "start", label: held ? `Start ${held.to} via ${held.route}` : `Start ${stage.name}` }, ...(draft ? [{ action: "draft" as const, label: `Open ${draft} in terminal` }] : []), skip, abandon];
   if (stage.kind !== "runner" || headlessRunning(rows[0] ?? null) || !(stage.human || takenOver)) {
     // A Stage that has not started may be skipped (LASSO-159): no Session of it yet, and none running.
     const unstarted = !rows.some((r) => r.stage === stage.name || r.ended_at === null);

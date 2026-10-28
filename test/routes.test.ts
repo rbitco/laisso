@@ -206,6 +206,34 @@ describe("the Route decision's Budget rule", () => {
   });
 });
 
+describe("the Route decision's hold rule (LASSO-196)", () => {
+  const routes = { back: { to: "implement" }, gated: { to: "implement", advance: false }, open: { to: "ship", advance: true } };
+  const action: Stage = { kind: "action", name: "gate", action: "gate", with: {}, routes };
+  const runner = (advance: boolean): Stage => ({ kind: "runner", name: "review", prompt: null, skills: [], profile: null, human: false, advance, artifact: null, repeat: null, budget: {}, routes });
+  const ok = { succeeded: true, lastLine: null };
+  const by = (stage: Stage, route: string, who: RoutePick["by"] = "check", counts = {}) => decide({ stage, pick: { route, note: null, by: who }, end: ok, counts });
+
+  it("holds on every Route of a source Stage that says advance: false, and on none of one that does not", () => {
+    expect(by(runner(false), "back")).toMatchObject({ kind: "route", route: "back", holds: true });
+    expect(by(runner(false), "open")).toMatchObject({ kind: "route", route: "open", holds: true });
+    expect(by(runner(true), "back")).not.toHaveProperty("holds");
+    expect(decide({ stage: runner(false), pick: null, end: ok, counts: {} })).toEqual({ kind: "walk" });
+  });
+
+  it("holds on a Route that says advance: false, on that exit only", () => {
+    expect(by(action, "gated", "action")).toMatchObject({ kind: "route", route: "gated", holds: true });
+    expect(by(runner(true), "gated")).toMatchObject({ holds: true });
+    expect(by(action, "back", "action")).not.toHaveProperty("holds");
+    expect(by(action, "open", "action")).not.toHaveProperty("holds");
+  });
+
+  it("Flags a spent Route at once rather than holding, and never holds a human's pick", () => {
+    expect(by(runner(false), "back", "agent", { back: { used: 1, limit: 1 } })).toMatchObject({ kind: "flag", reason: "budget.routes" });
+    expect(by(action, "gated", "action", { gated: { used: 0, limit: 1 } })).toMatchObject({ holds: true });
+    expect(by(action, "gated", "human")).not.toHaveProperty("holds");
+  });
+});
+
 describe("Route validation", () => {
   const withRoutes = (routes: string) => `stages:\n  - name: implement\n    prompt: Do the work.\n  - action: gate\n    routes:\n${routes}  - name: ship\n    prompt: Ship it.\n    human: true\n`;
   const BAD: Array<[string, RegExp]> = [
@@ -217,6 +245,7 @@ describe("Route validation", () => {
     ["      back: { to: implement, budget: 1.5 }\n", /Route back: budget must be a whole number of 0 or more/],
     ["      back: { append: a }\n", /Route back needs to: <Stage>/],
     ["      back: { to: implement, via: x }\n", /Route back: via is not a field of a Route/],
+    ["      back: { to: implement, advance: later }\n", /Route back: advance must be true or false/],
   ];
 
   it("refuses a dashboard save that breaks a rule, and leaves the file alone", async () => {
@@ -718,4 +747,127 @@ describe("the Route Budget", () => {
     expect(detail.stage.name).toBe("polish");
     expect(visitsOf(lasso, ticket.id).map((v) => [v.stage, v.arrived_by])).toEqual([["implement", "intake"], ["polish", "walk"]]);
   });
+});
+
+describe("holding before a Route (LASSO-196)", () => {
+  // implement's check picks a Route; implement says advance: false, so every exit from it holds.
+  const SOURCE_GATE = CHECKED.replace("    artifact: action check\n", "    artifact: action check\n    advance: false\n");
+  // Only the gate's back Route holds; ahead passes over polish, whose own hold is ignored.
+  const ROUTE_GATE = `stages:
+  - name: implement
+    prompt: Do the work.
+  - action: gate
+    routes:
+      back: { to: implement, append: Fix what the gate found., advance: false }
+      ahead: { to: ship }
+  - name: polish
+    prompt: Polish.
+    advance: false
+  - name: ship
+    prompt: Ship it.
+    human: true
+`;
+  const start = (lasso: Lasso, id: string) => lasso.api<TicketDetail>(`/api/tickets/${id}/start`, { method: "POST", body: "{}" });
+  const routeCount = (lasso: Lasso, id: string, route: string) => visitsOf(lasso, id).filter((v) => v.route === route && v.chosen_by !== "human").length;
+  /** Tick until the Ticket holds, rests at ship, or Flags, with nothing running. */
+  const settled = (lasso: Lasso, id: string) =>
+    waitFor(async () => {
+      await checkNow(lasso);
+      const d = await detailOf(lasso, id);
+      return !d.sessions.some((s) => s.running) && (d.flag || d.display.state === "holding" || d.stage.name === "ship") ? d : null;
+    }, "the Ticket to settle", 20_000);
+  const notified = (lasso: Lasso, body: string) => waitFor(async () => ((await lasso.notifications()).some((n) => n.body === body) ? true : null), `the notification "${body}"`);
+
+  it("holds at a source Stage that says advance: false, naming the Route, and Start takes it, counting it then", async () => {
+    const lasso = await lassoWith(SOURCE_GATE);
+    await check(lasso, 'lasso route again --note "missed a case"', 'echo "all good"');
+    const ticket = await add(lasso);
+    const held = await settled(lasso, ticket.id);
+    expect(held.stage.name).toBe("implement");
+    expect(held.display).toMatchObject({ state: "holding", why: "Start implement via again when ready" });
+    expect(held.triggers.map((t) => t.label)).toContain("Start implement via again");
+    // The pick waits on the source Visit; no Visit opens at the target, so the Route has not counted yet.
+    expect(visitsOf(lasso, ticket.id)).toEqual([expect.objectContaining({ stage: "implement", picked_route: "again", picked_note: "missed a case", picked_by: "check" })]);
+    expect(routeCount(lasso, ticket.id, "again")).toBe(0);
+    await notified(lasso, "implement finished; Start implement via again when ready");
+    expect(await lasso.runner.calls()).toHaveLength(1);
+
+    const started = await start(lasso, ticket.id);
+    expect(started.display.state).not.toBe("holding");
+    const visits = visitsOf(lasso, ticket.id);
+    expect(visits[1]).toMatchObject({ stage: "implement", arrived_by: "route", route: "again", chosen_by: "check", text: "Look again.", note: "missed a case", from_visit: visits[0]!.id });
+    expect(routeCount(lasso, ticket.id, "again")).toBe(1);
+
+    // The second run walks forward; implement's advance: false holds that exit too, as before Routes.
+    const walked = await settled(lasso, ticket.id);
+    expect(walked).toMatchObject({ stage: { name: "polish" }, display: { state: "holding", why: "Start polish when ready" } });
+    expect((await prompts(lasso))[1]).toContain("Do the work.\n\nLook again.");
+  });
+
+  it("holds on a Route that says advance: false only, and ignores the hold of a Stage a forward Route passes over", async () => {
+    const lasso = await lassoWith(ROUTE_GATE);
+    await gate(lasso, 'lasso route back --note "lint"', "lasso route ahead");
+    const ticket = await add(lasso);
+    const held = await settled(lasso, ticket.id);
+    expect(held).toMatchObject({ stage: { name: "gate" }, display: { state: "holding", why: "Start implement via back when ready" } });
+    await start(lasso, ticket.id);
+
+    // ahead does not hold, and passes over polish with its advance: false: the Ticket lands at ship.
+    const detail = await settled(lasso, ticket.id);
+    expect(detail.stage.name).toBe("ship");
+    expect(detail.display.state).toBe("needs_you");
+    expect(visitsOf(lasso, ticket.id).map((v) => [v.stage, v.arrived_by, v.route])).toEqual([["implement", "intake", null], ["gate", "walk", null], ["implement", "route", "back"], ["gate", "walk", null], ["ship", "route", "ahead"]]);
+    // The hold posts the gate notification; the Routes firing post none, and only the human Stage's follows.
+    await notified(lasso, "ship needs you");
+    expect((await lasso.notifications()).map((n) => n.body)).toEqual(["gate finished; Start implement via back when ready", "ship needs you"]);
+  });
+
+  it("Flags a spent pick at once, even when it would hold", async () => {
+    const lasso = await lassoWith(ROUTE_GATE.replace("advance: false }", "advance: false, budget: 0 }"));
+    await gate(lasso, "lasso route back");
+    const ticket = await add(lasso);
+    const detail = await settled(lasso, ticket.id);
+    expect(detail.flag).toMatchObject({ reason: "budget.routes", detail: "Route back to implement: 0 of 0 used; Extend to take it" });
+    expect(detail.display.state).toBe("flagged");
+
+    // Extend lets it be taken, and the Route's hold still applies before it is.
+    const extended = await lasso.api<TicketDetail>(`/api/tickets/${ticket.id}/extend`, { method: "POST", body: json({ routes: 1 }) });
+    expect(extended).toMatchObject({ flag: null, stage: { name: "gate" }, display: { state: "holding", why: "Start implement via back when ready" } });
+    expect(routeCount(lasso, ticket.id, "back")).toBe(0);
+  });
+
+  it("Skip declines the Route and walks on without holding again, even from a source Stage that says advance: false", async () => {
+    const lasso = await lassoWith(SOURCE_GATE);
+    await check(lasso, 'lasso route again --note "missed a case"');
+    const ticket = await add(lasso);
+    expect((await settled(lasso, ticket.id)).display.why).toBe("Start implement via again when ready");
+    await expect(lasso.api(`/api/tickets/${ticket.id}/takeover`, { method: "POST", body: "{}" })).rejects.toThrow(`Ticket ${ticket.id} is holding; Start implement via again or open the draft`);
+
+    const skipped = await lasso.api<TicketDetail>(`/api/tickets/${ticket.id}/skip`, { method: "POST", body: "{}" });
+    expect(skipped).toMatchObject({ stage: { name: "polish" }, display: { state: "needs_you" } });
+    const visits = visitsOf(lasso, ticket.id);
+    expect(visits.map((v) => [v.stage, v.arrived_by])).toEqual([["implement", "intake"], ["polish", "walk"]]);
+    expect(visits[0]).toMatchObject({ picked_route: "again", picked_note: "missed a case", picked_by: "check" });
+    expect(visits[0]!.skipped_at).not.toBeNull();
+    expect(routeCount(lasso, ticket.id, "again")).toBe(0);
+  });
+
+  it("Skip, Abandon or a send instead of Start never counts, and the source Visit keeps the overridden pick", async () => {
+    for (const lever of ["skip", "abandon", "send"] as const) {
+      const lasso = await lassoWith(ROUTE_GATE);
+      await gate(lasso, 'lasso route back --note "lint"');
+      const ticket = await add(lasso);
+      expect((await settled(lasso, ticket.id)).display.state).toBe("holding");
+      const body = lever === "send" ? json({ stage: "ship", instructions: "Ship as is." }) : "{}";
+      const after = await lasso.api<TicketDetail>(`/api/tickets/${ticket.id}/${lever}`, { method: "POST", body });
+      expect(after.stage.name).toBe({ skip: "polish", abandon: "gate", send: "ship" }[lever]);
+      expect(after.display.state).not.toBe("holding");
+      const visits = visitsOf(lasso, ticket.id);
+      expect(visits[1]).toMatchObject({ stage: "gate", picked_route: "back", picked_note: "lint", picked_by: "action" });
+      expect(routeCount(lasso, ticket.id, "back")).toBe(0);
+      if (lever === "skip") expect(visits.map((v) => [v.stage, v.arrived_by])).toEqual([["implement", "intake"], ["gate", "walk"], ["polish", "walk"]]);
+      if (lever === "send") expect(visits[2]).toMatchObject({ stage: "ship", arrived_by: "send", route: null, chosen_by: "human", note: "Ship as is.", from_visit: visits[1]!.id });
+      if (lever === "abandon") expect(visits).toHaveLength(2);
+    }
+  }, 60_000);
 });

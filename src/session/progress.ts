@@ -10,7 +10,7 @@ import { type ActionStage, type Pipeline, type RunnerStage, type Stage } from ".
 import type { Mirror } from "../tracker/mirror.ts";
 import { checkArtifact, type ActionProbe, type PrProbe } from "../artifact/check.ts";
 import type { Teardown } from "./teardown.ts";
-import { decide, type Exit, type RoutePick } from "../route/route.ts";
+import { decide, heldRoute, type Exit, type RoutePick, type TakeRoute } from "../route/route.ts";
 import type { CheckRun } from "../artifact/action-check.ts";
 import type { Budgets } from "../budget/budgets.ts";
 
@@ -67,8 +67,8 @@ export interface ProgressDeps {
 /**
  * How a Ticket moves along its Pipeline (ADR 0001): a Stage finishes and the
  * next becomes current, or a Route's target does, holds for a Start trigger
- * when the finished Stage said `advance: false`, or the Ticket is done after
- * the last. Flags freeze
+ * when the finished Stage (or the Route) said `advance: false`, or the Ticket
+ * is done after the last. Flags freeze
  * it until an exit clears them. Every Attention event notifies once, here.
  */
 export class Progress {
@@ -144,7 +144,7 @@ export class Progress {
    */
   humanStage(ticket: TicketRow): { pipeline: Pipeline; stage: RunnerStage } {
     const current = this.currentForTrigger(ticket);
-    if (ticket.holding_since) throw new TriggerError(`Ticket ${ticket.reference ?? ticket.id} is holding; Start ${current.stage.name} first`);
+    if (ticket.holding_since) throw new TriggerError(`Ticket ${ticket.reference ?? ticket.id} is holding; ${this.startLabel(ticket, current.stage)} first`);
     if (current.stage.kind !== "runner" || !(current.stage.human || this.takenOver(ticket, current.stage.name))) throw new TriggerError(`${current.stage.name} is not a human Stage`);
     return { pipeline: current.pipeline, stage: current.stage };
   }
@@ -193,9 +193,10 @@ export class Progress {
   /**
    * The current Stage finished: move on, hold for Start, or finish the Ticket. The mirror push is
    * not awaited: tracker CLI calls take a second or more, and a Trigger should answer as soon as
-   * the row has moved. A failed push shows as mirror-pending and the tick retries it.
+   * the row has moved. A failed push shows as mirror-pending and the tick retries it. `release` walks on without
+   * the finished Stage's hold: a human already decided at it, as by Skip from a hold before a Route.
    */
-  async finished(ticket: TicketRow): Promise<void> {
+  async finished(ticket: TicketRow, release = false): Promise<void> {
     const current = this.current(ticket);
     if ("problem" in current) return this.flag(ticket.id, "pipeline.missing", current.problem);
     const next = current.pipeline.stages[current.index + 1];
@@ -209,7 +210,7 @@ export class Progress {
       this.deps.mirror.pushSoon(done.id);
       return;
     }
-    const holds = current.stage.kind === "runner" && !current.stage.advance;
+    const holds = !release && current.stage.kind === "runner" && !current.stage.advance;
     const updated = this.deps.tickets.arrive(ticket.id, { stage: next.name, arrived_by: "walk" }, { holding_since: holds ? now : null, ...unflagPatch(ticket, now) }, now);
     this.deps.log.info("ticket.advanced", { ticket: ticket.id, stage: next.name, holding: holds });
     if (holds) this.deps.notifier.post("gate", updated, `${current.stage.name} finished; Start ${next.name} when ready`);
@@ -221,7 +222,9 @@ export class Progress {
    * The current Stage finished along the exit the Route decision chose: walk forward as `finished` does, or take
    * the Route. Taking one leaves the Visit for a new one at the target, carrying the Route's text and note; Stages a
    * forward Route passes over get no Visit and keep their last one's state. The Ticket walks on from the target.
-   * A spent Route Flags `budget.routes` instead, keeping the pick pending on the Visit for Extend.
+   * A spent Route Flags `budget.routes` instead, keeping the pick pending on the Visit for Extend. A Route that
+   * holds (`advance: false` on the source Stage or the Route) keeps the Ticket at the source, the pick waiting on
+   * its Visit, until Start takes it; no Visit opens at the target until then, so the Route counts only on Start.
    */
   async leave(ticket: TicketRow, exit: Exclude<Exit, { kind: "failed" }>): Promise<void> {
     if (exit.kind === "walk") return this.finished(ticket);
@@ -236,12 +239,27 @@ export class Progress {
     }
     const target = current.pipeline.stages.find((s) => s.name === exit.to);
     if (!target) return this.flag(ticket.id, "pipeline.missing", `Pipeline ${ticket.pipeline} has no Stage named ${exit.to} for Route ${exit.route}`);
+    if (exit.holds) {
+      const now = new Date().toISOString();
+      this.deps.visits.pick(ticket.id, exit.route, exit.note, exit.chosenBy);
+      const held = this.deps.tickets.update(ticket.id, { holding_since: now, runnable_since: null, ...unflagPatch(ticket, now) }, now);
+      this.deps.log.info("ticket.holding", { ticket: ticket.id, stage: current.stage.name, route: exit.route, to: target.name, chosen_by: exit.chosenBy });
+      this.deps.notifier.post("gate", held, `${current.stage.name} finished; Start ${target.name} via ${exit.route} when ready`);
+      this.deps.mirror.pushSoon(held.id);
+      return;
+    }
+    this.take(ticket, current.stage, target, exit);
+  }
+
+  /** Take a Route: the Visit at the source is left for a new one at the target, carrying the Route's text and note. */
+  private take(ticket: TicketRow, source: Stage, target: Stage, exit: TakeRoute): TicketRow {
     const now = new Date().toISOString();
     const arrival = { stage: target.name, arrived_by: "route" as const, route: exit.route, chosen_by: exit.chosenBy, text: exit.text, note: exit.note, replaces: exit.replaces };
     const updated = this.deps.tickets.arrive(ticket.id, arrival, { holding_since: null, ...unflagPatch(ticket, now) }, now);
-    this.deps.log.info("ticket.routed", { ticket: ticket.id, from: current.stage.name, route: exit.route, stage: target.name, chosen_by: exit.chosenBy });
+    this.deps.log.info("ticket.routed", { ticket: ticket.id, from: source.name, route: exit.route, stage: target.name, chosen_by: exit.chosenBy });
     this.entered(updated, target);
     this.deps.mirror.pushSoon(updated.id);
+    return updated;
   }
 
   /**
@@ -335,10 +353,37 @@ export class Progress {
     return visit?.picked_route ? { route: visit.picked_route, note: visit.picked_note, by: visit.picked_by ?? "action" } : null;
   }
 
-  /** The Start trigger: release a holding Ticket into its current Stage. */
+  /**
+   * The Route a holding Ticket waits at its source Stage to take (LASSO-196), or null when it holds after walking
+   * forward, or does not hold.
+   */
+  heldRoute(ticket: TicketRow, stage: Stage): { route: string; to: string } | null {
+    return ticket.holding_since ? heldRoute(stage, this.deps.visits.current(ticket.id)?.picked_route ?? null) : null;
+  }
+
+  /** What Start does for a holding Ticket: "Start <target> via <route>" before a Route, else "Start <Stage>". */
+  startLabel(ticket: TicketRow, stage: Stage): string {
+    const held = this.heldRoute(ticket, stage);
+    return held ? `Start ${held.to} via ${held.route}` : `Start ${stage.name}`;
+  }
+
+  /**
+   * The Start trigger: release a holding Ticket into its current Stage, or, holding before a Route, take the Route
+   * the Visit picked. It counts then, as its picker's, but is never refused: its Budget was checked at the pick.
+   */
   start(ticket: TicketRow): TicketRow {
     const current = this.currentForTrigger(ticket);
     if (!ticket.holding_since) throw new TriggerError(`Ticket ${ticket.reference ?? ticket.id} is not holding; ${current.stage.name} is already under way`);
+    const held = this.heldRoute(ticket, current.stage);
+    if (held) {
+      const visit = this.deps.visits.current(ticket.id)!;
+      const pick: RoutePick = { route: held.route, note: visit.picked_note, by: visit.picked_by ?? "action" };
+      const exit = decide({ stage: current.stage, pick, end: { succeeded: true, lastLine: null }, counts: {} });
+      const target = current.pipeline.stages.find((s) => s.name === held.to);
+      if (exit.kind !== "route" || !target) throw new TriggerError(`Pipeline ${ticket.pipeline} has no Stage named ${held.to} for Route ${held.route}`);
+      this.deps.log.info("ticket.started", { ticket: ticket.id, stage: current.stage.name, route: held.route });
+      return this.take(ticket, current.stage, target, exit);
+    }
     const released = this.deps.tickets.update(ticket.id, { holding_since: null });
     this.deps.log.info("ticket.started", { ticket: ticket.id, stage: current.stage.name });
     this.entered(released, current.stage);
@@ -376,15 +421,20 @@ export class Progress {
     return stage;
   }
 
-  /** Skip: the Stage finishes without its artifact, and its Visit records when (a human Stage, a Flagged one, or one not yet started). */
+  /**
+   * Skip: the Stage finishes without its artifact, and its Visit records when (a human Stage, a Flagged one, or one
+   * not yet started). Holding before a Route, Skip declines the Route: the Visit keeps the pick, overridden, and the
+   * Ticket walks on without holding again, the human having decided at the gate (LASSO-196).
+   */
   async skip(ticket: TicketRow): Promise<TicketRow> {
     const stage = this.skipStage(ticket);
+    const declined = ticket.flagged_at ? null : this.heldRoute(ticket, stage);
     this.endHumanSessions(ticket);
     const now = new Date().toISOString();
     this.deps.visits.setSkipped(ticket.id, now);
     const skipped = this.deps.tickets.update(ticket.id, {}, now);
-    this.deps.log.info("ticket.skipped", { ticket: ticket.id, stage: stage.name, flagged: ticket.flagged_at !== null, holding: ticket.holding_since !== null });
-    await this.finished(skipped);
+    this.deps.log.info("ticket.skipped", { ticket: ticket.id, stage: stage.name, flagged: ticket.flagged_at !== null, holding: ticket.holding_since !== null, declined: declined?.route ?? null });
+    await this.finished(skipped, declined !== null);
     return this.deps.tickets.get(ticket.id)!;
   }
 
