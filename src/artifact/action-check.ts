@@ -2,16 +2,17 @@ import { existsSync } from "node:fs";
 import { actionsFor, currentConfig, type Config } from "../server/config.ts";
 import type { LassoHome } from "../server/home.ts";
 import type { Logger } from "../server/log.ts";
-import type { Tickets, TicketRow } from "../store/tickets.ts";
+import type { TicketRow } from "../store/tickets.ts";
 import type { PrLinks } from "../store/links.ts";
+import type { Visits } from "../store/visits.ts";
 import { actionEnv, lastLine, missingParams, runCommand, type RunningCommand } from "../session/command.ts";
 import type { ActionProbe, ArtifactVerdict } from "./check.ts";
 
 export interface ActionChecksDeps {
   config: Config;
   home: LassoHome;
-  tickets: Tickets;
   links: PrLinks;
+  visits: Visits;
   log: Logger;
 }
 
@@ -19,7 +20,7 @@ export interface ActionChecksDeps {
  * Check Actions (ADR 0014): an Action from config.yaml run as a Stage's
  * Artifact, in the Ticket's worktree with the variables an action Stage
  * gets. No Session is recorded; the exit code is the verdict, and the
- * latest at each Stage is kept on the Ticket for the page to show.
+ * latest is kept on the Stage's Visit for the page to show.
  */
 export class ActionChecks {
   private deps: ActionChecksDeps;
@@ -54,7 +55,7 @@ export class ActionChecks {
     // Shutdown cut it short: it is no verdict, so nothing is kept.
     if (code !== "shutdown") {
       const result = verdict.present ? "met" : verdict.broken ? "error" : "not_met";
-      this.deps.tickets.setCheck(ticket.id, stage, { action: name, result, at: new Date().toISOString(), code: typeof code === "number" ? code : null, line: verdict.detail });
+      this.deps.visits.setCheck(ticket.id, stage, { action: name, result, at: new Date().toISOString(), code: typeof code === "number" ? code : null, line: verdict.detail });
     }
     return verdict;
   }

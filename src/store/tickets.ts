@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { Visits, type Arrival } from "./visits.ts";
 
 export type TicketState = "active" | "done" | "abandoned";
 
@@ -37,10 +38,6 @@ export interface TicketRow {
   ended_at: string | null;
   /** A human's profile per Stage name, as JSON; it wins over the Pipeline's choice until cleared (ADR 0011). Null when there are none. */
   profile_overrides: string | null;
-  /** The latest check Action run per Stage name, as JSON (ADR 0014); null before any. */
-  artifact_checks: string | null;
-  /** When a human skipped each Stage, by Stage name, as JSON; null before any skip. */
-  skipped_stages: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -53,27 +50,6 @@ export function overridesOf(ticket: Pick<TicketRow, "profile_overrides">): Recor
 /** The profile a human chose for this Stage of the Ticket, or null when the Pipeline's choice stands. */
 export function overrideFor(ticket: Pick<TicketRow, "profile_overrides">, stage: string): string | null {
   return overridesOf(ticket)[stage] ?? null;
-}
-
-/** How a check Action artifact last came out at a Stage: met (exit 0), not met (exit 1), or broken. */
-export interface ArtifactCheck {
-  action: string;
-  result: "met" | "not_met" | "error";
-  at: string;
-  /** The exit code; null when it timed out or never started. */
-  code: number | null;
-  /** The last line of its output, or why it could not run. */
-  line: string | null;
-}
-
-/** The latest check Action run at this Stage of the Ticket, or null. */
-export function checkFor(ticket: Pick<TicketRow, "artifact_checks">, stage: string): ArtifactCheck | null {
-  return ticket.artifact_checks ? ((JSON.parse(ticket.artifact_checks) as Record<string, ArtifactCheck>)[stage] ?? null) : null;
-}
-
-/** When a human skipped each Stage of the Ticket, by Stage name. */
-export function skipsOf(ticket: Pick<TicketRow, "skipped_stages">): Record<string, string> {
-  return ticket.skipped_stages ? (JSON.parse(ticket.skipped_stages) as Record<string, string>) : {};
 }
 
 /** The tail of the ULID humans quote when a Ticket has no tracker reference. */
@@ -103,22 +79,38 @@ export type NewTicket = Pick<TicketRow, "id" | "repo" | "reference" | "origin" |
 export class Tickets {
   private db: DatabaseSync;
   private changed: (ticket: string) => void;
+  /** A Ticket's Stage and its current Visit move together, so every Stage change goes through here (LASSO-189). */
+  private visits: Visits;
 
   /** `changed` hears of every write, after it lands. */
   constructor(db: DatabaseSync, changed: (ticket: string) => void = () => undefined) {
     this.db = db;
     this.changed = changed;
+    this.visits = new Visits(db, changed);
   }
 
+  /** A Ticket admitted at its first Stage, on its first Visit. */
   insert(ticket: NewTicket, now: string = new Date().toISOString()): TicketRow {
-    this.db
-      .prepare(
-        `INSERT INTO tickets (id, repo, reference, origin, prompt, title, name, body, pipeline, pipeline_version, stage, state, branch, worktree, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)`,
-      )
-      .run(ticket.id, ticket.repo, ticket.reference, ticket.origin, ticket.prompt, ticket.title, ticket.name ?? null, ticket.body, ticket.pipeline, ticket.pipeline_version, ticket.stage, ticket.branch, ticket.worktree, now, now);
+    together(this.db, () => {
+      this.db
+        .prepare(
+          `INSERT INTO tickets (id, repo, reference, origin, prompt, title, name, body, pipeline, pipeline_version, stage, state, branch, worktree, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)`,
+        )
+        .run(ticket.id, ticket.repo, ticket.reference, ticket.origin, ticket.prompt, ticket.title, ticket.name ?? null, ticket.body, ticket.pipeline, ticket.pipeline_version, ticket.stage, ticket.branch, ticket.worktree, now, now);
+      this.visits.arrive(ticket.id, ticket.pipeline_version, { stage: ticket.stage, arrived_by: "intake" }, now);
+    });
     this.changed(ticket.id);
     return this.get(ticket.id)!;
+  }
+
+  /** The Ticket arrives at a Stage: the row moves there, with `patch`, and a new Visit starts as the current one is left. */
+  arrive(id: string, arrival: Arrival, patch: Partial<Omit<TicketRow, "id" | "created_at" | "stage">> = {}, now: string = new Date().toISOString()): TicketRow {
+    return together(this.db, () => {
+      const row = this.get(id)!;
+      this.visits.arrive(id, patch.pipeline_version !== undefined ? patch.pipeline_version : row.pipeline_version, arrival, now);
+      return this.update(id, { ...patch, stage: arrival.stage }, now);
+    });
   }
 
   get(id: string): TicketRow | null {
@@ -150,6 +142,8 @@ export class Tickets {
   /** Migration bookkeeping only: not activity on the Ticket, so updated_at is left alone. */
   pinVersion(id: string, version: number): void {
     this.db.prepare(`UPDATE tickets SET pipeline_version = ? WHERE id = ?`).run(version, id);
+    // Its Visits ran the file it is now pinned to.
+    this.db.prepare(`UPDATE visits SET version = ? WHERE ticket = ? AND version IS NULL`).run(version, id);
     this.changed(id);
   }
 
@@ -163,23 +157,6 @@ export class Tickets {
   setRunnableSince(id: string, since: string | null): void {
     this.db.prepare(`UPDATE tickets SET runnable_since = ? WHERE id = ?`).run(since, id);
     this.changed(id);
-  }
-
-  /** Keep the latest check at a Stage, over the one before. Not activity on the Ticket, so updated_at is left alone. */
-  setCheck(id: string, stage: string, check: ArtifactCheck): void {
-    const row = this.get(id);
-    if (!row) return;
-    const checks = row.artifact_checks ? (JSON.parse(row.artifact_checks) as Record<string, ArtifactCheck>) : {};
-    checks[stage] = check;
-    this.db.prepare(`UPDATE tickets SET artifact_checks = ? WHERE id = ?`).run(JSON.stringify(checks), id);
-    this.changed(id);
-  }
-
-  /** Record that a human skipped this Stage now, over any earlier skip of it. */
-  setSkipped(id: string, stage: string, now: string = new Date().toISOString()): TicketRow {
-    const skips = skipsOf(this.get(id)!);
-    skips[stage] = now;
-    return this.update(id, { skipped_stages: JSON.stringify(skips) }, now);
   }
 
   /** Set or (with null) clear the override for one Stage; it applies from the Stage's next Session. */
@@ -209,5 +186,19 @@ export class Tickets {
     this.db.prepare(`UPDATE tickets SET ${sets} WHERE id = ?`).run(...entries.map(([, v]) => v as string | number | null), id);
     this.changed(id);
     return this.get(id)!;
+  }
+}
+
+/** Run `write` as one unit: every write in it lands, or none does. A savepoint, so it nests inside a caller's transaction. */
+function together<T>(db: DatabaseSync, write: () => T): T {
+  db.exec("SAVEPOINT together");
+  try {
+    const result = write();
+    db.exec("RELEASE together");
+    return result;
+  } catch (error) {
+    db.exec("ROLLBACK TO together");
+    db.exec("RELEASE together");
+    throw error;
   }
 }

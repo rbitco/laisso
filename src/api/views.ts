@@ -1,4 +1,5 @@
-import { checkFor, overrideFor, shortId, skipsOf, ticketLabel, type ArtifactCheck, type TicketRow } from "../store/tickets.ts";
+import { overrideFor, shortId, ticketLabel, type TicketRow } from "../store/tickets.ts";
+import { checkOf, latestVisit, type ArtifactCheck, type VisitRow } from "../store/visits.ts";
 import { runnerOf, type SessionProfile, type SessionRow } from "../store/sessions.ts";
 import { type Pipeline, type RunnerName, type RunnerStage, type Stage } from "../pipeline/load.ts";
 import type { PipelineSource } from "../pipeline/files.ts";
@@ -204,6 +205,8 @@ export interface ViewContext {
   pipelineFor(ticket: TicketRow): Pipeline | null;
   /** A Ticket's Sessions, newest first. */
   sessionsFor(ticket: TicketRow): SessionRow[];
+  /** A Ticket's Visits, oldest first. */
+  visitsFor(ticket: TicketRow): VisitRow[];
   /** A Round's Feedback snapshot as recorded. */
   feedbackFor(session: SessionRow): FeedbackRow[];
   /** The Ticket's live PR links, in the order they were added. */
@@ -352,12 +355,13 @@ export function ticketView(ticket: TicketRow, ctx: ViewContext): TicketView {
   const queue = ctx.queuePosition(ticket);
   const budget = ctx.budgetFor(ticket, pipeline, stage, rows);
   const takenOver = stage?.kind === "runner" && !stage.human && rows.some((r) => r.mode === "terminal" && r.ended_at === null && r.stage === stage.name);
-  const display = displayState(ticket, links, stage, rows[0] ?? null, queue, budget.rounds.limit, takenOver);
+  const visits = ctx.visitsFor(ticket);
+  const check = checkOf(latestVisit(visits, ticket.stage));
+  const display = displayState(ticket, links, stage, rows[0] ?? null, queue, budget.rounds.limit, takenOver, check);
   const resume = stage?.kind === "runner" ? (last: SessionRow) => resumeRefusal(stage.name, last, ticketProfile(ctx.profiles, ticket, pipeline!, stage)) : () => null;
   const finished = index > 0 ? pipeline!.stages[index - 1]! : null;
   const draft = ticket.holding_since && finished?.kind === "runner" && !finished.human && resumableHeadless(rows, finished.name) ? finished.name : null;
   const triggers = ticketTriggers(ticket, stage, rows, resume, takenOver, draft);
-  const skips = skipsOf(ticket);
   return {
     id: ticket.id,
     shortId: shortId(ticket.id),
@@ -389,8 +393,8 @@ export function ticketView(ticket: TicketRow, ctx: ViewContext): TicketView {
     queue,
     triggers,
     budget,
-    stages: (pipeline?.stages ?? []).map((s) => ({ name: s.name, kind: s.kind, label: stageLabel(s), human: s.kind === "runner" && s.human, skippedAt: skips[s.name] ?? null })),
-    check: stage?.kind === "runner" && stage.artifactWith ? checkFor(ticket, stage.name) : null,
+    stages: (pipeline?.stages ?? []).map((s) => ({ name: s.name, kind: s.kind, label: stageLabel(s), human: s.kind === "runner" && s.human, skippedAt: latestVisit(visits, s.name)?.skipped_at ?? null })),
+    check: stage?.kind === "runner" && stage.artifactWith ? check : null,
     mirrorPending: ticket.mirror_pending !== null,
     createdAt: ticket.created_at,
     updatedAt: ticket.updated_at,
@@ -468,7 +472,7 @@ export function prView(link: PrLinkRow): PrView {
   };
 }
 
-function displayState(ticket: TicketRow, links: PrLinkRow[], stage: Stage | null, latest: SessionRow | null, queue: number | null, rounds: number, takenOver = false): { state: DisplayState; why: string } {
+function displayState(ticket: TicketRow, links: PrLinkRow[], stage: Stage | null, latest: SessionRow | null, queue: number | null, rounds: number, takenOver = false, check: ArtifactCheck | null = null): { state: DisplayState; why: string } {
   const human = stage?.kind === "runner" && stage.human;
   const name = stage ? stageLabel(stage) : ticket.stage;
   if (ticket.state === "done") return { state: "done", why: "done" };
@@ -484,7 +488,7 @@ function displayState(ticket: TicketRow, links: PrLinkRow[], stage: Stage | null
   }
   if (queue !== null) return { state: "queued", why: `${queue} in line; ${name} starts when a slot frees` };
   // A repeating Stage with no Round due waits on its PR: quiet (spec: Review loop).
-  if (stage?.kind === "runner" && stage.repeat && !roundDue(links)) return { state: "quiet", why: quietWhy(ticket, links, name) };
+  if (stage?.kind === "runner" && stage.repeat && !roundDue(links)) return { state: "quiet", why: quietWhy(check, links, name) };
   return { state: "ready", why: `${name} starts on the next tick` };
 }
 

@@ -24,6 +24,8 @@ export interface SessionRow {
   stage: string;
   /** This Session's number within its Stage for its Ticket. */
   ordinal: number;
+  /** The Visit to the Stage this Session worked in (LASSO-189); attempts and Rounds are counted per Visit. */
+  visit: number | null;
   /** The Round this Session worked, in a repeating Stage; a retry re-runs the same Round, so several Sessions share one. */
   round: number | null;
   stage_snapshot: string;
@@ -66,14 +68,15 @@ export class Sessions {
     this.changed = changed;
   }
 
+  /** A Session belongs to its Stage's latest Visit: the current one, as Sessions run only at the Stage the Ticket is on. */
   insert(session: NewSession, now: string = new Date().toISOString()): SessionRow {
     const ordinal = this.count(session.ticket, session.stage) + 1;
     this.db
       .prepare(
-        `INSERT INTO sessions (id, ticket, stage, ordinal, stage_snapshot, mode, started_by, started_at, stdout_path, limits_honoured, transcript_path, round, profile)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO sessions (id, ticket, stage, ordinal, visit, stage_snapshot, mode, started_by, started_at, stdout_path, limits_honoured, transcript_path, round, profile)
+         VALUES (?, ?, ?, ?, (SELECT id FROM visits WHERE ticket = ? AND stage = ? ORDER BY number DESC LIMIT 1), ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(session.id, session.ticket, session.stage, ordinal, session.stage_snapshot, session.mode, session.started_by, now, session.stdout_path, session.limits_honoured, session.transcript_path ?? null, session.round ?? null, session.profile ?? null);
+      .run(session.id, session.ticket, session.stage, ordinal, session.ticket, session.stage, session.stage_snapshot, session.mode, session.started_by, now, session.stdout_path, session.limits_honoured, session.transcript_path ?? null, session.round ?? null, session.profile ?? null);
     this.changed(session.ticket);
     return this.get(session.id)!;
   }

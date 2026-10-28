@@ -8,6 +8,7 @@ import { acquireLock, AlreadyRunning } from "./lock.ts";
 import { createLogger } from "./log.ts";
 import { Store, StoreTooNew } from "../store/store.ts";
 import { Tickets } from "../store/tickets.ts";
+import { Visits } from "../store/visits.ts";
 import { Sessions } from "../store/sessions.ts";
 import { Feedback } from "../store/feedback.ts";
 import { PrLinks } from "../store/links.ts";
@@ -102,6 +103,7 @@ export async function serve(opts: ServeOptions): Promise<number> {
   if (migrated.config || migrated.pipelines.length || migratedVersions.versions) log.info("migrated", { config: migrated.config, pipelines: migrated.pipelines.join(",") || null, versions: migratedVersions.versions });
   versions.pinUnpinned(tickets, home.pipelinesDir);
   const sessions = new Sessions(store.db, ticketChanged);
+  const visits = new Visits(store.db, ticketChanged);
   const feedback = new Feedback(store.db, ticketChanged);
   // Each repo's GitHub owner/name, read from its checkout's origin. The read is async and PrLinks asks synchronously,
   // so PrLinks sees what the last read found: every repo at startup, and the Ticket's repo again before each link.
@@ -128,8 +130,8 @@ export async function serve(opts: ServeOptions): Promise<number> {
   });
   const prs = new PullRequests(log);
   const teardown = new Teardown({ config, home, tickets, links, log, prs });
-  const checks = new ActionChecks({ config, home, tickets, links, log });
-  const progress: Progress = new Progress({ home, tickets, versions, sessions, links, log, notifier, mirror, prProbe: (ticket) => () => review.probe(ticket), actionProbe: (ticket, stage) => checks.probe(ticket, stage), teardown });
+  const checks = new ActionChecks({ config, home, links, visits, log });
+  const progress: Progress = new Progress({ home, tickets, versions, sessions, visits, links, log, notifier, mirror, prProbe: (ticket) => () => review.probe(ticket), actionProbe: (ticket, stage) => checks.probe(ticket, stage), teardown });
   // review: is read from the live config per Ticket, so a Config page save applies on the next poll; the gh login is read once.
   const ignored = async (ticket: TicketRow) => {
     const rules = reviewFor(config, ticket.repo);
@@ -137,7 +139,7 @@ export async function serve(opts: ServeOptions): Promise<number> {
   };
   const review: Review = new Review({ tickets, sessions, feedback, links, progress, prs, checks, log, ignored });
   const terminal = new Terminal({ config, home, sessions, links, log, flag: (ticket, reason, detail) => progress.flag(ticket, reason, detail) });
-  const budgets = new Budgets({ config, sessions, links });
+  const budgets = new Budgets({ config, sessions, links, visits });
   const queue = new Queue({ home, tickets, sessions, progress, log, cap: config.concurrency });
   const runs = new Runs({ config, home, tickets, links, sessions, log, progress, budgets, queue, review, checks, stdoutWritten: (ticket, session) => changes.emit({ kind: "stdout", ticket, session }), ended: () => tick.kick("session-end") });
   const actions = new Actions({
@@ -193,7 +195,7 @@ export async function serve(opts: ServeOptions): Promise<number> {
     }
   };
   const versionCheck = new VersionCheck({ running: pkg.version, onDisk, latest: npmLatest, log, changed: () => changes.emit({ kind: "version" }) });
-  const app = createApp({ config, home, tick, tickets, versions, sessions, feedback, links, prs, githubOf, runs, progress, terminal, exits, overrides, budgets, queue, changes, prLists, dashboard, version: pkg.version, missingTools, versionNotice: () => versionCheck.current() });
+  const app = createApp({ config, home, tick, tickets, versions, sessions, visits, feedback, links, prs, githubOf, runs, progress, terminal, exits, overrides, budgets, queue, changes, prLists, dashboard, version: pkg.version, missingTools, versionNotice: () => versionCheck.current() });
 
   if (defaults.wroteConfig) log.info("config.written", { file: home.configFile });
   for (const name of defaults.wrotePipelines) log.info("pipeline.written", { name });

@@ -8,7 +8,7 @@ import type { Verdict } from "../session/runs.ts";
 import { actionArtifact, type RunnerStage } from "../pipeline/load.ts";
 import type { ActionChecks } from "../artifact/action-check.ts";
 import type { OwnedPr } from "../artifact/check.ts";
-import { checkFor } from "../store/tickets.ts";
+import type { ArtifactCheck } from "../store/visits.ts";
 import { ownedOf, type PrLinkFacts, type PrLinks, type PrLinkRow } from "../store/links.ts";
 import { parsePrUrl, type PullRequests, type PrRef } from "./github.ts";
 import { addressedEvidence, checkFailed, describe, fresh, logSlice, marker, outstanding, ownMark, repeatedChecks, watermarkOf, withoutIgnored, type FeedbackItem, type IgnoredAuthor, type PrFacts, type PrFeedback, type Seen } from "./feedback.ts";
@@ -370,8 +370,7 @@ export function statusOf(facts: PrFacts, freshCount: number, outstandingCount: n
 }
 
 /** The why line of a quiet Ticket: what the last poll saw of each Owned PR not yet merged, else of the last one. */
-export function quietWhy(ticket: Pick<TicketRow, "artifact_checks">, links: PrLinkRow[], stage: string): string {
-  const check = checkFor(ticket, stage);
+export function quietWhy(check: ArtifactCheck | null, links: PrLinkRow[], stage: string): string {
   const owned = links.filter((l) => l.role === "owned");
   const open = owned.filter((l) => l.state !== "MERGED");
   const shown = open.length ? open : owned.slice(-1);

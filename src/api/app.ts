@@ -8,6 +8,7 @@ import type { Tick } from "../server/tick.ts";
 import { parseName, ticketLabel, type Tickets, type TicketRow } from "../store/tickets.ts";
 import type { PipelineVersions } from "../store/versions.ts";
 import type { Sessions } from "../store/sessions.ts";
+import type { Visits } from "../store/visits.ts";
 import type { Feedback } from "../store/feedback.ts";
 import type { PrLinks, PrRole } from "../store/links.ts";
 import { parsePrRef, parsePrUrl, PullRequestError, type PullRequests } from "../review/github.ts";
@@ -37,6 +38,7 @@ export interface AppDeps {
   tickets: Tickets;
   versions: PipelineVersions;
   sessions: Sessions;
+  visits: Visits;
   feedback: Feedback;
   links: PrLinks;
   /** gh, for the one lookup that confirms a PR before it is linked. */
@@ -82,6 +84,7 @@ export function createApp(deps: AppDeps): Hono {
     },
     driftFor: (ticket: TicketRow) => deps.versions.drift(ticket, deps.home.pipelinesDir),
     sessionsFor: (ticket: TicketRow) => deps.sessions.forTicket(ticket.id),
+    visitsFor: (ticket: TicketRow) => deps.visits.forTicket(ticket.id),
     feedbackFor: (session) => deps.feedback.forSession(session.id),
     linksFor: (ticket) => deps.links.links(ticket.id),
     budgetFor: (ticket, pipeline, stage, rows) => deps.budgets.view(ticket, pipeline, stage, rows),

@@ -266,7 +266,93 @@ const MIGRATIONS: Array<(db: DatabaseSync) => void> = [
       );
     `);
   },
+  // Visits (LASSO-189): each arrival at a Stage, with the check and Skip kept per Visit; Sessions belong to one.
+  (db) => {
+    db.exec(`
+      CREATE TABLE visits (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ticket TEXT NOT NULL REFERENCES tickets (id),
+        stage TEXT NOT NULL,
+        number INTEGER NOT NULL,
+        version INTEGER,
+        arrived_at TEXT NOT NULL,
+        left_at TEXT,
+        arrived_by TEXT NOT NULL CHECK (arrived_by IN ('walk', 'route', 'send', 'intake', 'upgrade')),
+        from_visit INTEGER REFERENCES visits (id),
+        route TEXT,
+        chosen_by TEXT CHECK (chosen_by IN ('agent', 'action', 'check', 'human')),
+        text TEXT,
+        note TEXT,
+        picked_route TEXT,
+        picked_note TEXT,
+        check_result TEXT,
+        check_run TEXT,
+        skipped_at TEXT,
+        UNIQUE (ticket, stage, number)
+      );
+      CREATE UNIQUE INDEX visits_current ON visits (ticket) WHERE left_at IS NULL;
+      ALTER TABLE sessions ADD COLUMN visit INTEGER;
+    `);
+    backfillVisits(db);
+    db.exec(`
+      CREATE INDEX sessions_visit ON sessions (visit);
+      ALTER TABLE tickets DROP COLUMN artifact_checks;
+      ALTER TABLE tickets DROP COLUMN skipped_stages;
+    `);
+  },
 ];
+
+/**
+ * One Visit per Stage each Ticket reached (a Session, a check or a Skip) plus
+ * its current Stage, in Pipeline order where its Version says, else in the
+ * order they began. The first was Intake's, the rest walked; each began at its
+ * first Session (else when the one before was left, or the Ticket was made)
+ * and was left at its last Session's end, all but the current Stage's (LASSO-189).
+ */
+function backfillVisits(db: DatabaseSync): void {
+  type Old = { id: string; stage: string; pipeline: string; pipeline_version: number | null; created_at: string; artifact_checks: string | null; skipped_stages: string | null };
+  const tickets = db.prepare(`SELECT id, stage, pipeline, pipeline_version, created_at, artifact_checks, skipped_stages FROM tickets ORDER BY created_at`).all() as unknown as Old[];
+  const spans = db.prepare(`SELECT stage, MIN(started_at) AS first, MAX(COALESCE(ended_at, started_at)) AS last FROM sessions WHERE ticket = ? GROUP BY stage`);
+  const definition = db.prepare(`SELECT definition FROM pipeline_versions WHERE pipeline = ? AND version = ?`);
+  const insert = db.prepare(
+    `INSERT INTO visits (ticket, stage, number, version, arrived_at, left_at, arrived_by, from_visit, check_result, skipped_at) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?)`,
+  );
+  const link = db.prepare(`UPDATE sessions SET visit = ? WHERE ticket = ? AND stage = ?`);
+  for (const ticket of tickets) {
+    const checks = ticket.artifact_checks ? (JSON.parse(ticket.artifact_checks) as Record<string, { at: string }>) : {};
+    const skips = ticket.skipped_stages ? (JSON.parse(ticket.skipped_stages) as Record<string, string>) : {};
+    const sessions = new Map((spans.all(ticket.id) as Array<{ stage: string; first: string; last: string }>).map((s) => [s.stage, s]));
+    const reached = [...new Set([...sessions.keys(), ...Object.keys(checks), ...Object.keys(skips), ticket.stage])];
+    const order = stageOrder(ticket.pipeline_version === null ? undefined : (definition.get(ticket.pipeline, ticket.pipeline_version) as { definition: string } | undefined)?.definition);
+    const arrivedAt = (stage: string) => sessions.get(stage)?.first ?? ticket.created_at;
+    reached.sort((a, b) => rank(order, a) - rank(order, b) || arrivedAt(a).localeCompare(arrivedAt(b)));
+    let from: { id: number; left: string | null } | null = null;
+    reached.forEach((stage, i) => {
+      // A Stage with no Session was arrived at when the one before it was left.
+      const arrived = sessions.get(stage)?.first ?? from?.left ?? ticket.created_at;
+      const left = stage === ticket.stage ? null : (sessions.get(stage)?.last ?? skips[stage] ?? checks[stage]?.at ?? arrived);
+      const check = checks[stage] ? JSON.stringify(checks[stage]) : null;
+      const visit = Number(insert.run(ticket.id, stage, ticket.pipeline_version, arrived, left, i === 0 ? "intake" : "walk", from?.id ?? null, check, skips[stage] ?? null).lastInsertRowid);
+      link.run(visit, ticket.id, stage);
+      from = { id: visit, left };
+    });
+  }
+}
+
+/** The Stage names of a pinned Version's definition, in order; empty when there is none to read. */
+function stageOrder(definition: string | undefined): string[] {
+  try {
+    return definition ? ((JSON.parse(definition) as { stages?: Array<{ name: string }> }).stages ?? []).map((s) => s.name) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Where a Stage falls in Pipeline order; one the Pipeline no longer has sorts after every one it has. */
+function rank(order: string[], stage: string): number {
+  const index = order.indexOf(stage);
+  return index < 0 ? order.length : index;
+}
 
 /** The schema version this Lasso migrates a store up to. */
 export const SCHEMA_VERSION = MIGRATIONS.length;

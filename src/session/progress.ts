@@ -3,6 +3,7 @@ import type { Logger } from "../server/log.ts";
 import type { Tickets, TicketRow } from "../store/tickets.ts";
 import type { PipelineVersions } from "../store/versions.ts";
 import type { Sessions, EndedReason } from "../store/sessions.ts";
+import type { Visits } from "../store/visits.ts";
 import { roundDue, type PrLinks } from "../store/links.ts";
 import type { Notifier } from "../notify/notifier.ts";
 import { type ActionStage, type Pipeline, type RunnerStage, type Stage } from "../pipeline/load.ts";
@@ -35,6 +36,8 @@ export interface ProgressDeps {
   tickets: Tickets;
   versions: PipelineVersions;
   sessions: Sessions;
+  /** Each arrival at a Stage, where a Skip is kept. */
+  visits: Visits;
   /** The Ticket's PR links, where a Round due to start is kept. */
   links: PrLinks;
   log: Logger;
@@ -192,7 +195,7 @@ export class Progress {
       return;
     }
     const holds = current.stage.kind === "runner" && !current.stage.advance;
-    const updated = this.deps.tickets.update(ticket.id, { stage: next.name, holding_since: holds ? now : null, ...unflagPatch(ticket, now) });
+    const updated = this.deps.tickets.arrive(ticket.id, { stage: next.name, arrived_by: "walk" }, { holding_since: holds ? now : null, ...unflagPatch(ticket, now) }, now);
     this.deps.log.info("ticket.advanced", { ticket: ticket.id, stage: next.name, holding: holds });
     if (holds) this.deps.notifier.post("gate", updated, `${current.stage.name} finished; Start ${next.name} when ready`);
     else this.entered(updated, next);
@@ -227,23 +230,26 @@ export class Progress {
 
   /**
    * The Stage Skip acts on: where a Flagged Ticket stopped, the human Stage under way, or one that has not started
-   * (LASSO-159): the Stage a holding Ticket waits at, or one with no Session yet and none running.
+   * (LASSO-159): the Stage a holding Ticket waits at, or one with no Session yet this Visit and none running.
    */
   private skipStage(ticket: TicketRow): Stage {
     if (ticket.flagged_at) return this.flaggedStage(ticket).stage;
     const { stage } = this.currentForTrigger(ticket);
     if (ticket.holding_since) return stage;
     if (stage.kind === "runner" && (stage.human || this.takenOver(ticket, stage.name))) return stage;
-    const started = this.deps.sessions.running(ticket.id).length > 0 || this.deps.sessions.forTicket(ticket.id).some((s) => s.stage === stage.name);
+    const visit = this.deps.visits.current(ticket.id);
+    const started = this.deps.sessions.running(ticket.id).length > 0 || this.deps.sessions.forTicket(ticket.id).some((s) => s.visit === visit?.id);
     if (started) throw new TriggerError(`${stage.name} has started; Skip only a Stage that has not, or one that is Flagged`);
     return stage;
   }
 
-  /** Skip: the Stage finishes without its artifact, and the Ticket records when (a human Stage, a Flagged one, or one not yet started). */
+  /** Skip: the Stage finishes without its artifact, and its Visit records when (a human Stage, a Flagged one, or one not yet started). */
   async skip(ticket: TicketRow): Promise<TicketRow> {
     const stage = this.skipStage(ticket);
     this.endHumanSessions(ticket);
-    const skipped = this.deps.tickets.setSkipped(ticket.id, stage.name);
+    const now = new Date().toISOString();
+    this.deps.visits.setSkipped(ticket.id, now);
+    const skipped = this.deps.tickets.update(ticket.id, {}, now);
     this.deps.log.info("ticket.skipped", { ticket: ticket.id, stage: stage.name, flagged: ticket.flagged_at !== null, holding: ticket.holding_since !== null });
     await this.finished(skipped);
     return this.deps.tickets.get(ticket.id)!;

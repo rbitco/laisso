@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNod
 import { createPortal } from "react-dom";
 import type { TicketDetail, TicketView } from "../../../api/views.ts";
 import type { Drift } from "../../../store/versions.ts";
-import type { ArtifactCheck } from "../../../store/tickets.ts";
+import type { ArtifactCheck } from "../../../store/visits.ts";
 import { relative } from "../../metro.ts";
 import { api } from "../api.ts";
 import { useEvents } from "../events.ts";

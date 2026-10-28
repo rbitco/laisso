@@ -32,8 +32,10 @@ Actions to Artifacts and loosens ADR 0004's merge-only end of Review.
 
 - Built-in Artifacts and pinned Versions are unchanged; no migration.
 - `artifact.error` joins `artifact.missing` as a Flag reason.
-- Lasso keeps only the latest check result per Ticket and Stage, not a
-  Session per run, so polling does not bury a Ticket's history.
+- Lasso keeps only the latest check result per Visit, not a Session per
+  run, so polling does not bury a Ticket's history. A Ticket back at a
+  Stage starts its new Visit with no verdict from the last. (Amended by
+  LASSO-189; it was the latest per Ticket and Stage.)
 - A closed, unmerged PR still Flags `review.pr_closed`.
 - Nothing stops a check Action from changing things; checks should only
   look.

@@ -2,6 +2,7 @@ import type { Config } from "../server/config.ts";
 import type { Pipeline, Stage } from "../pipeline/load.ts";
 import type { TicketRow } from "../store/tickets.ts";
 import type { SessionRow } from "../store/sessions.ts";
+import { latestVisit, type VisitRow } from "../store/visits.ts";
 import { parseDuration } from "../duration.ts";
 
 export type BudgetLayer = "global" | "pipeline" | "ticket";
@@ -28,13 +29,13 @@ export interface TicketBudget {
   spend: number | null;
 }
 
-/** What the Ticket has consumed, derived from its Session rows and never reset. */
+/** What the Ticket has consumed, derived from its Session rows and never reset; a new Visit counts attempts and Rounds afresh. */
 export interface Usage {
-  /** Sessions of the repeating Stage: the current one when it repeats, else the Pipeline's first. */
+  /** Rounds in the repeating Stage's latest Visit: the current one when it repeats, else the Pipeline's first. */
   rounds: number;
-  /** Sessions of the current Stage that count as tries. */
+  /** Sessions of the current Visit that count as tries. */
   attempts: number;
-  /** How long the latest headless Session of the current Stage has run, or ran. */
+  /** How long the latest headless Session of the current Visit has run, or ran. */
   wallTimeMs: number;
   spend: number;
 }
@@ -95,13 +96,24 @@ export function spendOf(rows: SessionRow[]): number {
   return rows.reduce((sum, r) => sum + (r.cost_usd ?? 0), 0);
 }
 
-export function usageOf(rows: SessionRow[], pipeline: Pipeline | null, stage: Stage | null, now: number = Date.now()): Usage {
+/**
+ * The Sessions of a Stage's latest Visit, which is the current one at the current Stage: attempts and
+ * Rounds count only these (LASSO-189). A Stage never visited has none.
+ */
+export function visitRows(rows: SessionRow[], visits: VisitRow[], stage: string): SessionRow[] {
+  const visit = latestVisit(visits, stage);
+  return visit ? rows.filter((r) => r.visit === visit.id) : [];
+}
+
+/** `rows` are the Ticket's Sessions newest first, and `visits` its Visits oldest first. */
+export function usageOf(rows: SessionRow[], visits: VisitRow[], pipeline: Pipeline | null, stage: Stage | null, now: number = Date.now()): Usage {
   const repeating = stage?.kind === "runner" && stage.repeat ? stage : pipeline?.stages.find((s) => s.kind === "runner" && s.repeat) ?? null;
-  const latest = stage ? rows.find((r) => r.stage === stage.name && r.mode === "headless") : undefined;
+  const here = stage ? visitRows(rows, visits, stage.name) : [];
+  const latest = here.find((r) => r.mode === "headless");
   const wallTimeMs = latest ? Math.max(0, (latest.ended_at ? new Date(latest.ended_at).getTime() : now) - new Date(latest.started_at).getTime()) : 0;
   return {
-    rounds: repeating ? roundsOf(rows, repeating.name) : 0,
-    attempts: stage ? attemptsOf(rows, stage.name).length : 0,
+    rounds: repeating ? roundsOf(visitRows(rows, visits, repeating.name), repeating.name) : 0,
+    attempts: stage ? attemptsOf(here, stage.name).length : 0,
     wallTimeMs,
     spend: spendOf(rows),
   };
