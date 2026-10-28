@@ -231,7 +231,7 @@ stages:
 `;
 
 describe("each Runner", () => {
-  it.each(["claude", "codex", "pi"])("%s carries the Route block headless and in a terminal, and the pick is taken from either", async (runner) => {
+  it.each(["claude", "codex", "pi"])("%s carries the Route block headless and in a terminal, and the terminal pick pre-selects Mark done", async (runner) => {
     const codexHome = await mkdtemp(path.join(tmpdir(), "lasso-codex-"));
     dirs.push(codexHome);
     const lasso = await lassoWith({ [runner]: EACH(runner) }, { CODEX_HOME: codexHome });
@@ -246,41 +246,44 @@ describe("each Runner", () => {
     expect(call.argv.join("\n")).toContain(NO_CALL);
     expect(await callsOf(lasso)).toBe("no Route named publish on Stage review; it has fix, ship\nexit 1\n");
 
-    // In the terminal the human works publish; the agent there picks fix, and Mark done takes it.
+    // In the terminal the human works publish; the agent there picks fix, which the Mark done menu pre-selects, and
+    // the human confirms it: a human's choice (LASSO-198), so it never counts.
     const opened = await pull(lasso, ticket.id, "terminal");
     const launcher = readFileSync((await lasso.terminals()).at(-1)!.launcher!, "utf8");
     expect(launcher).toContain(`exec '${runner}'`);
     expect(launcher).toContain("- fix -> review (used 0/3): The work has a fault to fix.\n- ship -> ship (used 0/3)\n");
     const picked = await runCli(["route", "fix", "--note", "missed a case"], { ...lasso, env: { LASSO_SESSION: opened.session!.id } });
     expect(picked).toMatchObject({ code: 0, stdout: "picked Route fix to review: missed a case\n" });
-    const done = await pull(lasso, ticket.id, "done");
+    expect((await detailOf(lasso, ticket.id)).markDone).toEqual({ routes: [{ name: "fix", to: "review", text: null, replaces: false }, { name: "ship", to: "ship", text: null, replaces: false }], suggested: { route: "fix", note: "missed a case" } });
+    const done = await pull(lasso, ticket.id, "done", { route: "fix", note: "missed a case" });
     expect(done.stage.name).toBe("review");
-    expect(visitsOf(lasso, ticket.id).at(-1)).toMatchObject({ stage: "review", arrived_by: "route", route: "fix", chosen_by: "agent", note: "missed a case" });
-    // The routed review is told why; back at publish, the next terminal counts the lap from publish.
+    expect(visitsOf(lasso, ticket.id).at(-2)).toMatchObject({ stage: "publish", picked_route: "fix", picked_by: "agent" });
+    expect(visitsOf(lasso, ticket.id).at(-1)).toMatchObject({ stage: "review", arrived_by: "route", route: "fix", chosen_by: "human", note: "missed a case" });
+    // The routed review is told why; back at publish, the next terminal shows the human's lap uncounted.
     const routed = await waitFor(async () => { await checkNow(lasso); const d = await detailOf(lasso, ticket.id); return d.stage.name === "publish" && !d.sessions.some((s) => s.running) ? d : null; }, `${runner} back at publish`, 20_000);
     expect(routed.flag).toBeNull();
-    expect((await lasso.runner.calls()).at(-1)!.argv.join("\n")).toContain("Review the work.\n\nLasso sent this Ticket here by Route fix, chosen by the agent, with this note: missed a case");
+    expect((await lasso.runner.calls()).at(-1)!.argv.join("\n")).toContain("Review the work.\n\nLasso sent this Ticket here by Route fix, chosen by a human, with this note: missed a case");
     await pull(lasso, ticket.id, "terminal");
-    expect(readFileSync((await lasso.terminals()).at(-1)!.launcher!, "utf8")).toContain("- fix -> review (used 1/3): The work has a fault to fix.\n- ship -> ship (used 0/3)\n");
+    expect(readFileSync((await lasso.terminals()).at(-1)!.launcher!, "utf8")).toContain("- fix -> review (used 0/3): The work has a fault to fix.\n- ship -> ship (used 0/3)\n");
   });
 });
 
 describe("a terminal agent", () => {
-  it("holds before the Route it picked on a Stage that says advance: false, and Start takes it as the agent's", async () => {
+  it("suggests a Route the human confirms on a Stage that says advance: false, which holds before it, and Start takes it", async () => {
     const lasso = await lassoWith({ work: EACH("claude").replace("    human: true\n    agentRoutes: true\n", "    human: true\n    advance: false\n    agentRoutes: true\n") });
     await lasso.runner.script({ stdout: claudeFixture("success.json") });
     const ticket = await add(lasso);
     await waitFor(async () => { await checkNow(lasso); return (await detailOf(lasso, ticket.id)).stage.name === "publish" ? true : null; }, "publish");
     const opened = await pull(lasso, ticket.id, "terminal");
     expect((await runCli(["route", "fix", "--note", "missed a case"], { ...lasso, env: { LASSO_SESSION: opened.session!.id } })).code).toBe(0);
-    const held = await pull(lasso, ticket.id, "done");
+    const held = await pull(lasso, ticket.id, "done", { route: "fix", note: "missed a case" });
     expect(held).toMatchObject({ stage: { name: "publish" }, display: { state: "holding", why: "Start review via fix when ready" } });
     const started = await pull(lasso, ticket.id, "start");
     expect(started.stage.name).toBe("review");
-    expect(visitsOf(lasso, ticket.id).at(-1)).toMatchObject({ stage: "review", arrived_by: "route", route: "fix", chosen_by: "agent", note: "missed a case" });
+    expect(visitsOf(lasso, ticket.id).at(-1)).toMatchObject({ stage: "review", arrived_by: "route", route: "fix", chosen_by: "human", note: "missed a case" });
   });
 
-  it("has its pick taken by Mark done on a taken-over Stage; Skip, and a Stage that does not opt in, walk", async () => {
+  it("suggests its pick in the Mark done menu on a taken-over Stage; Skip, and a Stage that does not opt in, walk", async () => {
     const lasso = await lassoWith({ work: EACH("claude") });
     await lasso.runner.script({ hang: true });
     const ticket = await add(lasso);
@@ -292,9 +295,10 @@ describe("a terminal agent", () => {
     expect(visitsOf(lasso, ticket.id).at(-1)).toMatchObject({ picked_route: "ship", picked_by: "agent" });
     expect((await runCli(["route", "fix", "--note", "one more pass"], { ...lasso, env: { LASSO_SESSION: taken.session!.id } })).code).toBe(0);
     await lasso.runner.script({ stdout: claudeFixture("success.json") });
-    const done = await pull(lasso, ticket.id, "done");
+    expect((await detailOf(lasso, ticket.id)).markDone?.suggested).toEqual({ route: "fix", note: "one more pass" });
+    const done = await pull(lasso, ticket.id, "done", { route: "fix", note: "one more pass" });
     expect(done.stage.name).toBe("review");
-    expect(visitsOf(lasso, ticket.id).at(-1)).toMatchObject({ arrived_by: "route", route: "fix", chosen_by: "agent", note: "one more pass" });
+    expect(visitsOf(lasso, ticket.id).at(-1)).toMatchObject({ arrived_by: "route", route: "fix", chosen_by: "human", note: "one more pass" });
 
     // At publish, a human Stage, Skip walks forward, leaving the terminal agent's pick unused.
     await waitFor(async () => { await checkNow(lasso); const d = await detailOf(lasso, ticket.id); return d.stage.name === "publish" ? d : null; }, "publish");

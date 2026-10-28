@@ -222,8 +222,10 @@ and its `when:` text, and tells it how to call `lasso route` and that with
 no call the Ticket continues to the next Stage. A Route at its limit stays
 listed, marked "choosing it Flags the Ticket for a human", and the call
 accepts it. The pick is taken only when the Session ends as one that would
-advance: a headless Session that succeeded with its Artifact met, or Mark
-done on a human or taken-over Stage. A failed Session Flags as before and
+advance: a headless Session that succeeded with its Artifact met. On a human
+or taken-over Stage the terminal agent's pick only pre-selects its entry in
+the [Mark done menu](#routes-on-human-stages), with its note; the human
+confirms it or chooses otherwise. A failed Session Flags as before and
 routes nothing; Skip, Send, and Mark done on a Flag walk or send as
 before. A new Session picks afresh: a pick an earlier Session of the Visit
 left is dropped, unless the new one re-enters that session (Resume, Take
@@ -299,7 +301,8 @@ to raise, and the Ticket skips `publish`; otherwise it walks on to it.
 ### Holding before a Route
 
 A Stage with `advance: false` holds on every way out: walking forward, or a
-Route an agent, Action or check picked. A Route with its own
+Route an agent, Action or check picked, or one a human chose from the Mark
+done menu. A Route with its own
 `advance: false` holds on that way out only. The Ticket holds when either
 says so. Holding before a Route, the Ticket stays at the source Stage, which
 shows Holding with "Start <target> via <route> when ready", and the gate
@@ -314,6 +317,32 @@ keeps the pick it overrode. **Skip <source>** declines the Route: the source
 Stage is marked skipped and the Ticket walks on to the next Stage without
 holding again, even when the source says `advance: false`, since Skip was
 the human's decision at the gate. A Route taken without a hold posts no notification.
+
+### Routes on human Stages
+
+A human Stage (`human: true`) can declare `routes`, and `agentRoutes`, like
+any Runner Stage. Its **Mark done** becomes a menu, on a Stage taken over in
+a terminal too:
+
+- **Done, walk forward**: the Stage finishes as before, with the artifact
+  warning and **Advance anyway**.
+- **Done via <route> -> <target>**, one per declared Route, showing its
+  `append` or `replace` text, with an optional note: the Ticket takes the
+  Route. The artifact is not checked.
+- **Send to Stage...**: pick a Stage and the [Send](#send-to-stage) popover
+  opens for it.
+
+A Route chosen here is the human's: it never counts against the Route's
+`budget` and is never refused for one, but a hold still applies: a source
+Stage or Route with `advance: false` holds before it, and Start takes it.
+With `agentRoutes: true`, the terminal agent's last `lasso route` call
+pre-selects its entry with its note. Through the API, `POST
+/api/tickets/<id>/done` takes `{}` (or `{ "override": true }`) to walk
+forward, or `{ "route": "...", "note": "..." }` to take a Route.
+
+When a Route lands on a human Stage, its notification names the Route and
+where it came from ("review needs you: Route fix from publish"), and the
+terminal opened there starts on the prompt with the Route's text and note.
 
 ### Send to Stage
 

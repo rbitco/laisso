@@ -73,7 +73,7 @@ function ticket(id: string, over: Partial<TicketDetail> = {}): TicketDetail {
     ],
     mirrorPending: false, createdAt: T0, updatedAt: T0, url: `http://lasso/#${id}`,
     session: s, sessions: [session({ ticket: id, id: "S2", stage: "implement", outcome: "failed" }), s], pipelineDrift: "same",
-    profiles: [profile("plan", "claude-opus"), profile("implement", "claude-opus")], send: { unavailable: null, routes: [] }, visit: null, visits: [], arcs: [],
+    profiles: [profile("plan", "claude-opus"), profile("implement", "claude-opus")], send: { unavailable: null, routes: [] }, markDone: null, visit: null, visits: [], arcs: [],
     ...over,
   };
 }
@@ -740,6 +740,101 @@ describe("sending a Ticket to a Stage (LASSO-197)", () => {
     await showPage("B");
     await user.hover(station("plan"));
     expect(sendHere()).toBeNull();
+  });
+});
+
+describe("the Mark done menu (LASSO-198)", () => {
+  const routes = [{ name: "fix", to: "plan", text: "Fix what review found.", replaces: false }, { name: "redo", to: "plan", text: "Start over.", replaces: true }];
+  const human = (over: Partial<TicketDetail> = {}) =>
+    ticket("A", { stage: { ...ticket("A").stage, human: true }, triggers: [{ action: "terminal", label: "Open terminal" }, { action: "done", label: "Mark implement done" }, { action: "abandon", label: "Abandon" }], markDone: { routes, suggested: null }, ...over });
+  const menu = () => screen.queryByRole("dialog", { name: "Mark implement done" });
+  const open = async (user: ReturnType<typeof userEvent.setup>) => {
+    await user.click(within(triggers()).getByRole("button", { name: "Mark implement done" }));
+    return menu()!;
+  };
+
+  it("lists Done, walk forward, each declared Route with its text, and Send to Stage, walking forward by default", async () => {
+    const lasso = fakeLasso([human()]);
+    await showPage("A");
+    const user = userEvent.setup();
+    const pop = await open(user);
+    expect(lasso.sent).toEqual([]);
+    const radios = within(pop).getAllByRole("radio") as HTMLInputElement[];
+    expect(radios.map((r) => r.closest("label")!.textContent)).toEqual(["Done, walk forward", "Done via fix -> plan", "Done via redo -> plan"]);
+    expect(radios.map((r) => r.checked)).toEqual([true, false, false]);
+    expect(within(pop).getByText("Adds to the prompt: Fix what review found.")).toBeTruthy();
+    expect(within(pop).getByText("Replaces the prompt with: Start over.")).toBeTruthy();
+    expect(within(pop).getByRole("combobox", { name: "Send to Stage" })).toBeTruthy();
+    // A human's choice never counts, so nothing here warns of a Flag; no note is asked for walking forward.
+    expect(pop.textContent).not.toMatch(/Flag/);
+    expect(within(pop).queryByRole("textbox", { name: "Note" })).toBeNull();
+    await user.click(within(pop).getByRole("button", { name: "Done, walk forward" }));
+    await waitFor(() => expect(lasso.sent).toEqual([{ method: "POST", route: "/api/tickets/A/done", body: {} }]));
+    await waitFor(() => expect(menu()).toBeNull());
+  });
+
+  it("takes a Route with an optional note, and offers Advance anyway only for walking forward", async () => {
+    const lasso = fakeLasso([human()]);
+    lasso.state.refuse.done = { status: 409, body: { error: "artifact missing", artifact: "file NOTES.md", detail: "no NOTES.md on the branch", override: true } };
+    await showPage("A");
+    const user = userEvent.setup();
+    await user.click(within(await open(user)).getByRole("button", { name: "Done, walk forward" }));
+    await screen.findByText("artifact file NOTES.md is missing: no NOTES.md on the branch");
+    delete lasso.state.refuse.done;
+
+    let pop = await open(user);
+    await user.click(within(pop).getByRole("radio", { name: "Done via fix -> plan" }));
+    await user.type(within(pop).getByRole("textbox", { name: "Note" }), "Handle the empty list.");
+    await user.click(within(pop).getByRole("button", { name: "Done via fix" }));
+    await waitFor(() => expect(lasso.sent.at(-1)).toEqual({ method: "POST", route: "/api/tickets/A/done", body: { route: "fix", note: "Handle the empty list." } }));
+
+    pop = await open(user);
+    await user.click(within(pop).getByRole("radio", { name: "Done via redo -> plan" }));
+    await user.click(within(pop).getByRole("button", { name: "Done via redo" }));
+    await waitFor(() => expect(lasso.sent.at(-1)).toEqual({ method: "POST", route: "/api/tickets/A/done", body: { route: "redo" } }));
+  });
+
+  it("pre-selects the agent's pick with its note, which the human may change or decline", async () => {
+    const lasso = fakeLasso([human({ markDone: { routes, suggested: { route: "redo", note: "The plan was wrong." } } })]);
+    await showPage("A");
+    const user = userEvent.setup();
+    let pop = await open(user);
+    expect((within(pop).getByRole("radio", { name: "Done via redo -> plan" }) as HTMLInputElement).checked).toBe(true);
+    expect(within(pop).getByText("the agent's pick").closest('[data-role="done-route"]')!.textContent).toContain("Done via redo -> plan");
+    expect((within(pop).getByRole("textbox", { name: "Note" }) as HTMLTextAreaElement).value).toBe("The plan was wrong.");
+    await user.click(within(pop).getByRole("button", { name: "Done via redo" }));
+    await waitFor(() => expect(lasso.sent).toEqual([{ method: "POST", route: "/api/tickets/A/done", body: { route: "redo", note: "The plan was wrong." } }]));
+
+    pop = await open(user);
+    await user.click(within(pop).getByRole("radio", { name: "Done via fix -> plan" }));
+    expect((within(pop).getByRole("textbox", { name: "Note" }) as HTMLTextAreaElement).value).toBe("");
+    await user.click(within(pop).getByRole("radio", { name: "Done, walk forward" }));
+    await user.click(within(pop).getByRole("button", { name: "Done, walk forward" }));
+    await waitFor(() => expect(lasso.sent.at(-1)).toEqual({ method: "POST", route: "/api/tickets/A/done", body: {} }));
+  });
+
+  it("opens the Send popover for the Stage picked under Send to Stage, and closes on Escape without sending", async () => {
+    const lasso = fakeLasso([human({ send: { unavailable: null, routes } })]);
+    await showPage("A");
+    const user = userEvent.setup();
+    await open(user);
+    await user.keyboard("{Escape}");
+    expect(menu()).toBeNull();
+    await user.selectOptions(within(await open(user)).getByRole("combobox", { name: "Send to Stage" }), "plan");
+    expect(menu()).toBeNull();
+    const send = screen.getByRole("dialog", { name: "Send to plan" });
+    expect((within(send).getByRole("checkbox", { name: "Use Route fix" }) as HTMLInputElement).checked).toBe(true);
+    await user.type(within(send).getByRole("textbox", { name: "Instructions" }), "Plan again.");
+    await user.click(within(send).getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(lasso.sent).toEqual([{ method: "POST", route: "/api/tickets/A/send", body: { stage: "plan", instructions: "Plan again.", route: "fix" } }]));
+  });
+
+  it("stays a plain lever where the Ticket offers no menu, as on a Flag", async () => {
+    const lasso = fakeLasso([human({ markDone: null })]);
+    await showPage("A");
+    await userEvent.setup().click(within(triggers()).getByRole("button", { name: "Mark implement done" }));
+    expect(menu()).toBeNull();
+    await waitFor(() => expect(lasso.sent).toEqual([{ method: "POST", route: "/api/tickets/A/done", body: {} }]));
   });
 });
 

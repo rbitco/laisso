@@ -208,7 +208,17 @@ export function createApp(deps: AppDeps): Hono {
     await deps.terminal.open(ticket, pipeline, stage);
     return deps.tickets.get(ticket.id)!;
   });
-  trigger("done", (ticket, body) => deps.progress.markDone(ticket, body.override === true));
+  // Mark done (LASSO-198): {} or { override: true } is "Done, walk forward", the artifact checked unless overridden;
+  // { route, note? } is "Done via <route>", a human's choice of a declared Route that skips the artifact check and
+  // never counts. Send to Stage, the menu's third entry, is the send Trigger below.
+  trigger("done", async (ticket, body) => {
+    if (body.route !== undefined && body.route !== null && (typeof body.route !== "string" || !body.route)) throw new TriggerError("route must name a declared Route of the Stage, or be left out to walk forward");
+    if (body.note !== undefined && body.note !== null && typeof body.note !== "string") throw new TriggerError("note must be text");
+    const choice = typeof body.route === "string" ? { route: body.route, note: typeof body.note === "string" ? body.note.trim() || null : null } : null;
+    const done = await deps.progress.markDone(ticket, body.override === true, choice);
+    if (choice) await deps.tick.run("start");
+    return deps.tickets.get(done.id)!;
+  });
   trigger("skip", (ticket) => deps.progress.skip(ticket));
   trigger("start", async (ticket) => {
     const released = deps.progress.start(ticket);

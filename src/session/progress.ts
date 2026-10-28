@@ -21,6 +21,12 @@ export interface SendRequest {
   route: string | null;
 }
 
+/** A Mark done menu entry other than "Done, walk forward": "Done via <route> -> <target>", with an optional note. */
+export interface MarkDoneChoice {
+  route: string;
+  note: string | null;
+}
+
 /** A Trigger that cannot pull right now, with the reason for the human. */
 export class TriggerError extends Error {}
 
@@ -185,9 +191,15 @@ export class Progress {
     this.deps.mirror.pushSoon(ticketId);
   }
 
-  /** A Stage just became current (at intake, or by advancing): a human Stage is an Attention event. */
+  /**
+   * A Stage just became current (at intake, or by advancing): a human Stage is an Attention event. Arrived by a
+   * Route, the notification names the Route and the Stage it came from (LASSO-198), so the human knows why.
+   */
   entered(ticket: TicketRow, stage: Stage): void {
-    if (stage.kind === "runner" && stage.human) this.deps.notifier.post("human", ticket, `${stage.name} needs you`);
+    if (stage.kind !== "runner" || !stage.human) return;
+    const visit = this.deps.visits.current(ticket.id);
+    const from = visit?.arrived_by === "route" && visit.route && visit.from_visit !== null ? this.deps.visits.forTicket(ticket.id).find((v) => v.id === visit.from_visit) : undefined;
+    this.deps.notifier.post("human", ticket, from ? `${stage.name} needs you: Route ${visit!.route} from ${from.stage}` : `${stage.name} needs you`);
   }
 
   /**
@@ -392,15 +404,19 @@ export class Progress {
   }
 
   /**
-   * Mark <Stage> done: the artifact is checked with warn-and-override, then the Stage finishes (a human Stage, or a
-   * Flagged one: accept and advance). On a human or taken-over Stage that says `agentRoutes: true`, the Route its
-   * terminal agent picked is taken as a headless Session's would be when it met its artifact; a Flagged Stage walks.
+   * Mark <Stage> done (a human Stage, a taken-over one, or a Flagged one: accept and advance), by the Mark done menu
+   * (LASSO-198). With no Route it is "Done, walk forward": the artifact is checked with warn-and-override, then the
+   * Stage finishes. With one of the Stage's declared Routes it is "Done via <route>": the artifact is not checked, and
+   * the Ticket takes the Route as a human's choice, which never counts against the Route's Budget and is never
+   * refused, though the source Stage's or the Route's `advance: false` still holds before it. A terminal agent's pick
+   * only suggests the menu entry; the human's choice is what is taken, the pick kept on the Visit left.
    */
-  async markDone(ticket: TicketRow, override: boolean): Promise<TicketRow> {
+  async markDone(ticket: TicketRow, override: boolean, choice: MarkDoneChoice | null = null): Promise<TicketRow> {
     const at = ticket.flagged_at ? this.flaggedStage(ticket).stage : this.currentForTrigger(ticket).stage;
     if (at.kind === "wait") throw new TriggerError(`${at.name} is a wait Stage; it has no Mark done. Skip advances it as if its check were met`);
     const { stage } = this.exitStage(ticket);
-    if (!override && stage.kind === "runner" && stage.artifact) {
+    if (choice) declares(stage, choice.route);
+    if (!choice && !override && stage.kind === "runner" && stage.artifact) {
       const verdict = await checkArtifact(stage.artifact, ticket.worktree, this.deps.prProbe(ticket), this.deps.actionProbe(ticket, stage.name), stage.artifactWith);
       if (!verdict.present) throw new ArtifactWarning(stage.artifact, verdict.detail ?? "missing");
     }
@@ -409,9 +425,14 @@ export class Progress {
     if (fresh.stage !== stage.name) throw new TriggerError(`${stage.name} already finished`);
     this.endHumanSessions(fresh);
     const visit = this.deps.visits.current(fresh.id);
-    const agentPick = !fresh.flagged_at && stage.kind === "runner" && stage.agentRoutes && visit?.picked_route && visit.picked_by === "agent" ? visit.picked_route : null;
-    this.deps.log.info("ticket.marked_done", { ticket: ticket.id, stage: stage.name, override, flagged: fresh.flagged_at !== null, route: agentPick });
-    await (agentPick ? this.advance(fresh) : this.finished(fresh));
+    const suggested = visit?.picked_by === "agent" ? visit.picked_route : null;
+    this.deps.log.info("ticket.marked_done", { ticket: ticket.id, stage: stage.name, override, flagged: fresh.flagged_at !== null, route: choice?.route ?? null, suggested });
+    if (!choice) await this.finished(fresh);
+    else {
+      const exit = decide({ stage, pick: { route: choice.route, note: choice.note?.trim() || null, by: "human" }, end: { succeeded: true, lastLine: null }, counts: {} });
+      if (exit.kind === "failed") throw new TriggerError(`Route ${choice.route} cannot be taken from ${stage.name}`);
+      await this.leave(fresh, exit);
+    }
     return this.deps.tickets.get(ticket.id)!;
   }
 

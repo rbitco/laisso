@@ -226,10 +226,16 @@ describe("the Route decision's hold rule (LASSO-196)", () => {
     expect(by(action, "open", "action")).not.toHaveProperty("holds");
   });
 
-  it("Flags a spent Route at once rather than holding, and never holds a human's pick", () => {
+  it("Flags a spent Route at once rather than holding", () => {
     expect(by(runner(false), "back", "agent", { back: { used: 1, limit: 1 } })).toMatchObject({ kind: "flag", reason: "budget.routes" });
     expect(by(action, "gated", "action", { gated: { used: 0, limit: 1 } })).toMatchObject({ holds: true });
-    expect(by(action, "gated", "human")).not.toHaveProperty("holds");
+  });
+
+  it("holds a human's pick as any other, though it is never refused (LASSO-198)", () => {
+    const human = (advance: boolean): Stage => ({ kind: "runner", name: "publish", prompt: null, skills: [], profile: null, human: true, advance, artifact: null, repeat: null, budget: {}, routes });
+    expect(by(human(false), "back", "human", { back: { used: 1, limit: 1 } })).toMatchObject({ kind: "route", route: "back", chosenBy: "human", holds: true });
+    expect(by(human(true), "gated", "human")).toMatchObject({ chosenBy: "human", holds: true });
+    expect(by(human(true), "back", "human")).not.toHaveProperty("holds");
   });
 });
 
@@ -806,9 +812,10 @@ describe("holding before a Route (LASSO-196)", () => {
     expect(detail.stage.name).toBe("ship");
     expect(detail.display.state).toBe("needs_you");
     expect(visitsOf(lasso, ticket.id).map((v) => [v.stage, v.arrived_by, v.route])).toEqual([["implement", "intake", null], ["gate", "walk", null], ["implement", "route", "back"], ["gate", "walk", null], ["ship", "route", "ahead"]]);
-    // The hold posts the gate notification; the Routes firing post none, and only the human Stage's follows.
-    await notified(lasso, "ship needs you");
-    expect((await lasso.notifications()).map((n) => n.body)).toEqual(["gate finished; Start implement via back when ready", "ship needs you"]);
+    // The hold posts the gate notification; the Routes firing post none, and only the human Stage's follows, naming
+    // the Route that landed there and its source (LASSO-198).
+    await notified(lasso, "ship needs you: Route ahead from gate");
+    expect((await lasso.notifications()).map((n) => n.body)).toEqual(["gate finished; Start implement via back when ready", "ship needs you: Route ahead from gate"]);
   });
 
   it("Flags a spent pick at once, even when it would hold", async () => {

@@ -3,6 +3,7 @@ import type { TicketDetail, Trigger } from "../../../api/views.ts";
 import { showNotice } from "../notice.tsx";
 import { openProfileDrawer } from "../profiles/drawer.tsx";
 import { AbandonPopover } from "./Abandon.tsx";
+import { MarkDoneMenu } from "./MarkDone.tsx";
 import { message, pullTrigger, type ArtifactProblem } from "./ticket.ts";
 
 const PRIMARY = new Set<string>(["terminal", "start", "retry"]);
@@ -18,11 +19,15 @@ export function Triggers({ ticket: t, onExtend, refresh }: { ticket: TicketDetai
   const [abandoning, setAbandoning] = useState(false);
   // The Abandon lever and its popover: a click outside both closes the popover.
   const abandonBox = useRef<HTMLDivElement>(null);
+  // The Mark done menu on a human or taken-over Stage (LASSO-198), and the lever with it.
+  const [marking, setMarking] = useState(false);
+  const doneBox = useRef<HTMLDivElement>(null);
   const [problem, setProblem] = useState<{ action: string; problem: ArtifactProblem } | null>(null);
 
   const pull = async (action: string, body: object = {}) => {
     setBusy(action);
     setAbandoning(false);
+    setMarking(false);
     try {
       const refused = await pullTrigger(t.id, action, body);
       if (refused) {
@@ -40,6 +45,7 @@ export function Triggers({ ticket: t, onExtend, refresh }: { ticket: TicketDetai
 
   const press = (trigger: Trigger) => {
     if (trigger.action === "extend") onExtend();
+    else if (trigger.action === "done" && t.markDone) setMarking((m) => !m);
     else if (trigger.action !== "abandon") void pull(trigger.action);
     else setAbandoning((a) => !a);
   };
@@ -86,6 +92,14 @@ export function Triggers({ ticket: t, onExtend, refresh }: { ticket: TicketDetai
       {t.triggers.map((trigger) => {
         // A lever on show that cannot be pulled (Resume on another Runner) stays disabled and says why below.
         const button = lever(trigger.action, trigger.label, PRIMARY.has(trigger.action), () => press(trigger), { unavailable: trigger.unavailable });
+        if (trigger.action === "done" && t.markDone) {
+          return (
+            <div key="done" className="done-menu" ref={doneBox}>
+              {button}
+              {marking && <MarkDoneMenu ticket={t} menu={t.markDone} within={doneBox} busy={busy !== null} onDone={(body) => void pull("done", body)} onSent={refresh} onClose={() => setMarking(false)} />}
+            </div>
+          );
+        }
         if (trigger.action !== "abandon") return button;
         return (
           <div key="abandon" className="abandon" ref={abandonBox}>

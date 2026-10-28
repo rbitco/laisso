@@ -210,6 +210,8 @@ export interface TicketDetail extends TicketView {
   profiles: StageProfileView[];
   /** Send here (LASSO-197): null when the Ticket cannot be sent anywhere (done, Abandoned, or its Pipeline not loading). */
   send: SendView | null;
+  /** The Mark done menu (LASSO-198) on a human or taken-over Stage; null where Mark done is a plain lever or absent. */
+  markDone: MarkDoneView | null;
   /** Every Visit, oldest first, with how each began (LASSO-199). */
   visits: VisitView[];
   /** The arcs over the Stage track: one per Route that has fired, one per source and target of human sends. */
@@ -286,6 +288,16 @@ export interface SendView {
   unavailable: string | null;
   /** The current Stage's declared Routes, each offered as "Use Route <name>" on the Stage it goes to. */
   routes: SendRoute[];
+}
+
+/**
+ * What Mark done offers on a human or taken-over Stage: "Done, walk forward", "Done via <route> -> <target>" for each
+ * of the Stage's declared Routes, and Send to Stage. A Route chosen here is a human's and never counts or Flags.
+ */
+export interface MarkDoneView {
+  routes: SendRoute[];
+  /** The terminal agent's pick on this Visit (`lasso route`), which the menu pre-selects with its note; null for none. */
+  suggested: { route: string; note: string | null } | null;
 }
 
 /** A declared Route a send may reuse, with the text it adds to its target's prompt. A human's send never counts against its Budget. */
@@ -516,7 +528,23 @@ export function ticketDetail(ticket: TicketRow, ctx: ViewContext): TicketDetail 
   const profiles = (pipeline?.stages ?? []).flatMap((stage) => (stage.kind === "runner" ? [stageProfileView(ctx.profiles, ticket, pipeline!, stage)] : []));
   const visits = visitViews(ctx.visitsFor(ticket));
   const arcs = pipeline ? routeArcs(visits, pipeline, (stage) => ctx.routeBudgetsFor(ticket, stage)) : [];
-  return { ...ticketView(ticket, ctx), session: sessions[0] ?? null, sessions, pipelineDrift: ctx.driftFor(ticket), profiles, send: sendView(ticket, pipeline, sessions), visits, arcs };
+  const view = ticketView(ticket, ctx);
+  const markDone = markDoneView(view, pipeline, ctx.visitsFor(ticket));
+  return { ...view, session: sessions[0] ?? null, sessions, pipelineDrift: ctx.driftFor(ticket), profiles, send: sendView(ticket, pipeline, sessions), markDone, visits, arcs };
+}
+
+/** The Mark done menu when the Ticket offers Mark done at an unflagged human or taken-over Stage, else null. */
+function markDoneView(view: TicketView, pipeline: Pipeline | null, visits: VisitRow[]): MarkDoneView | null {
+  const stage = pipeline?.stages.find((s) => s.name === view.stage.name);
+  if (view.flag || stage?.kind !== "runner" || !view.triggers.some((t) => t.action === "done")) return null;
+  const visit = visits.find((v) => v.left_at === null);
+  const picked = visit?.picked_by === "agent" && visit.picked_route && stage.routes?.[visit.picked_route] ? visit : null;
+  return { routes: declaredRoutes(stage), suggested: picked ? { route: picked.picked_route!, note: picked.picked_note } : null };
+}
+
+/** A Stage's declared Routes, each with the text it adds to its target's prompt. */
+function declaredRoutes(stage: Stage): SendRoute[] {
+  return Object.entries(stage.routes ?? {}).map(([name, r]) => ({ name, to: r.to, text: r.replace ?? r.append ?? null, replaces: r.replace !== undefined }));
 }
 
 /** The Visit not yet left, as the Ledger reads it; null for a Ticket with none. */
@@ -598,7 +626,7 @@ function sendView(ticket: TicketRow, pipeline: Pipeline | null, sessions: Sessio
   const running = sessions.find((s) => s.running && s.mode !== "terminal");
   return {
     unavailable: running ? `${running.stage} has a Session running; stop it or let it end first` : null,
-    routes: Object.entries(stage.routes ?? {}).map(([name, r]) => ({ name, to: r.to, text: r.replace ?? r.append ?? null, replaces: r.replace !== undefined })),
+    routes: declaredRoutes(stage),
   };
 }
 

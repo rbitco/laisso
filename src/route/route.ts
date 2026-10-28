@@ -106,10 +106,11 @@ export type Exit = { kind: "walk" } | TakeRoute | Conflict | RouteFlag | { kind:
  * is not taken, and the Ticket Flags `budget.routes` with the Route pending.
  * A human's pick is never counted and never refused.
  *
- * A Route with Budget left that an agent, Action or check picked holds before
- * it is taken when the source Stage or the Route itself says `advance: false`:
- * the Stage's on every exit, the Route's on that exit only. Holds of Stages a
- * forward Route passes over play no part. A human's pick never holds.
+ * A Route with Budget left holds before it is taken when the source Stage or
+ * the Route itself says `advance: false`: the Stage's on every exit, the
+ * Route's on that exit only. A human's pick from the Mark done menu holds too
+ * (LASSO-198), so an approval gate can't be dodged; Start then takes it. Holds
+ * of Stages a forward Route passes over play no part.
  */
 export function decide({ stage, pick, check = null, end, counts }: Leaving): Exit {
   if (!end.succeeded) return { kind: "failed", untaken: pick };
@@ -134,7 +135,7 @@ export function decide({ stage, pick, check = null, end, counts }: Leaving): Exi
     return { kind: "flag", reason: "budget.routes", detail: `Route ${taken.route} to ${route.to}: ${count.used} of ${count.limit} used; Extend to take it`, pending: take };
   }
   const gated = (stage.kind !== "action" && !stage.advance) || route.advance === false;
-  return taken.by !== "human" && gated ? { ...take, holds: true } : take;
+  return gated ? { ...take, holds: true } : take;
 }
 
 /**
