@@ -8,6 +8,10 @@ name: Release
 # Self-hosted: npm.matty.rocks is LAN-only, so a GitHub-hosted runner
 # cannot reach it.
 #
+# A prerelease tag (vX.Y.Z-next.N) publishes under the npm dist-tag
+# `next`, so `npm i -g @rbitco/lasso@next` installs it while `latest`
+# and the upgrade notice stay on the last release.
+#
 # Run by hand (workflow_dispatch) it is a dry run: everything up to the
 # smoke test, as 0.0.0-dryrun, with nothing published.
 on:
@@ -54,6 +58,8 @@ jobs:
           if [ "$GITHUB_REF_TYPE" = tag ]; then VERSION="${GITHUB_REF_NAME#v}"; else VERSION=0.0.0-dryrun; fi
           npm version "$VERSION" --no-git-tag-version
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          case "$VERSION" in *-*) DIST_TAG=next ;; *) DIST_TAG=latest ;; esac
+          echo "DIST_TAG=$DIST_TAG" >> "$GITHUB_ENV"
 
       # prepack typechecks, builds the dashboard, then bundles.
       - run: npm pack
@@ -69,11 +75,14 @@ jobs:
         run: |
           npmrc="$RUNNER_TEMP/.npmrc"
           echo "//npm.matty.rocks/:_authToken=${NPM_TOKEN}" > "$npmrc"
-          npm publish "rbitco-lasso-$VERSION.tgz" --userconfig "$npmrc"
+          npm publish "rbitco-lasso-$VERSION.tgz" --tag "$DIST_TAG" --userconfig "$npmrc"
           rm -f "$npmrc"
 
       - name: GitHub Release
         if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" "rbitco-lasso-$VERSION.tgz" --generate-notes
+        run: |
+          prerelease=""
+          if [ "$DIST_TAG" = next ]; then prerelease=--prerelease; fi
+          gh release create "$GITHUB_REF_NAME" "rbitco-lasso-$VERSION.tgz" --generate-notes $prerelease

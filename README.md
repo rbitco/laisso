@@ -30,6 +30,10 @@ To upgrade, `npm update -g @rbitco/lasso`, then restart Lasso. The
 dashboard and `lasso status` say when a newer version is published, and
 when one is installed but not yet running.
 
+To try unreleased work from main, `npm i -g @rbitco/lasso@next`
+installs the latest preview (a `vX.Y.Z-next.N` tag); `npm i -g
+@rbitco/lasso@latest` goes back to the last release.
+
 Lasso also checks PATH at each start, logs a warning per missing tool,
 and lists them in the dashboard header.
 
