@@ -30,7 +30,7 @@ names come from Lasso code.
 ## Consequences
 
 - An Action has `run`, optional `params` (names a Stage must supply
-  under `with:`), and optional `timeout` (default 5m). A repo may
+  under `with:`), and optional `timeout` (default 60s). A repo may
   redefine an Action by name under its own `actions:`; the repo's wins.
 - Variables: the `LASSO_*` set Runner Sessions get, plus the Ticket's
   title, tracker, project, PR, worktree, and Pipeline, plus one

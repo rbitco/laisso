@@ -95,7 +95,7 @@ win for that repo.
 | --- | --- |
 | `run` | required, non-empty: the command, run with `$SHELL -c` (else `/bin/sh`) in the Ticket's worktree |
 | `params` | optional list of names (lowercase letters, digits, underscores, starting with a letter), no repeats. A Stage must supply exactly these under `with:`. |
-| `timeout` | optional duration, default `5m`; the command is killed and the Ticket Flagged after it |
+| `timeout` | optional duration, default `60s`; the command is killed and the Ticket Flagged after it |
 
 Any other field is an error. Exit 0 advances the Ticket; anything else, a
 timeout, or a command that cannot start Flags it `outcome.failed` with the

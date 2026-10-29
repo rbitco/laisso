@@ -55,8 +55,8 @@ tick: 30 # fast
     expect(text).toContain("app: { tracker: jira, project: APP, path: /a }");
     expect(text).toContain("params: [ status ]");
     const config = parseConfig(text, "config.yaml");
-    expect(config.actions["tracker.transition"]).toEqual({ ...JIRA_TRANSITION, timeout: "5m" });
-    expect(config.repos.web!.actions["tracker.transition"]).toEqual({ ...GITHUB_TRANSITION, timeout: "5m" });
+    expect(config.actions["tracker.transition"]).toEqual({ ...JIRA_TRANSITION, timeout: "60s" });
+    expect(config.repos.web!.actions["tracker.transition"]).toEqual({ ...GITHUB_TRANSITION, timeout: "60s" });
     expect(config.repos.app!.actions).toEqual({});
   });
 

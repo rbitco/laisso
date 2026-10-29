@@ -181,7 +181,7 @@ repos: {}
 actions: {}
 #  notify:
 #    params: [channel]        # a Stage supplies these under with:, as LASSO_CHANNEL
-#    timeout: 5m              # killed and Flagged after this long
+#    timeout: 60s             # killed and Flagged after this long
 #    run: echo "$LASSO_REFERENCE is at $LASSO_STAGE" >> ~/lasso-$LASSO_CHANNEL.log
 
 # Agent Profiles: the Runner a Stage runs under, and how. A Stage names one
@@ -622,7 +622,7 @@ export function reviewFor(config: Pick<Config, "review" | "repos">, repo: string
 /** What an Action may be called, and what a param may be called so that LASSO_<PARAM> is a plain variable name. */
 export const ACTION_NAME = /^[a-z0-9][a-z0-9._-]*$/;
 export const PARAM_NAME = /^[a-z][a-z0-9_]*$/;
-export const DEFAULT_ACTION_TIMEOUT = "5m";
+export const DEFAULT_ACTION_TIMEOUT = "60s";
 const ACTION_FIELDS = new Set(["run", "params", "timeout"]);
 
 function parseActions(value: Record<string, unknown>, where: string): Record<string, ActionConfig> {

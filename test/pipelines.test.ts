@@ -504,8 +504,8 @@ describe("config Actions in the Pipeline editor", () => {
     const lasso = await lassoWithActions();
     const listed = await lasso.api<ActionListing[]>("/api/actions");
     expect(listed.filter((a) => a.name !== "tracker.transition" && a.repo !== "app")).toEqual([
-      { name: "notify", repo: null, params: ["channel"], timeout: "5m", run: 'echo "told $LASSO_CHANNEL"' },
-      { name: "deploy", repo: "web", params: ["env", "region"], timeout: "5m", run: "./deploy" },
+      { name: "notify", repo: null, params: ["channel"], timeout: "60s", run: 'echo "told $LASSO_CHANNEL"' },
+      { name: "deploy", repo: "web", params: ["env", "region"], timeout: "60s", run: "./deploy" },
       { name: "notify", repo: "web", params: ["channel"], timeout: "1m", run: "echo web" },
     ]);
     expect(listed.find((a) => a.name === "tracker.transition")).toMatchObject({ repo: null, params: ["status"] });

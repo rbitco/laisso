@@ -60,10 +60,10 @@ describe("loadConfig", () => {
     expect(() => loadConfig(homeWith("budget: { routes: 1.5 }\n"))).toThrow(/budget\.routes/);
   });
 
-  it("reads Actions, with params and a timeout defaulting to 5m, and refuses a malformed one", () => {
+  it("reads Actions, with params and a timeout defaulting to 60s, and refuses a malformed one", () => {
     const yaml = (actions: string) => `actions:\n${actions}`;
     expect(loadConfig(homeWith(yaml("  notify:\n    params: [channel]\n    run: echo hi\n  slack.post:\n    timeout: 30s\n    run: ./post\n"))).actions).toEqual({
-      notify: { run: "echo hi", params: ["channel"], timeout: "5m" },
+      notify: { run: "echo hi", params: ["channel"], timeout: "60s" },
       "slack.post": { run: "./post", params: [], timeout: "30s" },
     });
     expect(() => loadConfig(homeWith(yaml("  notify: {}\n")))).toThrow(/actions\.notify: run must be a command/);
@@ -76,7 +76,7 @@ describe("loadConfig", () => {
 
   it("reads a repo's own Actions, which replace global ones of the same name for that repo", () => {
     const config = loadConfig(homeWith("actions:\n  notify:\n    run: global\n  page:\n    run: pager\nrepos:\n  app:\n    actions:\n      notify:\n        run: local\n        params: [channel]\n      deploy:\n        run: ./deploy\n  web: {}\n"));
-    expect(config.repos.app!.actions).toEqual({ notify: { run: "local", params: ["channel"], timeout: "5m" }, deploy: { run: "./deploy", params: [], timeout: "5m" } });
+    expect(config.repos.app!.actions).toEqual({ notify: { run: "local", params: ["channel"], timeout: "60s" }, deploy: { run: "./deploy", params: [], timeout: "60s" } });
     expect(config.repos.web!.actions).toEqual({});
     expect(actionsFor(config, "app")).toMatchObject({ notify: { run: "local" }, page: { run: "pager" }, deploy: { run: "./deploy" } });
     expect(actionsFor(config, "web")).toEqual(config.actions);

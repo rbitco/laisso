@@ -3,22 +3,28 @@ import { promisify } from "node:util";
 
 const run = promisify(execFile);
 
+/** How long one git command may run before it is killed, so a hung fetch or push cannot stall a tick. */
+export const GIT_TIMEOUT_MS = 120_000;
+
 export class GitError extends Error {}
 
 /** Thin, promise-based git over a checkout. Lasso owns worktrees; Runners never touch them (ADR 0003). */
 export class Git {
   cwd: string;
+  timeoutMs: number;
 
-  constructor(cwd: string) {
+  constructor(cwd: string, timeoutMs: number = GIT_TIMEOUT_MS) {
     this.cwd = cwd;
+    this.timeoutMs = timeoutMs;
   }
 
   async exec(args: string[], cwd: string = this.cwd): Promise<string> {
     try {
-      const { stdout } = await run("git", args, { cwd, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
+      const { stdout } = await run("git", args, { cwd, encoding: "utf8", maxBuffer: 16 * 1024 * 1024, timeout: this.timeoutMs, killSignal: "SIGKILL" });
       return stdout.trim();
     } catch (error) {
-      const e = error as { stderr?: string; message?: string };
+      const e = error as { stderr?: string; message?: string; killed?: boolean; signal?: string | null };
+      if (e.killed && e.signal === "SIGKILL") throw new GitError(`git ${args.join(" ")} timed out after ${this.timeoutMs / 1000}s in ${cwd}`);
       throw new GitError(`git ${args.join(" ")} failed in ${cwd}: ${(e.stderr || e.message || "").trim()}`);
     }
   }
