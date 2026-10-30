@@ -4,6 +4,7 @@ import type { Config } from "../server/config.ts";
 import type { LassoHome } from "../server/home.ts";
 import type { Logger } from "../server/log.ts";
 import type { TickChange } from "../server/tick.ts";
+import { TicketWork } from "../server/ticket-work.ts";
 import type { Tickets, TicketRow } from "../store/tickets.ts";
 import { Git } from "../git.ts";
 import { expandHome } from "../intake/intake.ts";
@@ -19,6 +20,8 @@ export interface TeardownDeps {
   links: PrLinks;
   log: Logger;
   prs: PullRequests;
+  /** Told when a sweep that outlasted its tick ends having swept something. */
+  late?: () => void;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -35,9 +38,17 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  */
 export class Teardown {
   private deps: TeardownDeps;
+  // One at a time: worktree removals in one repo contend for git's lock.
+  private work: TicketWork;
 
   constructor(deps: TeardownDeps) {
     this.deps = deps;
+    this.work = new TicketWork({ step: "sweep", limit: 1, log: deps.log, late: deps.late });
+  }
+
+  /** Resolves once every sweep under way is through, those that outlasted their tick included. */
+  settle(): Promise<void> {
+    return this.work.settle();
   }
 
   /** Done: the worktree goes, then the local branch; a worktree that will not go keeps its branch. */
@@ -79,9 +90,9 @@ export class Teardown {
    * remove it) goes through git first, so the repo is not left with a dangling registration; the
    * retention deadline is the one point where uncommitted work is let go, and it is logged.
    */
-  async sweep(now: number = Date.now()): Promise<TickChange[]> {
+  sweep(now: number = Date.now()): Promise<TickChange[]> {
     const { config, home, tickets, log } = this.deps;
-    const changes: TickChange[] = [];
+    const due = new Map<string, TicketRow>();
     for (const ticket of tickets.list({ all: true })) {
       if (ticket.state === "active") continue;
       const endedAt = Date.parse(ticket.ended_at ?? ticket.updated_at);
@@ -90,23 +101,26 @@ export class Teardown {
         continue;
       }
       if (endedAt + config.retention * DAY_MS > now) continue;
-      const dir = path.join(home.ticketsDir, ticket.id);
-      if (!existsSync(dir)) continue;
+      if (!existsSync(path.join(home.ticketsDir, ticket.id))) continue;
+      due.set(ticket.id, ticket);
+    }
+    // A git that hangs on one worktree holds up only that Ticket's sweep (LASSO-203).
+    return this.work.run([...due.keys()], async (id) => {
+      const ticket = due.get(id)!;
       if (existsSync(ticket.worktree)) {
         const git = this.gitFor(ticket);
-        if (!git || (await this.step(ticket, "sweep worktree", () => git.removeWorktree(ticket.worktree))) === null) continue;
+        if (!git || (await this.step(ticket, "sweep worktree", () => git.removeWorktree(ticket.worktree))) === null) return [];
         log.info("ticket.worktree_swept", { ticket: ticket.id, state: ticket.state });
       }
       try {
-        rmSync(dir, { recursive: true, force: true });
+        rmSync(path.join(home.ticketsDir, ticket.id), { recursive: true, force: true });
       } catch (error) {
         log.error("ticket.sweep_failed", { ticket: ticket.id, error: error instanceof Error ? error.message : String(error) });
-        continue;
+        return [];
       }
       log.info("ticket.swept", { ticket: ticket.id, state: ticket.state, days: config.retention });
-      changes.push({ ticket: ticket.id, summary: `directory swept, ${config.retention} days after ${ticket.state}` });
-    }
-    return changes;
+      return [{ ticket: ticket.id, summary: `directory swept, ${config.retention} days after ${ticket.state}` }];
+    });
   }
 
   /**

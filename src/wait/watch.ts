@@ -1,5 +1,6 @@
 import type { Logger } from "../server/log.ts";
 import type { TickChange } from "../server/tick.ts";
+import { TicketWork } from "../server/ticket-work.ts";
 import type { Tickets, TicketRow } from "../store/tickets.ts";
 import type { Visits } from "../store/visits.ts";
 import type { Progress } from "../session/progress.ts";
@@ -13,6 +14,8 @@ export interface WatchDeps {
   progress: Progress;
   checks: ActionChecks;
   log: Logger;
+  /** Told when a check that outlasted its tick ends having moved or Flagged its Ticket. */
+  late?: () => void;
 }
 
 /**
@@ -26,27 +29,41 @@ export interface WatchDeps {
  */
 export class Watch {
   private deps: WatchDeps;
+  private work: TicketWork;
 
   constructor(deps: WatchDeps) {
     this.deps = deps;
+    this.work = new TicketWork({ step: "watch", limit: Infinity, log: deps.log, late: deps.late });
   }
 
-  /** The Tick's pass over wait Stages. Checks of different Tickets run side by side; one line per Ticket that moved or Flagged. */
-  async poll(now: number = Date.now()): Promise<TickChange[]> {
-    const due: Array<Promise<TickChange | null>> = [];
+  /** Resolves once every check this pass started is through, those that outlasted their tick included. */
+  settle(): Promise<void> {
+    return this.work.settle();
+  }
+
+  /**
+   * The Tick's pass over wait Stages. Checks of different Tickets run side by side; one line per Ticket that moved or
+   * Flagged. A check that outlasts the tick's patience finishes on its own (LASSO-203).
+   */
+  poll(now: number = Date.now()): Promise<TickChange[]> {
+    const due: Array<{ ticket: TicketRow; stage: WaitStage }> = [];
     for (const ticket of this.deps.tickets.list()) {
       const current = this.deps.progress.current(ticket);
       if ("problem" in current || current.stage.kind !== "wait") continue;
       if (ticket.flagged_at || ticket.holding_since || this.deps.checks.running(ticket.id)) continue;
-      const stage = current.stage;
-      due.push(
-        this.watch(ticket, stage, now).catch((error: unknown) => {
-          this.deps.log.error("wait.poll_failed", { ticket: ticket.id, stage: stage.name, error: error instanceof Error ? error.message : String(error) });
-          return null;
-        }),
-      );
+      due.push({ ticket, stage: current.stage });
     }
-    return (await Promise.all(due)).filter((c): c is TickChange => c !== null);
+    const byId = new Map(due.map((d) => [d.ticket.id, d]));
+    return this.work.run([...byId.keys()], async (id) => {
+      const { ticket, stage } = byId.get(id)!;
+      try {
+        const change = await this.watch(ticket, stage, now);
+        return change ? [change] : [];
+      } catch (error) {
+        this.deps.log.error("wait.poll_failed", { ticket: ticket.id, stage: stage.name, error: error instanceof Error ? error.message : String(error) });
+        return [];
+      }
+    });
   }
 
   private async watch(ticket: TicketRow, stage: WaitStage, now: number): Promise<TickChange | null> {

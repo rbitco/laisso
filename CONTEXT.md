@@ -193,7 +193,10 @@ _Avoid_: waiting, pending, polling, idle
 One pass of Lasso's single clock, in which it polls PRs, retries pending
 tracker updates, and starts Queued Sessions. A Tick runs on an interval, on
 Check now, and when a Session ends; one already under way is joined, never
-doubled.
+doubled. Each Ticket's share runs on its own: a Ticket whose gh, git or
+Action outlasts the Tick's patience (5 seconds) finishes in the background,
+is skipped by later Ticks until it ends, and then kicks a Tick if it changed
+anything.
 _Avoid_: poll, refresh, sync, heartbeat
 
 **PR List**:

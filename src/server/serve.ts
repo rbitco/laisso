@@ -119,10 +119,13 @@ export async function serve(opts: ServeOptions): Promise<number> {
   };
   const links = new PrLinks(store.db, ticketChanged, (repo) => origins.get(repo) ?? null);
   const notifier = createNotifier({ config: config.notifications, log, baseUrl: `http://localhost:${config.port}` });
+  // Per-Ticket work that outlasted its tick and changed something kicks a tick, so what it made due starts now (LASSO-203).
+  const late = () => tick.kick("late-work");
   const mirror = new Mirror({
     config,
     tickets,
     log,
+    late,
     pipelineFor: (ticket) => {
       try {
         return versions.forTicket(ticket, home.pipelinesDir);
@@ -132,7 +135,7 @@ export async function serve(opts: ServeOptions): Promise<number> {
     },
   });
   const prs = new PullRequests(log);
-  const teardown = new Teardown({ config, home, tickets, links, log, prs });
+  const teardown = new Teardown({ config, home, tickets, links, log, prs, late });
   const checks = new ActionChecks({ config, home, links, visits, log });
   const budgets = new Budgets({ config, sessions, links, visits });
   const upgrades = new Upgrades(store.db);
@@ -142,8 +145,8 @@ export async function serve(opts: ServeOptions): Promise<number> {
     const rules = reviewFor(config, ticket.repo);
     return ignoring(rules.ignore_self ? [...rules.ignore_authors, await prs.viewer()] : rules.ignore_authors);
   };
-  const review: Review = new Review({ tickets, sessions, visits, feedback, links, progress, prs, checks, log, ignored });
-  const watch = new Watch({ tickets, visits, progress, checks, log });
+  const review: Review = new Review({ tickets, sessions, visits, feedback, links, progress, prs, checks, log, ignored, late });
+  const watch = new Watch({ tickets, visits, progress, checks, log, late });
   const terminal = new Terminal({ config, home, sessions, visits, links, log, routeCounts: (ticket, stage) => budgets.routes(ticket, stage), flag: (ticket, reason, detail) => progress.flag(ticket, reason, detail) });
   const queue = new Queue({ home, tickets, sessions, progress, log, cap: config.concurrency });
   const runs = new Runs({ config, home, tickets, links, sessions, visits, log, progress, budgets, queue, review, checks, stdoutWritten: (ticket, session) => changes.emit({ kind: "stdout", ticket, session }), ended: () => tick.kick("session-end") });
@@ -179,7 +182,9 @@ export async function serve(opts: ServeOptions): Promise<number> {
   });
   // One tick: the PR Lists, which only start their fetches (a Tick never waits on a PR search), then owed mirror
   // pushes, then action Stages, then the PR poll (a Round it makes due starts below), then wait Stages' checks, then
-  // headless starts, then the retention sweep.
+  // headless starts, then the retention sweep. The mirror, PR poll, wait checks and sweep each handle every Ticket on its
+  // own: one whose gh, git or Action outlasts the tick's patience finishes in the background and is skipped until it
+  // ends, so it never holds up the other Tickets or the next tick (LASSO-203).
   const tick = new Tick(
     config.tick,
     log,
@@ -254,7 +259,7 @@ export async function serve(opts: ServeOptions): Promise<number> {
     const finished = new Promise<void>((done) => server.close(() => done()));
     // The ended streams leave keep-alive sockets behind once their last bytes are out; drop them then.
     setTimeout(() => (server as { closeIdleConnections?: () => void }).closeIdleConnections?.(), 50).unref();
-    void startup.then(() => tick.settle()).then(() => Promise.all([runs.shutdown(), actions.shutdown(), checks.shutdown()])).then(() => mirror.settle()).then(() => finished).then(() => {
+    void startup.then(() => tick.settle()).then(() => Promise.all([review.settle(), watch.settle(), teardown.settle()])).then(() => Promise.all([runs.shutdown(), actions.shutdown(), checks.shutdown()])).then(() => mirror.settle()).then(() => finished).then(() => {
       store.close();
       releaseLock();
       resolveExit(0);

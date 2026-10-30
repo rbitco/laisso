@@ -1,5 +1,6 @@
 import type { Logger } from "../server/log.ts";
 import type { TickChange } from "../server/tick.ts";
+import { TicketWork } from "../server/ticket-work.ts";
 import type { Tickets, TicketRow } from "../store/tickets.ts";
 import type { Sessions } from "../store/sessions.ts";
 import { itemOf, type Feedback, type FeedbackRow } from "../store/feedback.ts";
@@ -56,7 +57,12 @@ export interface ReviewDeps {
   log: Logger;
   /** Whose comments are never Feedback on this Ticket's PR (review.ignore_authors, review.ignore_self); unset ignores no one. */
   ignored?: (ticket: TicketRow) => Promise<IgnoredAuthor>;
+  /** Told when a poll that outlasted its tick ends having changed something. */
+  late?: () => void;
 }
+
+/** Tickets whose PRs are read at once: each read is a few gh calls, and GitHub limits how many land together. */
+const POLL_LIMIT = 4;
 
 /**
  * The Review loop (ADR 0004): each tick, every Ticket in a repeating Stage
@@ -67,9 +73,16 @@ export interface ReviewDeps {
  */
 export class Review {
   private deps: ReviewDeps;
+  private work: TicketWork;
 
   constructor(deps: ReviewDeps) {
     this.deps = deps;
+    this.work = new TicketWork({ step: "review", limit: POLL_LIMIT, log: deps.log, late: deps.late });
+  }
+
+  /** Resolves once every poll under way is through, those that outlasted their tick included. */
+  settle(): Promise<void> {
+    return this.work.settle();
   }
 
   /** The facts less the comments of authors this Ticket's repo ignores, so they never start a Round or hold one open. */
@@ -77,22 +90,28 @@ export class Review {
     return this.deps.ignored ? withoutIgnored(facts, own, await this.deps.ignored(ticket)) : facts;
   }
 
-  /** The tick's poll: one line per Ticket whose PR changed something. Feedback arriving mid-Round waits. */
-  async poll(): Promise<TickChange[]> {
-    const changes: TickChange[] = [];
-    for (const ticket of this.deps.tickets.list()) {
+  /**
+   * The tick's poll: one line per Ticket whose PR changed something. Feedback arriving mid-Round waits. Tickets are
+   * read side by side, a few at once; one whose read outlasts the tick's patience finishes on its own (LASSO-203).
+   */
+  poll(): Promise<TickChange[]> {
+    const rows = new Map(this.deps.tickets.list().map((t) => [t.id, t]));
+    return this.work.run([...rows.keys()], async (id) => {
+      // Read afresh: the Ticket may have moved while an earlier Ticket's read held its turn.
+      const ticket = this.deps.tickets.get(id) ?? rows.get(id)!;
+      if (ticket.state !== "active") return [];
       const current = this.deps.progress.current(ticket);
-      if ("problem" in current || current.stage.kind !== "runner" || !current.stage.repeat) continue;
-      if (this.deps.sessions.running(ticket.id).some((s) => s.mode === "headless")) continue;
+      if ("problem" in current || current.stage.kind !== "runner" || !current.stage.repeat) return [];
+      if (this.deps.sessions.running(ticket.id).some((s) => s.mode === "headless")) return [];
       // Holding before a Route, the Stage has finished: nothing more is read or run until Start takes the Route.
-      if (ticket.holding_since && this.deps.progress.heldRoute(ticket, current.stage)) continue;
+      if (ticket.holding_since && this.deps.progress.heldRoute(ticket, current.stage)) return [];
       try {
-        changes.push(...(await this.pollTicket(ticket, current.stage)));
+        return await this.pollTicket(ticket, current.stage);
       } catch (error) {
         this.deps.log.error("review.poll_failed", { ticket: ticket.id, error: error instanceof Error ? error.message : String(error) });
+        return [];
       }
-    }
-    return changes;
+    });
   }
 
   private async pollTicket(ticket: TicketRow, stage: RunnerStage): Promise<TickChange[]> {

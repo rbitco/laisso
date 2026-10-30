@@ -1,6 +1,7 @@
 import type { Config } from "../server/config.ts";
 import type { Logger } from "../server/log.ts";
 import type { TickChange } from "../server/tick.ts";
+import { TicketWork } from "../server/ticket-work.ts";
 import type { Tickets, TicketRow } from "../store/tickets.ts";
 import type { Pipeline } from "../pipeline/load.ts";
 import { trackerFor, LABEL_PREFIX, FLAGGED_LABEL, mirrorLabel, type Tracker } from "./tracker.ts";
@@ -11,7 +12,12 @@ export interface MirrorDeps {
   log: Logger;
   /** The Ticket's Pipeline, or null when it cannot be loaded; the stage label then stays as the tracker has it. */
   pipelineFor: (ticket: TicketRow) => Pipeline | null;
+  /** Told when a retry that outlasted its tick ends having changed something. */
+  late?: () => void;
 }
+
+/** Tickets whose pending pushes are retried at once. */
+const RETRY_LIMIT = 4;
 
 /** What one push did: nothing to mirror, the tracker now matches, or the tracker still owes the write. */
 export type PushResult = "skipped" | "pushed" | "pending";
@@ -29,9 +35,11 @@ export type PushResult = "skipped" | "pushed" | "pending";
 export class Mirror {
   private deps: MirrorDeps;
   private chains = new Map<string, Promise<PushResult>>();
+  private work: TicketWork;
 
   constructor(deps: MirrorDeps) {
     this.deps = deps;
+    this.work = new TicketWork({ step: "mirror", limit: RETRY_LIMIT, log: deps.log, late: deps.late });
   }
 
   /** The `lasso:*` labels the issue should carry; `stage` null means leave whatever stage label it has. */
@@ -58,6 +66,7 @@ export class Mirror {
 
   /** Wait for every push under way, so shutdown closes the store only after they have recorded their result. */
   async settle(): Promise<void> {
+    await this.work.settle();
     while (this.chains.size) await Promise.allSettled([...this.chains.values()]);
   }
 
@@ -80,16 +89,14 @@ export class Mirror {
     }
   }
 
-  /** The tick's share: every Ticket with a pending mirror is pushed again from its current state. */
-  async retryPending(): Promise<TickChange[]> {
-    const changes: TickChange[] = [];
-    for (const ticket of this.deps.tickets.list({ all: true })) {
-      if (!ticket.mirror_pending) continue;
-      const result = await this.push(ticket.id);
-      if (result === "skipped") continue;
-      changes.push({ ticket: ticket.id, summary: result === "pushed" ? "mirror pushed" : "tracker labels not written yet" });
-    }
-    return changes;
+  /** The tick's share: every Ticket with a pending mirror is pushed again from its current state, a few side by side (LASSO-203). */
+  retryPending(): Promise<TickChange[]> {
+    const pending = this.deps.tickets.list({ all: true }).filter((t) => t.mirror_pending).map((t) => t.id);
+    return this.work.run(pending, async (id) => {
+      const result = await this.push(id);
+      if (result === "skipped") return [];
+      return [{ ticket: id, summary: result === "pushed" ? "mirror pushed" : "tracker labels not written yet" }];
+    });
   }
 
   /** At startup every active tracker Ticket is owed a push, so a tracker edited while Lasso was down is overwritten. */
