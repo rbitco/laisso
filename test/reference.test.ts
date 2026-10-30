@@ -5,6 +5,7 @@ import path from "node:path";
 import { startLassoWithRepos, restartOnFakesOnly, runCli, waitFor, type Lasso, type RepoSpec, type LassoConfig } from "./harness.ts";
 import type { Detection } from "../src/intake/detect.ts";
 import type { TicketView, IntakeResult } from "../src/api/views.ts";
+import { showTicket } from "../src/notify/notifier.ts";
 
 const running: Lasso[] = [];
 afterEach(async () => {
@@ -202,6 +203,6 @@ describe("lasso add with a reference", () => {
     // The first Stage is human, so the Ticket needs you from the start.
     const posts = await waitFor(async () => { const n = await lasso.notifications(); return n.length ? n : null; }, "the notification");
     const [ticket] = await lasso.api<Array<{ id: string }>>("/api/tickets");
-    expect(posts).toEqual([{ title: "APP-12 Add dark mode to the settings page", body: "grill needs you", url: `${lasso.url}/#${ticket!.id}` }]);
+    expect(posts).toEqual([{ title: "APP-12 Add dark mode to the settings page", body: "grill needs you", click: showTicket(lasso.url, `${lasso.url}/#${ticket!.id}`) }]);
   });
 });

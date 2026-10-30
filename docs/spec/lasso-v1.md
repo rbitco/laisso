@@ -267,7 +267,7 @@ CLI
 
 Notifications
 
-- A notifier adapter per OS; v1 ships macOS (terminal-notifier when present, osascript fallback). Events, once each: Ticket Flagged, human Stage became current, Stage finished with `advance: false`. Title is the Ticket name (the reference first when it has one, then the title), body is the event plus reason, click opens the Ticket detail where the adapter supports a URL. Failures are logged only.
+- A notifier adapter per OS; v1 ships macOS (terminal-notifier when present, osascript fallback). Events, once each: Ticket Flagged, human Stage became current, Stage finished with `advance: false`. Title is the Ticket name (the reference first when it has one, then the title), body is the event plus reason, click opens the Ticket detail where the adapter supports a URL, reusing a Chrome tab already on the dashboard (pointed at the Ticket and brought forward) and opening the default browser otherwise. Failures are logged only.
 
 End of life (ADR 0007)
 

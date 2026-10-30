@@ -4,6 +4,7 @@ import path from "node:path";
 import { startLassoWithRepos, startLasso, runCli, waitFor, claudeFixture, type Lasso, type LassoConfig } from "./harness.ts";
 import type { TicketDetail, IntakeResult } from "../src/api/views.ts";
 import type { TickChange } from "../src/server/tick.ts";
+import { showTicket } from "../src/notify/notifier.ts";
 
 // Seam one again: a human Stage from intake through Open terminal, Mark done,
 // Skip and the Start gate, watched through the API and the fakes on PATH
@@ -56,7 +57,7 @@ describe("a human Stage", () => {
       { action: "abandon", label: "Abandon" },
     ]);
     const [hello] = await notified(lasso, 1);
-    expect(hello).toEqual({ title: "Add dark mode", body: "grill needs you", url: `${lasso.url}/#${ticket.id}` });
+    expect(hello).toEqual({ title: "Add dark mode", body: "grill needs you", click: showTicket(lasso.url, `${lasso.url}/#${ticket.id}`) });
 
     // check-now leaves a human Stage alone: nothing to run headless.
     expect((await lasso.api<{ changes: TickChange[] }>("/api/check-now", { method: "POST" })).changes).toEqual([]);

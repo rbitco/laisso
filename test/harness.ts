@@ -49,7 +49,7 @@ export interface Lasso {
   /** Fetch a page (HTML) as text. */
   page(route: string): Promise<Response>;
   /** The notifications the fake notifier recorded, oldest first. */
-  notifications(): Promise<Array<{ title: string; body: string; url?: string }>>;
+  notifications(): Promise<Array<{ title: string; body: string; click?: string }>>;
   /** The gh and acli shims: canned replies in, recorded invocations out. */
   tracker: TrackerShim;
   /** The fake Runner behind claude, codex and pi: a script in, recorded launches out. */
@@ -375,7 +375,7 @@ async function installFakeNotifier(pathDir: string): Promise<void> {
 const fs = require("node:fs");
 const path = require("node:path");
 const args = process.argv.slice(2);
-const flags = { "-title": "title", "-message": "body", "-open": "url" };
+const flags = { "-title": "title", "-message": "body", "-execute": "click" };
 const record = {};
 for (let i = 0; i < args.length; i++) {
   const key = flags[args[i]];
