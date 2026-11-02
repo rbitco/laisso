@@ -102,18 +102,6 @@ Field references for `config.yaml`, Pipelines and profiles are in
 [skills/laisso](skills/laisso/SKILL.md), with worked examples for GitHub
 and JIRA in [skills/laisso/examples](skills/laisso/examples).
 
-## Coming from Lasso
-
-Laisso was named Lasso. Install `laisso`, uninstall `@rbitco/lasso`, and set
-`LAISSO_DIRECTORY_NAME=.lasso` to keep using `~/.lasso` as it is: its
-`lasso.db`, `lasso.log` and backups are picked up, `LASSO_HOME` and
-`LASSO_PORT` still work, and Sessions and Actions get each `LAISSO_*`
-variable under its `LASSO_*` name too, so Action scripts written for Lasso
-run unchanged. Prompts that tell an agent to run `lasso route` or `lasso pr
-link` need `laisso` instead, as no `lasso` command is installed. `laisso
-skill install` removes the skill Lasso installed. Tracker issues keep their
-old `lasso:*` labels beside the new `laisso:*` ones until removed by hand.
-
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for running from a clone, tests and
