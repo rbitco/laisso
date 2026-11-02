@@ -8,18 +8,18 @@ import { chooseTerminal, type TerminalChoice } from "../session/openers.ts";
 
 export interface DoctorOptions {
   json: boolean;
-  /** LASSO_HOME, PATH and HOME are read from here: the process's own unless a test says otherwise. */
+  /** LAISSO_HOME, PATH and HOME are read from here: the process's own unless a test says otherwise. */
   env?: NodeJS.ProcessEnv;
 }
 
 /**
- * `lasso doctor`: which external tools this Lasso home's config needs, whether
- * each is on PATH and logged in, and what needs it. Reads the Lasso home
- * directly, so it works with or without Lasso running, and writes nothing.
+ * `laisso doctor`: which external tools this Laisso home's config needs, whether
+ * each is on PATH and logged in, and what needs it. Reads the Laisso home
+ * directly, so it works with or without Laisso running, and writes nothing.
  * Exits 1 when a needed tool is missing or logged out. It also says whether
- * each agent has the Lasso skill and from which version, as information only:
+ * each agent has the Laisso skill and from which version, as information only:
  * the skill never changes the exit code. Last, where human Stages open, as
- * Lasso started from this shell would choose.
+ * Laisso started from this shell would choose.
  */
 export async function doctor(opts: DoctorOptions): Promise<number> {
   const env = opts.env ?? process.env;
@@ -58,15 +58,15 @@ export function renderDoctor(home: string, rows: DoctorRow[], problems: DoctorRo
     : "every needed tool is found and logged in";
   const skills = skill.length ? ["", ...skill.map((s) => skillLine(s, version))] : [];
   const opens = terminal ? ["", `human Stages open in: ${TERMINAL_NAME[terminal.kind]}, as ${terminal.why}`] : [];
-  return [`lasso home: ${home}`, "", ...lines, "", verdict, ...skills, ...opens].join("\n");
+  return [`laisso home: ${home}`, "", ...lines, "", verdict, ...skills, ...opens].join("\n");
 }
 
 const TERMINAL_NAME: Record<TerminalChoice["kind"], string> = { herdr: "a herdr tab", tmux: "a tmux window", "terminal-app": "a Terminal.app window" };
 
-/** One agent's copy of the skill, with the fix when it is not this Lasso's. */
+/** One agent's copy of the skill, with the fix when it is not this Laisso's. */
 function skillLine(s: SkillStatus, version: string): string {
-  const head = `lasso skill for ${s.agent} (${s.dir}): `;
-  if (s.state === "current") return `${head}current, Lasso ${version}`;
-  if (s.state === "missing") return `${head}missing; run lasso skill install`;
-  return `${head}from ${s.installed === null ? "an unknown version" : `Lasso ${s.installed}`}, this is Lasso ${version}; run lasso skill install`;
+  const head = `laisso skill for ${s.agent} (${s.dir}): `;
+  if (s.state === "current") return `${head}current, Laisso ${version}`;
+  if (s.state === "missing") return `${head}missing; run laisso skill install`;
+  return `${head}from ${s.installed === null ? "an unknown version" : `Laisso ${s.installed}`}, this is Laisso ${version}; run laisso skill install`;
 }

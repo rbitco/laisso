@@ -23,7 +23,7 @@ export function PrListsForm({ visit }: { visit: number }) {
       setSaved(text);
       setText(text);
     } catch {
-      // A Lasso without PR Lists has nothing to edit here.
+      // A Laisso without PR Lists has nothing to edit here.
     }
   }, []);
   useEffect(() => void read(), [read, visit]);

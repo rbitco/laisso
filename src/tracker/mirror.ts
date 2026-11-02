@@ -23,11 +23,11 @@ const RETRY_LIMIT = 4;
 export type PushResult = "skipped" | "pushed" | "pending";
 
 /**
- * The tracker mirrors Lasso's state summary (ADR 0001, ADR 0005): a
- * `lasso:<stage>` label swapped on each transition and `lasso:flagged`
+ * The tracker mirrors Laisso's state summary (ADR 0001, ADR 0005): a
+ * `laisso:<stage>` label swapped on each transition and `laisso:flagged`
  * toggled. Writes are write-through: the row is already committed when
  * push runs; a failed push marks the Ticket mirror-pending and the tick
- * retries. Every push sets the whole `lasso:*` set, so hand edits in the
+ * retries. Every push sets the whole `laisso:*` set, so hand edits in the
  * tracker are overwritten. Pushes for one Ticket run one after another,
  * each from the row as it stands when its turn comes, so the last write
  * always reflects the latest state.
@@ -42,7 +42,7 @@ export class Mirror {
     this.work = new TicketWork({ step: "mirror", limit: RETRY_LIMIT, log: deps.log, late: deps.late });
   }
 
-  /** The `lasso:*` labels the issue should carry; `stage` null means leave whatever stage label it has. */
+  /** The `laisso:*` labels the issue should carry; `stage` null means leave whatever stage label it has. */
   wanted(ticket: TicketRow): { stage: string | null; flagged: boolean; active: boolean } {
     if (ticket.state !== "active") return { stage: null, flagged: false, active: false };
     return { stage: this.labelledStage(ticket), flagged: ticket.flagged_at !== null, active: true };
@@ -99,7 +99,7 @@ export class Mirror {
     });
   }
 
-  /** At startup every active tracker Ticket is owed a push, so a tracker edited while Lasso was down is overwritten. */
+  /** At startup every active tracker Ticket is owed a push, so a tracker edited while Laisso was down is overwritten. */
   markAllPending(): void {
     const now = new Date().toISOString();
     for (const ticket of this.deps.tickets.list()) {
@@ -126,7 +126,7 @@ export class Mirror {
   }
 }
 
-/** Make the issue's `lasso:*` labels match, touching nothing else and writing nothing when they already do; answers with the labels wanted. */
+/** Make the issue's `laisso:*` labels match, touching nothing else and writing nothing when they already do; answers with the labels wanted. */
 async function sync(tracker: Tracker, reference: string, wanted: ReturnType<Mirror["wanted"]>): Promise<string[]> {
   const current = await tracker.labels(reference);
   const mine = current.filter((l) => l.startsWith(LABEL_PREFIX));

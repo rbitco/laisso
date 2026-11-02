@@ -1,6 +1,6 @@
-// Test harness for the Lasso v1 test seam: the localhost JSON API, end to end.
+// Test harness for the Laisso v1 test seam: the localhost JSON API, end to end.
 //
-// Each test gets a temporary Lasso home, the server spawned as a child process,
+// Each test gets a temporary Laisso home, the server spawned as a child process,
 // a PATH directory for fake executables, and a fake notifier on that PATH that
 // records what it was asked to post, and gh and acli shims that answer from
 // canned replies and record every invocation, and a fake Runner (claude, codex, pi) that
@@ -17,7 +17,7 @@ import path from "node:path";
 import { stringify } from "yaml";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "..");
-const BIN = path.join(REPO_ROOT, "bin", "lasso.js");
+const BIN = path.join(REPO_ROOT, "bin", "laisso.js");
 
 import { DEFAULT_CONFIG, type Config, type RepoConfig } from "../src/server/config.ts";
 import { parsePipeline } from "../src/pipeline/load.ts";
@@ -30,11 +30,11 @@ const DEFAULT_PIPELINE_STATUSES = [...new Set(parsePipeline("default", DEFAULT_P
 /** An Action as a test writes it: params and timeout may be left to their defaults. */
 export type ActionSpec = { run: string; params?: string[]; timeout?: string };
 
-export type LassoConfig = {
+export type LaissoConfig = {
   [K in Exclude<keyof Config, "actions" | "repos">]?: Config[K] extends object ? Partial<Config[K]> : Config[K];
 } & { actions?: Record<string, ActionSpec>; repos?: Record<string, Partial<Omit<RepoConfig, "actions">> & { actions?: Record<string, ActionSpec> }> };
 
-export interface Lasso {
+export interface Laisso {
   home: string;
   pathDir: string;
   port: number;
@@ -74,13 +74,13 @@ export interface StartOptions {
   home?: string;
   pathDir?: string;
   port?: number;
-  config?: LassoConfig;
+  config?: LaissoConfig;
   /** Extra environment for the server process. */
   env?: Record<string, string>;
 }
 
-export async function makeHome(config: LassoConfig = {}): Promise<{ home: string; pathDir: string }> {
-  const root = await mkdtemp(path.join(tmpdir(), "lasso-test-"));
+export async function makeHome(config: LaissoConfig = {}): Promise<{ home: string; pathDir: string }> {
+  const root = await mkdtemp(path.join(tmpdir(), "laisso-test-"));
   const home = path.join(root, "home");
   const pathDir = path.join(root, "bin");
   await mkdir(home, { recursive: true });
@@ -177,13 +177,13 @@ const RUNNER_SCRIPT_FILE = "runner-script.json";
 const RUNNER_CALLS_FILE = "runner-calls.jsonl";
 
 async function installFakeRunner(pathDir: string): Promise<void> {
-  // With no script it exits at once with nothing on stdout, which Lasso reads
+  // With no script it exits at once with nothing on stdout, which Laisso reads
   // as interrupted: a test that runs a Stage sets a script first.
   const script = `#!/usr/bin/env node
 const fs = require("node:fs");
 const path = require("node:path");
 const { execFileSync } = require("node:child_process");
-const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.startsWith("LASSO_")));
+const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.startsWith("LAISSO_")));
 fs.appendFileSync(path.join(__dirname, ${JSON.stringify(RUNNER_CALLS_FILE)}), JSON.stringify({ pid: process.pid, argv: [path.basename(process.argv[1]), ...process.argv.slice(2)], cwd: process.cwd(), env }) + "\\n");
 let script = {};
 try { script = JSON.parse(fs.readFileSync(path.join(__dirname, ${JSON.stringify(RUNNER_SCRIPT_FILE)}), "utf8")); } catch {}
@@ -326,21 +326,21 @@ export interface RepoSpec {
   default_profile?: string;
 }
 
-export interface LassoWithRepos {
-  lasso: Lasso;
+export interface LaissoWithRepos {
+  laisso: Laisso;
   repos: Record<string, Awaited<ReturnType<typeof makeRepo>>>;
 }
 
 /**
- * A running Lasso whose config names one real temp git repo per entry, plus
+ * A running Laisso whose config names one real temp git repo per entry, plus
  * any extra config and Pipelines. The default Pipeline transitions through
  * three JIRA statuses; the acli shim is seeded to accept each so a reference
  * intake into a JIRA repo passes the status check without every test saying so.
  */
-export async function startLassoWithRepos(specs: Record<string, RepoSpec>, extra: LassoConfig = {}, pipelines: Record<string, string> = {}, env?: Record<string, string>): Promise<LassoWithRepos> {
+export async function startLaissoWithRepos(specs: Record<string, RepoSpec>, extra: LaissoConfig = {}, pipelines: Record<string, string> = {}, env?: Record<string, string>): Promise<LaissoWithRepos> {
   const { home, pathDir } = await makeHome();
-  const repos: LassoWithRepos["repos"] = {};
-  const config: NonNullable<LassoConfig["repos"]> = {};
+  const repos: LaissoWithRepos["repos"] = {};
+  const config: NonNullable<LaissoConfig["repos"]> = {};
   for (const [name, spec] of Object.entries(specs)) {
     repos[name] = await makeRepo(path.join(home, "..", "repos"), name);
     const tracker = spec.tracker ?? "jira";
@@ -351,11 +351,11 @@ export async function startLassoWithRepos(specs: Record<string, RepoSpec>, extra
     await mkdir(path.join(home, "pipelines"), { recursive: true });
     await writeFile(path.join(home, "pipelines", `${name}.yaml`), yaml);
   }
-  const lasso = await startLasso({ home, pathDir, env });
+  const laisso = await startLaisso({ home, pathDir, env });
   for (const status of DEFAULT_PIPELINE_STATUSES) {
-    await lasso.tracker.reply({ tool: "acli", match: ["workitem search", `status = "${status}"`], stdout: "[]" });
+    await laisso.tracker.reply({ tool: "acli", match: ["workitem search", `status = "${status}"`], stdout: "[]" });
   }
-  return { lasso, repos };
+  return { laisso, repos };
 }
 
 /**
@@ -363,14 +363,14 @@ export async function startLassoWithRepos(specs: Record<string, RepoSpec>, extra
  * shipped ones the default Pipeline names, and with no default_profile the
  * startup migration adds the runner-only claude one, as for an old home.
  */
-export async function writeConfig(home: string, config: LassoConfig): Promise<void> {
+export async function writeConfig(home: string, config: LaissoConfig): Promise<void> {
   await mkdir(home, { recursive: true });
   await writeFile(path.join(home, "config.yaml"), stringify({ profiles: DEFAULT_CONFIG.profiles, ...config }));
 }
 
 async function installFakeNotifier(pathDir: string): Promise<void> {
   // The fake notifier appends one JSON line per call to notifications.jsonl
-  // beside itself. Lasso's macOS adapter looks for terminal-notifier on PATH.
+  // beside itself. Laisso's macOS adapter looks for terminal-notifier on PATH.
   const script = `#!/usr/bin/env node
 const fs = require("node:fs");
 const path = require("node:path");
@@ -393,7 +393,7 @@ const MULTIPLEXER_ENV = /^(TMUX|TMUX_PANE|HERDR_.*)$/;
 export function serverEnv(home: string, pathDir: string, extra: Record<string, string> = {}): NodeJS.ProcessEnv {
   return {
     ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !MULTIPLEXER_ENV.test(key))),
-    LASSO_HOME: home,
+    LAISSO_HOME: home,
     PATH: `${pathDir}:${process.env.PATH ?? ""}`,
     ...extra,
   };
@@ -411,7 +411,7 @@ export async function freePort(): Promise<number> {
   });
 }
 
-export async function startLasso(opts: StartOptions = {}): Promise<Lasso> {
+export async function startLaisso(opts: StartOptions = {}): Promise<Laisso> {
   const { home, pathDir } = opts.home
     ? { home: opts.home, pathDir: opts.pathDir ?? path.join(opts.home, "..", "bin") }
     : await makeHome(opts.config);
@@ -429,7 +429,7 @@ export async function startLasso(opts: StartOptions = {}): Promise<Lasso> {
   const exited = new Promise<number | null>((resolve) => child.once("exit", (code) => resolve(code)));
   await waitForHealth(url, exited, () => out + err);
 
-  const lasso: Lasso = {
+  const laisso: Laisso = {
     home,
     pathDir,
     port,
@@ -469,29 +469,29 @@ export async function startLasso(opts: StartOptions = {}): Promise<Lasso> {
       await exited;
     },
     async destroy() {
-      await lasso.stop();
+      await laisso.stop();
       // A fake a Session spawned may still be writing its calls file as the directory goes.
       await rm(path.dirname(home), { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     },
   };
-  return lasso;
+  return laisso;
 }
 
 /**
- * Stop Lasso and start it again on the same home with a PATH of only the
+ * Stop Laisso and start it again on the same home with a PATH of only the
  * fakes, node and git, so a test that deletes a fake leaves that tool missing
  * whatever this machine has installed.
  */
-export async function restartOnFakesOnly(lasso: Lasso): Promise<Lasso> {
-  await lasso.stop();
-  const systemDir = path.join(path.dirname(lasso.home), "system");
+export async function restartOnFakesOnly(laisso: Laisso): Promise<Laisso> {
+  await laisso.stop();
+  const systemDir = path.join(path.dirname(laisso.home), "system");
   await mkdir(systemDir, { recursive: true });
   const git = findOnPath()("git");
   if (!git) throw new Error("git is not on PATH");
   for (const [name, target] of [["node", process.execPath], ["git", git]]) {
     await writeFile(path.join(systemDir, name), `#!/bin/sh\nexec '${target}' "$@"\n`, { mode: 0o755 });
   }
-  return startLasso({ home: lasso.home, pathDir: lasso.pathDir, env: { PATH: `${lasso.pathDir}:${systemDir}` } });
+  return startLaisso({ home: laisso.home, pathDir: laisso.pathDir, env: { PATH: `${laisso.pathDir}:${systemDir}` } });
 }
 
 async function waitForHealth(url: string, exited: Promise<number | null>, out: () => string): Promise<void> {
@@ -499,7 +499,7 @@ async function waitForHealth(url: string, exited: Promise<number | null>, out: (
   let done = false;
   exited.then(() => (done = true));
   while (Date.now() < deadline) {
-    if (done) throw new Error(`lasso exited before becoming healthy:\n${out()}`);
+    if (done) throw new Error(`laisso exited before becoming healthy:\n${out()}`);
     try {
       const res = await fetch(url + "/api/health");
       if (res.ok) return;
@@ -508,7 +508,7 @@ async function waitForHealth(url: string, exited: Promise<number | null>, out: (
     }
     await new Promise((r) => setTimeout(r, 50));
   }
-  throw new Error(`lasso did not become healthy in time:\n${out()}`);
+  throw new Error(`laisso did not become healthy in time:\n${out()}`);
 }
 
 export interface CliResult {
@@ -517,7 +517,7 @@ export interface CliResult {
   stderr: string;
 }
 
-/** Run the lasso CLI as a client against a home/port. */
+/** Run the laisso CLI as a client against a home/port. */
 export function runCli(
   args: string[],
   ctx: { home: string; pathDir: string; port: number; env?: Record<string, string>; stdin?: string },
@@ -542,7 +542,7 @@ export function runCli(
 export interface TempRepo {
   /** The bare origin. */
   origin: string;
-  /** The local checkout Lasso is configured with; worktrees hang off it. */
+  /** The local checkout Laisso is configured with; worktrees hang off it. */
   path: string;
   defaultBranch: string;
   git(args: string[], cwd?: string): string;

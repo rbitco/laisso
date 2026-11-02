@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
-import type { LassoHome } from "./home.ts";
+import type { LaissoHome } from "./home.ts";
 
 export interface LockHolder {
   pid: number;
@@ -9,7 +9,7 @@ export interface LockHolder {
 export class AlreadyRunning extends Error {
   holder: LockHolder;
   constructor(holder: LockHolder) {
-    super(`lasso already running at http://localhost:${holder.port} (pid ${holder.pid})`);
+    super(`laisso already running at http://localhost:${holder.port} (pid ${holder.pid})`);
     this.holder = holder;
   }
 }
@@ -19,7 +19,7 @@ export class AlreadyRunning extends Error {
  * is then created exclusively, so two starts racing for it cannot both win.
  * Throws AlreadyRunning when a live process holds it.
  */
-export function acquireLock(home: LassoHome, port: number): () => void {
+export function acquireLock(home: LaissoHome, port: number): () => void {
   const existing = readLock(home);
   if (existing && isAlive(existing.pid) && existing.pid !== process.pid) throw new AlreadyRunning(existing);
   if (existing) unlinkSync(home.pidFile);
@@ -43,7 +43,7 @@ export function acquireLock(home: LassoHome, port: number): () => void {
   };
 }
 
-export function readLock(home: LassoHome): LockHolder | null {
+export function readLock(home: LaissoHome): LockHolder | null {
   try {
     const parsed = JSON.parse(readFileSync(home.pidFile, "utf8")) as Partial<LockHolder>;
     if (typeof parsed.pid !== "number" || typeof parsed.port !== "number") return null;

@@ -9,9 +9,9 @@ budget:
   spend: 30
 
 stages:
-  # A human Stage: Lasso opens the Runner in a terminal, the human marks it
+  # A human Stage: Laisso opens the Runner in a terminal, the human marks it
   # done, and the Ticket holds until Start is pressed on the next Stage. No
-  # artifact: tracker-spec is not checked by this Lasso version.
+  # artifact: tracker-spec is not checked by this Laisso version.
   - name: grill
     profile: claude-fable
     human: true
@@ -24,7 +24,7 @@ stages:
   - action: tracker.transition
     with: { status: In Progress }
 
-  # No artifact: tracker-comment is not checked by this Lasso version and
+  # No artifact: tracker-comment is not checked by this Laisso version and
   # would Flag every run; a succeeded Outcome advances it.
   - name: plan
     profile: claude-fable

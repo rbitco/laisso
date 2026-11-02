@@ -2,7 +2,7 @@
 // reads with ETags. Shared by the review tests and the dashboard's Metro test.
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { Lasso, TrackerReply } from "./harness.ts";
+import type { Laisso, TrackerReply } from "./harness.ts";
 
 export const PR_URL = "https://github.com/owner/app/pull/7";
 export const prUrl = (number: number) => `https://github.com/owner/app/pull/${number}`;
@@ -80,32 +80,32 @@ export function replies(branch: string, scene: Scene): TrackerReply[] {
   ];
 }
 
-export const repliesFile = (lasso: Lasso) => path.join(lasso.pathDir, "tracker-replies.json");
+export const repliesFile = (laisso: Laisso) => path.join(laisso.pathDir, "tracker-replies.json");
 
 /** Make the shim play this scene from now on; `extra` replies (a tracker's, say) go ahead of it. */
-export async function setScene(lasso: Lasso, branch: string, scene: Scene, extra: TrackerReply[] = []): Promise<void> {
-  await writeFile(repliesFile(lasso), JSON.stringify([...extra, ...replies(branch, scene)]));
+export async function setScene(laisso: Laisso, branch: string, scene: Scene, extra: TrackerReply[] = []): Promise<void> {
+  await writeFile(repliesFile(laisso), JSON.stringify([...extra, ...replies(branch, scene)]));
 }
 
 /** A scene file the fake Runner copies over the replies mid-Round: what the Runner "did" to the PR. */
-export async function sceneFile(lasso: Lasso, branch: string, name: string, scene: Scene, extra: TrackerReply[] = []): Promise<string> {
-  const file = path.join(lasso.pathDir, `scene-${name}.json`);
+export async function sceneFile(laisso: Laisso, branch: string, name: string, scene: Scene, extra: TrackerReply[] = []): Promise<string> {
+  const file = path.join(laisso.pathDir, `scene-${name}.json`);
   await writeFile(file, JSON.stringify([...extra, ...replies(branch, scene)]));
   return file;
 }
 
 /** Several PRs played at once, each as [the branch discovery answers for, its scene]. */
-export async function setScenes(lasso: Lasso, scenes: Array<[string, Scene]>): Promise<void> {
-  await writeFile(repliesFile(lasso), JSON.stringify(scenes.flatMap(([branch, scene]) => replies(branch, scene))));
+export async function setScenes(laisso: Laisso, scenes: Array<[string, Scene]>): Promise<void> {
+  await writeFile(repliesFile(laisso), JSON.stringify(scenes.flatMap(([branch, scene]) => replies(branch, scene))));
 }
 
 /** A file of several PRs' scenes the fake Runner copies over the replies mid-Round. */
-export async function scenesFile(lasso: Lasso, name: string, scenes: Array<[string, Scene]>): Promise<string> {
-  const file = path.join(lasso.pathDir, `scene-${name}.json`);
+export async function scenesFile(laisso: Laisso, name: string, scenes: Array<[string, Scene]>): Promise<string> {
+  const file = path.join(laisso.pathDir, `scene-${name}.json`);
   await writeFile(file, JSON.stringify(scenes.flatMap(([branch, scene]) => replies(branch, scene))));
   return file;
 }
 
-export const swapTo = (lasso: Lasso, file: string) => [["cp", file, repliesFile(lasso)]];
+export const swapTo = (laisso: Laisso, file: string) => [["cp", file, repliesFile(laisso)]];
 
-export const marker = (ticket: string, round: number) => `<!-- lasso:${ticket}:review:round-${round} -->`;
+export const marker = (ticket: string, round: number) => `<!-- laisso:${ticket}:review:round-${round} -->`;

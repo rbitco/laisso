@@ -1,10 +1,10 @@
 # config.yaml
 
-`<Lasso home>/config.yaml`. Lasso writes a commented one on first start and
+`<Laisso home>/config.yaml`. Laisso writes a commented one on first start and
 never rewrites it, except for the start-up move described under
 [tracker.transition](#trackertransition). Every key is optional; a key left
-out takes its default. A key that is present with a wrong value stops Lasso
-from starting and makes `lasso doctor` exit 1 with a message naming the key.
+out takes its default. A key that is present with a wrong value stops Laisso
+from starting and makes `laisso doctor` exit 1 with a message naming the key.
 Unknown top-level keys are ignored.
 
 | Key | Default | Rule |
@@ -36,7 +36,7 @@ A duration is hours, minutes and seconds in that order, each optional:
 letters, digits, dots, hyphens and underscores, starting with a letter or
 digit.
 
-```yaml lasso-config
+```yaml laisso-config
 budget:
   rounds: 8
   attempts: 3
@@ -52,7 +52,7 @@ notifications:
 ## Repos
 
 A repo is where Intake makes Tickets' worktrees. Keyed by a short name the
-user picks; that name is what `lasso add --repo` and the dashboard show.
+user picks; that name is what `laisso add --repo` and the dashboard show.
 
 | Field | Rule |
 | --- | --- |
@@ -66,11 +66,11 @@ user picks; that name is what `lasso add --repo` and the dashboard show.
 | `review` | this repo's own `ignore_authors` and `ignore_self`; each one set here replaces the global one for this repo's Tickets, and one left out keeps the global one |
 
 The repo needs its tracker CLI installed and logged in: `acli` for JIRA,
-`gh` for GitHub (`lasso doctor` checks both). A JIRA key can only be intaken
+`gh` for GitHub (`laisso doctor` checks both). A JIRA key can only be intaken
 into a JIRA repo and a GitHub reference only into a GitHub repo; a prompt
 goes into any repo.
 
-```yaml lasso-config
+```yaml laisso-config
 repos:
   shop:
     tracker: jira
@@ -101,62 +101,62 @@ Any other field is an error. Exit 0 advances the Ticket; anything else, a
 timeout, or a command that cannot start Flags it `outcome.failed` with the
 last line of output. The last line of output is the Session's final message.
 
-The command's environment is Lasso's own plus:
+The command's environment is Laisso's own plus:
 
-- `LASSO_TICKET`, `LASSO_REFERENCE` (empty for a prompt Ticket with no issue
-  yet), `LASSO_REPO`, `LASSO_BRANCH`, `LASSO_STAGE`, `LASSO_SESSION`
-- `LASSO_TITLE`, `LASSO_TRACKER`, `LASSO_PROJECT`, `LASSO_PR` (empty before
-  a PR), `LASSO_WORKTREE`, `LASSO_PIPELINE`
-- one `LASSO_<PARAM>` per param, upper-cased: `params: [status]` gives
-  `LASSO_STATUS`
+- `LAISSO_TICKET`, `LAISSO_REFERENCE` (empty for a prompt Ticket with no issue
+  yet), `LAISSO_REPO`, `LAISSO_BRANCH`, `LAISSO_STAGE`, `LAISSO_SESSION`
+- `LAISSO_TITLE`, `LAISSO_TRACKER`, `LAISSO_PROJECT`, `LAISSO_PR` (empty before
+  a PR), `LAISSO_WORKTREE`, `LAISSO_PIPELINE`
+- one `LAISSO_<PARAM>` per param, upper-cased: `params: [status]` gives
+  `LAISSO_STATUS`
 
-Use these variables in `run`; Lasso does no template substitution, so
+Use these variables in `run`; Laisso does no template substitution, so
 quoting stays the shell's job.
 
 An Action can also be a Stage's artifact, run as a check: exit 0 is met,
 exit 1 is not met, anything else is a broken check. See
 [Check Actions](pipelines.md#check-actions). A check gets the same
-variables, with `LASSO_SESSION` naming that check run, so it can pick a
-[Route](pipelines.md#routes) with `lasso route`. Write a check so it only looks.
+variables, with `LAISSO_SESSION` naming that check run, so it can pick a
+[Route](pipelines.md#routes) with `laisso route`. Write a check so it only looks.
 
-```yaml lasso-config
+```yaml laisso-config
 actions:
   notify:
     params: [channel]
     timeout: 1m
-    run: echo "$LASSO_REFERENCE is at $LASSO_STAGE" >> ~/lasso-$LASSO_CHANNEL.log
+    run: echo "$LAISSO_REFERENCE is at $LAISSO_STAGE" >> ~/laisso-$LAISSO_CHANNEL.log
 ```
 
 ### tracker.transition
 
 The default Pipeline moves the tracker issue with an Action named
-`tracker.transition` taking `status`. It is an ordinary Action, but Lasso
+`tracker.transition` taking `status`. It is an ordinary Action, but Laisso
 writes it for you: at every start, if `config.yaml` has no **global**
-`actions.tracker.transition`, Lasso adds the JIRA one below globally and the
+`actions.tracker.transition`, Laisso adds the JIRA one below globally and the
 GitHub one to each `github` repo that lacks its own. Once a global one
-exists Lasso never touches this again, so a GitHub repo added later gets no
+exists Laisso never touches this again, so a GitHub repo added later gets no
 override: add it by hand.
 
-JIRA, the global one Lasso writes:
+JIRA, the global one Laisso writes:
 
-```yaml lasso-config
+```yaml laisso-config
 actions:
   tracker.transition:
     params: [status]
     run: |
-      [ -n "$LASSO_REFERENCE" ] || { echo "$LASSO_STAGE: the Ticket has no tracker issue yet" >&2; exit 1; }
-      acli jira workitem transition --key "$LASSO_REFERENCE" --status "$LASSO_STATUS" --yes >&2 || exit $?
-      echo "moved $LASSO_REFERENCE to $LASSO_STATUS"
+      [ -n "$LAISSO_REFERENCE" ] || { echo "$LAISSO_STAGE: the Ticket has no tracker issue yet" >&2; exit 1; }
+      acli jira workitem transition --key "$LAISSO_REFERENCE" --status "$LAISSO_STATUS" --yes >&2 || exit $?
+      echo "moved $LAISSO_REFERENCE to $LAISSO_STATUS"
 ```
 
-GitHub, the per-repo override Lasso writes. A GitHub issue is only open or
+GitHub, the per-repo override Laisso writes. A GitHub issue is only open or
 closed, so this accepts `status` `open` or `closed` (any case) and fails on
 anything else. The default Pipeline's `In Progress`, `In Review` and `Done`
 therefore Flag a GitHub Ticket: give GitHub repos a Pipeline whose
 transitions use `open`/`closed`, or none (see
 [examples/github/](examples/github/)).
 
-```yaml lasso-config
+```yaml laisso-config
 repos:
   web:
     tracker: github
@@ -166,18 +166,18 @@ repos:
       tracker.transition:
         params: [status]
         run: |
-          [ -n "$LASSO_REFERENCE" ] || { echo "$LASSO_STAGE: the Ticket has no tracker issue yet" >&2; exit 1; }
-          case "$(printf %s "$LASSO_STATUS" | tr '[:upper:]' '[:lower:]')" in
+          [ -n "$LAISSO_REFERENCE" ] || { echo "$LAISSO_STAGE: the Ticket has no tracker issue yet" >&2; exit 1; }
+          case "$(printf %s "$LAISSO_STATUS" | tr '[:upper:]' '[:lower:]')" in
             closed) verb=close ;;
             open) verb=reopen ;;
-            *) echo "GitHub accepts only open and closed, not $LASSO_STATUS" >&2; exit 1 ;;
+            *) echo "GitHub accepts only open and closed, not $LAISSO_STATUS" >&2; exit 1 ;;
           esac
-          gh issue "$verb" "${LASSO_REFERENCE##*#}" --repo "${LASSO_REFERENCE%#*}" >&2 || exit $?
-          echo "moved $LASSO_REFERENCE to $LASSO_STATUS"
+          gh issue "$verb" "${LAISSO_REFERENCE##*#}" --repo "${LAISSO_REFERENCE%#*}" >&2 || exit $?
+          echo "moved $LAISSO_REFERENCE to $LAISSO_STATUS"
 ```
 
 On a machine with only GitHub repos, put the GitHub command in the global
-`tracker.transition` instead: Lasso then adds nothing, and `acli` is not
+`tracker.transition` instead: Laisso then adds nothing, and `acli` is not
 needed (doctor lists a tool as needed when any Action's `run` names it).
 
 ## PR Lists
@@ -189,14 +189,14 @@ The dashboard's Pull Requests page shows one PR List per entry under
 | --- | --- |
 | `query` | GitHub search syntax. `is:pr` is added; a query with `is:issue` is an error. It is scoped to the configured repos' GitHub origins unless it names `repo:`, `org:` or `user:`. |
 | `limit` | PRs shown, 1 to 100. Default `25`. |
-| `search` | `legacy` (the default) or `advanced`. `advanced` runs GitHub's advanced search, where `AND`, `OR` and parentheses work; under `legacy` they are plain words. Lasso wraps an advanced query in parentheses and adds the repo scope as one `OR` group, so the query's own `OR`s stay its own. |
+| `search` | `legacy` (the default) or `advanced`. `advanced` runs GitHub's advanced search, where `AND`, `OR` and parentheses work; under `legacy` they are plain words. Laisso wraps an advanced query in parentheses and adds the repo scope as one `OR` group, so the query's own `OR`s stay its own. |
 | `hide_when_empty` | `true` or `false`, default `false`. `true` leaves the list off the page while its last search succeeded with no PRs; the page names hidden lists in a note. It still shows while its first search loads, after a failed search (with the error), and when it cannot search. It comes back on the first refresh that finds PRs. |
 
 Writing `pr_lists` replaces the two defaults whole; `pr_lists: {}` shows no
 lists. While any list is configured, `gh` is a needed tool, logged in, even
-on a JIRA-only machine (`lasso doctor` lists it).
+on a JIRA-only machine (`laisso doctor` lists it).
 
-```yaml lasso-config
+```yaml laisso-config
 pr_lists:
   Mine:
     query: is:open author:@me
@@ -223,7 +223,7 @@ logins whose comments should never count:
 | Field | Rule |
 | --- | --- |
 | `ignore_authors` | GitHub logins, matched without regard to case |
-| `ignore_self` | `true` also ignores the login `gh` is authenticated as, read once when Lasso starts. Safe: the Runner's replies are told apart by their marker, not their author. |
+| `ignore_self` | `true` also ignores the login `gh` is authenticated as, read once when Laisso starts. Safe: the Runner's replies are told apart by their marker, not their author. |
 
 An ignored author's top-level comment is dropped. A review thread is
 dropped when all its comments, the Runner's aside, are by ignored authors;
@@ -232,7 +232,7 @@ whole thread, ignored comments included. Failed checks and a
 changes-requested verdict count whoever is involved. A repo may set either
 key under `repos.<name>.review`.
 
-```yaml lasso-config
+```yaml laisso-config
 review:
   ignore_authors: [dependabot]
   ignore_self: true
@@ -248,21 +248,21 @@ repos:
 ## Terminals
 
 Open terminal on a human Stage runs the Runner in a new terminal, in the
-Ticket's worktree, named like `Lasso: LASSO-42 grill`. Where it opens:
+Ticket's worktree, named like `Laisso: LASSO-42 grill`. Where it opens:
 
 | `terminal` | Opens |
 | --- | --- |
-| `auto` | a herdr tab when Lasso was started inside herdr (`HERDR_ENV=1`), else a tmux window when it was started inside tmux (`TMUX` set), else a Terminal.app window |
-| `herdr` | a new tab in Lasso's herdr workspace, focused |
-| `tmux` | a new window in Lasso's tmux session, which becomes its current window |
+| `auto` | a herdr tab when Laisso was started inside herdr (`HERDR_ENV=1`), else a tmux window when it was started inside tmux (`TMUX` set), else a Terminal.app window |
+| `herdr` | a new tab in Laisso's herdr workspace, focused |
+| `tmux` | a new window in Laisso's tmux session, which becomes its current window |
 | `terminal-app` | a Terminal.app window, brought to the front |
 
-The window opens where the `lasso` process runs, not where the browser
-is. Under `auto`, a herdr or tmux that fails (its server gone since Lasso
+The window opens where the `laisso` process runs, not where the browser
+is. Under `auto`, a herdr or tmux that fails (its server gone since Laisso
 started) falls back to Terminal.app and logs `terminal.fallback`; a
 terminal named outright that fails is an error on Open terminal instead,
-and `lasso doctor` lists it as a needed tool. `lasso doctor` ends with
-where human Stages open, as Lasso started from that shell would choose.
+and `laisso doctor` lists it as a needed tool. `laisso doctor` ends with
+where human Stages open, as Laisso started from that shell would choose.
 
 ## When edits apply
 
@@ -274,7 +274,7 @@ where human Stages open, as Lasso started from that shell would choose.
 | `repos` (added, removed, or changed `tracker`/`project`/`path`/`pipeline`), `budget`, `retention`, `branch_prefix`, `notifications`, `pr_lists`, `pr_list_refresh`, `pr_page_layout`, `review` (global or a repo's) | after a restart, or after the next save from the dashboard's Config page, which rereads the whole file |
 | `port`, `tick` | after a restart only |
 
-Restart means stopping the foreground `lasso` process (Ctrl-C) and starting
+Restart means stopping the foreground `laisso` process (Ctrl-C) and starting
 it again. Ctrl-C stops running headless Sessions; they are rerun on the next
 start without counting as an attempt. Human (terminal) Sessions are left
 alone.

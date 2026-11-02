@@ -5,10 +5,10 @@ import { writeLike } from "../yaml-edit.ts";
 import { listPipelines, parsePipeline, pipelineFile, RUNNERS } from "../pipeline/load.ts";
 import { replaceFile } from "../atomic-write.ts";
 import { DEFAULT_CONFIG } from "./config.ts";
-import type { LassoHome } from "./home.ts";
+import type { LaissoHome } from "./home.ts";
 
 /**
- * Moves of Lasso's own model into config, run at every start before config
+ * Moves of Laisso's own model into config, run at every start before config
  * or any Pipeline is read: tracker.transition into a config Action (ADR
  * 0010), and runner: and runnerOptions into Agent Profiles (ADR 0011).
  * Each step finds its own work, so a second run changes nothing.
@@ -18,9 +18,9 @@ import type { LassoHome } from "./home.ts";
 export const JIRA_TRANSITION = {
   params: ["status"],
   run: [
-    `[ -n "$LASSO_REFERENCE" ] || { echo "$LASSO_STAGE: the Ticket has no tracker issue yet" >&2; exit 1; }`,
-    `acli jira workitem transition --key "$LASSO_REFERENCE" --status "$LASSO_STATUS" --yes >&2 || exit $?`,
-    `echo "moved $LASSO_REFERENCE to $LASSO_STATUS"`,
+    `[ -n "$LAISSO_REFERENCE" ] || { echo "$LAISSO_STAGE: the Ticket has no tracker issue yet" >&2; exit 1; }`,
+    `acli jira workitem transition --key "$LAISSO_REFERENCE" --status "$LAISSO_STATUS" --yes >&2 || exit $?`,
+    `echo "moved $LAISSO_REFERENCE to $LAISSO_STATUS"`,
   ].join("\n"),
 };
 
@@ -28,14 +28,14 @@ export const JIRA_TRANSITION = {
 export const GITHUB_TRANSITION = {
   params: ["status"],
   run: [
-    `[ -n "$LASSO_REFERENCE" ] || { echo "$LASSO_STAGE: the Ticket has no tracker issue yet" >&2; exit 1; }`,
-    `case "$(printf %s "$LASSO_STATUS" | tr '[:upper:]' '[:lower:]')" in`,
+    `[ -n "$LAISSO_REFERENCE" ] || { echo "$LAISSO_STAGE: the Ticket has no tracker issue yet" >&2; exit 1; }`,
+    `case "$(printf %s "$LAISSO_STATUS" | tr '[:upper:]' '[:lower:]')" in`,
     `  closed) verb=close ;;`,
     `  open) verb=reopen ;;`,
-    `  *) echo "GitHub accepts only open and closed, not $LASSO_STATUS" >&2; exit 1 ;;`,
+    `  *) echo "GitHub accepts only open and closed, not $LAISSO_STATUS" >&2; exit 1 ;;`,
     `esac`,
-    `gh issue "$verb" "\${LASSO_REFERENCE##*#}" --repo "\${LASSO_REFERENCE%#*}" >&2 || exit $?`,
-    `echo "moved $LASSO_REFERENCE to $LASSO_STATUS"`,
+    `gh issue "$verb" "\${LAISSO_REFERENCE##*#}" --repo "\${LAISSO_REFERENCE%#*}" >&2 || exit $?`,
+    `echo "moved $LAISSO_REFERENCE to $LAISSO_STATUS"`,
   ].join("\n"),
 };
 
@@ -59,7 +59,7 @@ export interface MigratedProfile {
  * profiles they now name; the pinned Versions are migrateVersions', once
  * the store is open.
  */
-export function migrateHome(home: LassoHome): Omit<Migrated, "versions"> {
+export function migrateHome(home: LaissoHome): Omit<Migrated, "versions"> {
   const profiles: Record<string, MigratedProfile> = {};
   const pipelines = listPipelines(home.pipelinesDir).filter((name) => {
     const file = pipelineFile(home.pipelinesDir, name);
@@ -80,7 +80,7 @@ export function migrateHome(home: LassoHome): Omit<Migrated, "versions"> {
 }
 
 /** Write the profiles pinned Versions name that config.yaml lacks; true when config.yaml changed. */
-export function migrateConfigProfiles(home: LassoHome, profiles: Record<string, MigratedProfile>): boolean {
+export function migrateConfigProfiles(home: LaissoHome, profiles: Record<string, MigratedProfile>): boolean {
   return migrateFile(home.configFile, (text) => migrateConfigProfilesText(text, profiles));
 }
 

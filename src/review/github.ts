@@ -70,7 +70,7 @@ const QUERY = `query($owner:String!,$name:String!,$n:Int!,$after:String){
  * A Ticket's PR through the gh CLI, the way the spec's tick reads it: REST for
  * issue comments, review comments and check runs with ETags and `since`, one
  * GraphQL query for threads and the review decision. Nothing here decides
- * anything; it only fetches (ADR 0004: Lasso's poller, never a Runner).
+ * anything; it only fetches (ADR 0004: Laisso's poller, never a Runner).
  */
 export class PullRequests {
   private log: Logger;

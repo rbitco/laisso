@@ -4,22 +4,22 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { Dashboard, DashboardMissing } from "../src/dashboard/page.ts";
 
-// Lasso serves the dashboard Vite built (ADR 0012) and refuses to start without it.
+// Laisso serves the dashboard Vite built (ADR 0012) and refuses to start without it.
 describe("the built dashboard", () => {
   it("refuses a directory with no built page, naming the command that builds it", async () => {
-    const dir = await mkdtemp(path.join(tmpdir(), "lasso-dist-"));
+    const dir = await mkdtemp(path.join(tmpdir(), "laisso-dist-"));
     expect(() => new Dashboard(dir)).toThrow(DashboardMissing);
     expect(() => new Dashboard(dir)).toThrow(/not built .*run pnpm build/);
   });
 
   it("calls a missing dashboard in an installed package a broken install", async () => {
-    const dir = await mkdtemp(path.join(tmpdir(), "lasso-dist-"));
+    const dir = await mkdtemp(path.join(tmpdir(), "laisso-dist-"));
     expect(() => new Dashboard(dir, false)).toThrow(/the install is broken; reinstall/);
     expect(() => new Dashboard(dir, false)).not.toThrow(/pnpm/);
   });
 
   it("serves the page at / and each bundled file at its path, with its type", async () => {
-    const dir = await mkdtemp(path.join(tmpdir(), "lasso-dist-"));
+    const dir = await mkdtemp(path.join(tmpdir(), "laisso-dist-"));
     await mkdir(path.join(dir, "assets"));
     await writeFile(path.join(dir, "index.html"), "<!doctype html>");
     await writeFile(path.join(dir, "assets", "index-abc.js"), "export {}");

@@ -13,7 +13,7 @@ const request: RunRequest = {
   prompt: "Do the work described by the Ticket.",
   skills: ["implement", "tdd"],
   context: { id: "01J8ZK3M9Q4R5S6T7V8W9X0Y1Z", reference: "APP-12", repo: "app", branch: "APP-12-add-dark-mode", title: "Add dark mode", body: "A toggle in settings.", prs: [] },
-  cwd: "/tmp/lasso-fixture/worktree",
+  cwd: "/tmp/laisso-fixture/worktree",
   mode: "headless",
   sessionId: "3e728ae2-8d99-42f3-a7ba-6066de05d169",
   limits: { wallTimeMs: 60_000, remainingSpendUsd: 4.5 },
@@ -22,7 +22,7 @@ const request: RunRequest = {
 
 /** The line every preamble carries, linked PRs or none. */
 const LINKING =
-  "If you open a PR on a branch other than APP-12-add-dark-mode, run `lasso pr link <url>` so Lasso tracks it as this Ticket's; for a PR you only read, add --referenced. `lasso pr list --json` shows the Ticket's PRs as they are now.";
+  "If you open a PR on a branch other than APP-12-add-dark-mode, run `laisso pr link <url>` so Laisso tracks it as this Ticket's; for a PR you only read, add --referenced. `laisso pr list --json` shows the Ticket's PRs as they are now.";
 
 describe("claude adapter command", () => {
   it("lists the Ticket's linked PRs in the preamble, leaving out what no read has seen, before the linking line", () => {
@@ -59,7 +59,7 @@ describe("claude adapter command", () => {
         "/implement",
         "/tdd",
         "",
-        "You are working Lasso Ticket 01J8ZK3M9Q4R5S6T7V8W9X0Y1Z (APP-12) in repo app on branch APP-12-add-dark-mode, Stage implement.",
+        "You are working Laisso Ticket 01J8ZK3M9Q4R5S6T7V8W9X0Y1Z (APP-12) in repo app on branch APP-12-add-dark-mode, Stage implement.",
         "Title: Add dark mode",
         "",
         "A toggle in settings.",
@@ -75,8 +75,14 @@ describe("claude adapter command", () => {
       "--session-id", "3e728ae2-8d99-42f3-a7ba-6066de05d169",
       "--max-budget-usd", "4.5",
     ]);
-    expect(cmd.cwd).toBe("/tmp/lasso-fixture/worktree");
+    expect(cmd.cwd).toBe("/tmp/laisso-fixture/worktree");
     expect(cmd.env).toEqual({
+      LAISSO_TICKET: "01J8ZK3M9Q4R5S6T7V8W9X0Y1Z",
+      LAISSO_REFERENCE: "APP-12",
+      LAISSO_REPO: "app",
+      LAISSO_BRANCH: "APP-12-add-dark-mode",
+      LAISSO_STAGE: "implement",
+      LAISSO_SESSION: "3e728ae2-8d99-42f3-a7ba-6066de05d169",
       LASSO_TICKET: "01J8ZK3M9Q4R5S6T7V8W9X0Y1Z",
       LASSO_REFERENCE: "APP-12",
       LASSO_REPO: "app",
@@ -93,14 +99,14 @@ describe("claude adapter command", () => {
     expect(cmd.argv).not.toContain("--max-budget-usd");
     // The model flag comes first and the args after it, so an arg repeating it wins.
     expect(cmd.argv.slice(-4)).toEqual(["--model", "sonnet", "--model", "claude-sonnet-5"]);
-    expect(cmd.argv[2]!.split("\n")[3]).toBe("You are working Lasso Ticket 01J8ZK3M9Q4R5S6T7V8W9X0Y1Z in repo app on branch APP-12-add-dark-mode, Stage implement.");
+    expect(cmd.argv[2]!.split("\n")[3]).toBe("You are working Laisso Ticket 01J8ZK3M9Q4R5S6T7V8W9X0Y1Z in repo app on branch APP-12-add-dark-mode, Stage implement.");
     expect(cmd.argv[2]).not.toContain("A toggle");
-    expect(cmd.env.LASSO_REFERENCE).toBe("");
+    expect(cmd.env.LAISSO_REFERENCE).toBe("");
   });
 
   it("builds an interactive terminal command on the same session id with a display name", () => {
-    const cmd = claudeAdapter.command({ ...request, mode: "terminal", name: "Lasso: APP-12 Grill", skills: ["grilling"], prompt: null });
-    expect(cmd.argv.slice(0, 7)).toEqual(["claude", "--session-id", request.sessionId, "--permission-mode", "acceptEdits", "--name", "Lasso: APP-12 Grill"]);
+    const cmd = claudeAdapter.command({ ...request, mode: "terminal", name: "Laisso: APP-12 Grill", skills: ["grilling"], prompt: null });
+    expect(cmd.argv.slice(0, 7)).toEqual(["claude", "--session-id", request.sessionId, "--permission-mode", "acceptEdits", "--name", "Laisso: APP-12 Grill"]);
     expect(cmd.argv).toHaveLength(8);
     expect(cmd.argv.at(-1)!.startsWith("/grilling\n")).toBe(true);
     expect(cmd.argv).not.toContain("-p");
@@ -108,7 +114,7 @@ describe("claude adapter command", () => {
 
   it("puts the profile's model under --model before its args, ahead of the prompt in a terminal and after the flags on resume", () => {
     const profile = { runner: "claude" as const, model: "opus", args: ["--verbose"] };
-    const opened = claudeAdapter.command({ ...request, mode: "terminal", name: "Lasso: APP-12 Grill", profile });
+    const opened = claudeAdapter.command({ ...request, mode: "terminal", name: "Laisso: APP-12 Grill", profile });
     expect(opened.argv.slice(7, 10)).toEqual(["--model", "opus", "--verbose"]);
     expect(opened.argv).toHaveLength(11);
     const resumed = claudeAdapter.command({ ...request, mode: "terminal", resume: true, profile });
@@ -120,9 +126,9 @@ describe("claude adapter command", () => {
   });
 
   it("re-enters a held session id with --resume and no prompt", () => {
-    const cmd = claudeAdapter.command({ ...request, mode: "terminal", resume: true, name: "Lasso: APP-12 grill" });
+    const cmd = claudeAdapter.command({ ...request, mode: "terminal", resume: true, name: "Laisso: APP-12 grill" });
     expect(cmd.argv).toEqual(["claude", "--resume", request.sessionId, "--permission-mode", "acceptEdits"]);
-    expect(cmd.env.LASSO_SESSION).toBe(request.sessionId);
+    expect(cmd.env.LAISSO_SESSION).toBe(request.sessionId);
   });
 });
 
@@ -161,7 +167,7 @@ describe("claude adapter effort and permission", () => {
 });
 
 describe("claude adapter parse", () => {
-  const transcript = path.join(homedir(), ".claude", "projects", "-tmp-lasso-fixture-worktree");
+  const transcript = path.join(homedir(), ".claude", "projects", "-tmp-laisso-fixture-worktree");
 
   it("reads a success result: final message, cost, usage, session id, transcript pointer", () => {
     const outcome = claudeAdapter.parse(fixture("success.json"), request);

@@ -11,18 +11,18 @@ export interface StoreOptions {
   now?: () => Date;
 }
 
-/** The store was migrated by a newer Lasso than this one; opening it would run code against a schema it does not know. */
+/** The store was migrated by a newer Laisso than this one; opening it would run code against a schema it does not know. */
 export class StoreTooNew extends Error {
   readonly schema: number;
 
   constructor(schema: number) {
-    super(`this Lasso home was last used by a newer Lasso (schema ${schema}); install that version or newer`);
+    super(`this Laisso home was last used by a newer Laisso (schema ${schema}); install that version or newer`);
     this.name = "StoreTooNew";
     this.schema = schema;
   }
 }
 
-/** The one SQLite store. Only the running lasso process opens it for writing (ADR 0008). */
+/** The one SQLite store. Only the running laisso process opens it for writing (ADR 0008). */
 export class Store {
   db: DatabaseSync;
 
@@ -51,7 +51,7 @@ export class Store {
   /** A consistent copy, WAL included, named so the newest sort last; keeps the newest KEEP_BACKUPS. */
   private backup(dir: string, version: number, at: Date): void {
     mkdirSync(dir, { recursive: true });
-    const file = path.join(dir, `lasso-${at.toISOString().replace(/:/g, "-").replace(/\.\d+Z$/, "Z")}-schema${version}.db`);
+    const file = path.join(dir, `laisso-${at.toISOString().replace(/:/g, "-").replace(/\.\d+Z$/, "Z")}-schema${version}.db`);
     rmSync(file, { force: true });
     this.db.prepare("VACUUM INTO ?").run(file);
     const backups = readdirSync(dir)
@@ -84,7 +84,8 @@ export class Store {
   }
 }
 
-const BACKUP_NAME = /^lasso-.+-schema\d+\.db$/;
+/** A backup by its name, Lasso's lasso-* ones included so they age out with the rest. */
+const BACKUP_NAME = /^la(i)?sso-.+-schema\d+\.db$/;
 
 const MIGRATIONS: Array<(db: DatabaseSync) => void> = [
   (db) => {
@@ -384,5 +385,5 @@ function rank(order: string[], stage: string): number {
   return index < 0 ? order.length : index;
 }
 
-/** The schema version this Lasso migrates a store up to. */
+/** The schema version this Laisso migrates a store up to. */
 export const SCHEMA_VERSION = MIGRATIONS.length;

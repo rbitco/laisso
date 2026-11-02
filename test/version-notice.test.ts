@@ -7,7 +7,7 @@ const none: VersionNotice = { kind: "none" };
 const available = (version: string): VersionNotice => ({ kind: "available", version });
 const restart = (version: string): VersionNotice => ({ kind: "restart", version });
 
-// Lasso tells Matt when a newer version is published, or when he has upgraded but still runs the old process.
+// Laisso tells Matt when a newer version is published, or when he has upgraded but still runs the old process.
 describe("the version notice", () => {
   it.each<[string, string, string, string | null, VersionNotice]>([
     ["all the same", "1.2.0", "1.2.0", "1.2.0", none],
@@ -31,8 +31,8 @@ describe("the version notice", () => {
   });
 
   it("says how to upgrade, how to finish an upgrade, or nothing", () => {
-    expect(noticeText(available("1.3.0"))).toBe("v1.3.0 available: npm update -g @rbitco/lasso");
-    expect(noticeText(restart("1.3.0"))).toBe("v1.3.0 installed: restart lasso to use it");
+    expect(noticeText(available("1.3.0"))).toBe("v1.3.0 available: npm update -g @rbitco/laisso");
+    expect(noticeText(restart("1.3.0"))).toBe("v1.3.0 installed: restart laisso to use it");
     expect(noticeText(none)).toBeNull();
   });
 });

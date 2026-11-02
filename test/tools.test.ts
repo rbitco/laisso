@@ -11,7 +11,7 @@ import type { ToolResult } from "../src/tracker/exec.ts";
 // The tool check: which external tools a config needs and why, then PATH and login through injected lookups (LASSO-96).
 
 const configOf = (yaml: string): Config => {
-  const home = resolveHome({ LASSO_HOME: mkdtempSync(path.join(tmpdir(), "lasso-tools-")) });
+  const home = resolveHome({ LAISSO_HOME: mkdtempSync(path.join(tmpdir(), "laisso-tools-")) });
   writeFileSync(home.configFile, yaml);
   return loadConfig(home);
 };
@@ -97,7 +97,7 @@ repos:
     const config = configOf(PROFILES + `
 actions:
   move-issue:
-    run: acli jira workitem transition --key "$LASSO_TICKET" --status Done
+    run: acli jira workitem transition --key "$LAISSO_TICKET" --status Done
   deploy:
     run: ./scripts/macli-deploy && echo gh-pages
 `);
@@ -122,7 +122,7 @@ actions:
   });
 
   it("reads the shipped Pipelines for a home with none yet", () => {
-    const home = resolveHome({ LASSO_HOME: mkdtempSync(path.join(tmpdir(), "lasso-tools-")) });
+    const home = resolveHome({ LAISSO_HOME: mkdtempSync(path.join(tmpdir(), "laisso-tools-")) });
     expect(homePipelines(home).map((p) => p.name)).toEqual(["default", "pr-review"]);
   });
 });
@@ -147,7 +147,7 @@ describe("checking PATH", () => {
     expect(missingFromPath("claude", "EACCES", lookup)).toBe(false);
     expect(missingFromPath("claude", undefined, lookup)).toBe(false);
     expect(missingFromPath("/opt/bin/claude", "ENOENT", lookup)).toBe(false);
-    expect(notOnPath("claude", "profile claude-opus")).toBe("claude not found on PATH (profile claude-opus); run lasso doctor");
+    expect(notOnPath("claude", "profile claude-opus")).toBe("claude not found on PATH (profile claude-opus); run laisso doctor");
   });
 });
 

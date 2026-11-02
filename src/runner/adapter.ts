@@ -4,10 +4,11 @@ import { renderFeedback, type PrFeedback } from "../review/feedback.ts";
 import type { PrLinkRow } from "../store/links.ts";
 import type { VisitRow } from "../store/visits.ts";
 import type { Routes } from "../pipeline/load.ts";
+import { withLegacyNames } from "../legacy.ts";
 
 export type OutcomeStatus = "succeeded" | "failed" | "exhausted" | "interrupted";
 
-/** What a Session gets told about its Ticket: rendered into the prompt preamble and LASSO_* variables. */
+/** What a Session gets told about its Ticket: rendered into the prompt preamble and LAISSO_* variables. */
 export interface TicketContext {
   id: string;
   reference: string | null;
@@ -15,14 +16,14 @@ export interface TicketContext {
   branch: string;
   title: string;
   body: string | null;
-  /** The Ticket's linked PRs as Lasso last saw them, in link order; prompt only, never an env variable. */
+  /** The Ticket's linked PRs as Laisso last saw them, in link order; prompt only, never an env variable. */
   prs: TicketPr[];
 }
 
 /** One linked PR as a Session is told of it; what no read of the PR has seen yet is null. */
 export type TicketPr = Pick<PrLinkRow, "url" | "role" | "title" | "head" | "base">;
 
-/** Best-effort limits handed to a Runner that can stop cleanly at them; Lasso enforces wall time itself. */
+/** Best-effort limits handed to a Runner that can stop cleanly at them; Laisso enforces wall time itself. */
 export interface RunLimits {
   wallTimeMs?: number;
   remainingSpendUsd?: number;
@@ -35,7 +36,7 @@ export interface RunRequest {
   context: TicketContext;
   cwd: string;
   mode: "headless" | "terminal";
-  /** Lasso's id for the Session: chosen up front, and what LASSO_SESSION always names. */
+  /** Laisso's id for the Session: chosen up front, and what LAISSO_SESSION always names. */
   sessionId: string;
   /** The session id is held from an earlier launch: re-enter it rather than start it. */
   resume?: boolean;
@@ -82,19 +83,19 @@ export interface Outcome {
   finalMessage: string | null;
   usage: Record<string, unknown> | null;
   costUsd: number | null;
-  /** The Runner's own transcript, or the directory it will land in: a pointer for humans, never read by Lasso (ADR 0003). */
+  /** The Runner's own transcript, or the directory it will land in: a pointer for humans, never read by Laisso (ADR 0003). */
   transcriptPath: string | null;
 }
 
 export type Limit = keyof RunLimits;
 
-/** A pure translator between Lasso and one Runner CLI (ADR 0003): no filesystem, no processes. */
+/** A pure translator between Laisso and one Runner CLI (ADR 0003): no filesystem, no processes. */
 export interface RunnerAdapter {
   name: RunnerName;
-  /** The limits this Runner stops at by itself when asked; the rest Lasso enforces. */
+  /** The limits this Runner stops at by itself when asked; the rest Laisso enforces. */
   honours: Limit[];
-  /** Whether the Runner takes the session id Lasso chose, or assigns its own for `findSession` to recover. */
-  sessionIds: "lasso" | "runner";
+  /** Whether the Runner takes the session id Laisso chose, or assigns its own for `findSession` to recover. */
+  sessionIds: "laisso" | "runner";
   command(request: RunRequest): Command;
   parse(stdout: string, request: Pick<RunRequest, "cwd" | "sessionId">): Outcome;
   /** The agent's own words in one complete line of headless stdout, or null when the line holds none: the Latest Message as it streams. */
@@ -103,7 +104,7 @@ export interface RunnerAdapter {
   transcriptPath(request: Pick<RunRequest, "cwd" | "sessionId">): string | null;
   /**
    * The session id a Runner assigned itself, found after launch; null for Runners that take
-   * Lasso's id. The one operation that reads the Runner's own store (ADR 0003), and only its index.
+   * Laisso's id. The one operation that reads the Runner's own store (ADR 0003), and only its index.
    */
   findSession(query: { cwd: string; launchedAfter: Date }): string | null;
 }
@@ -175,7 +176,7 @@ export function visitPrompt(prompt: string | null, visit: Omit<VisitLike, "stage
     ? null
     : sent
       ? `A human sent this Ticket here${by}, with these instructions: ${visit.note}`
-      : `Lasso sent this Ticket here${by}, chosen by ${visit.chosen_by ? CHOOSERS[visit.chosen_by] : "Lasso"}, with this note: ${visit.note}`;
+      : `Laisso sent this Ticket here${by}, chosen by ${visit.chosen_by ? CHOOSERS[visit.chosen_by] : "Laisso"}, with this note: ${visit.note}`;
   const parts = [visit.replaces ? null : prompt?.trim(), visit.route ? visit.text?.trim() : null, note].filter(Boolean);
   return parts.length ? parts.join("\n\n") : null;
 }
@@ -185,7 +186,7 @@ export function renderPrompt(request: RunRequest, skill: (name: string) => strin
   const { context } = request;
   const who = context.reference ? `${context.id} (${context.reference})` : context.id;
   const preamble = [
-    `You are working Lasso Ticket ${who} in repo ${context.repo} on branch ${context.branch}, Stage ${request.stage}.`,
+    `You are working Laisso Ticket ${who} in repo ${context.repo} on branch ${context.branch}, Stage ${request.stage}.`,
     `Title: ${context.title}`,
     ...(context.body ? ["", context.body.trim()] : []),
     "",
@@ -207,7 +208,7 @@ function renderPrs(context: TicketContext): string[] {
   });
   return [
     ...(list.length ? ["Linked PRs:", ...list, ""] : []),
-    `If you open a PR on a branch other than ${context.branch}, run \`lasso pr link <url>\` so Lasso tracks it as this Ticket's; for a PR you only read, add --referenced. \`lasso pr list --json\` shows the Ticket's PRs as they are now.`,
+    `If you open a PR on a branch other than ${context.branch}, run \`laisso pr link <url>\` so Laisso tracks it as this Ticket's; for a PR you only read, add --referenced. \`laisso pr list --json\` shows the Ticket's PRs as they are now.`,
   ];
 }
 
@@ -223,21 +224,21 @@ function renderRoutes(routes: RouteChoice[]): string[] {
   return [
     "This Stage lets you choose a Route, which sends the Ticket to another Stage instead of the next one:",
     ...list,
-    'To choose one, run `lasso route <name> [--note "..."]` before you finish; the note goes with the Ticket to say why. The last call wins, and `lasso route --clear` drops your choice. With no call, the Ticket continues to the next Stage as usual. Lasso takes the Route only if this Stage finishes with its work done.',
+    'To choose one, run `laisso route <name> [--note "..."]` before you finish; the note goes with the Ticket to say why. The last call wins, and `laisso route --clear` drops your choice. With no call, the Ticket continues to the next Stage as usual. Laisso takes the Route only if this Stage finishes with its work done.',
   ];
 }
 
 export function ticketEnv(request: RunRequest): Record<string, string> {
   const { context } = request;
-  return {
-    LASSO_TICKET: context.id,
-    LASSO_REFERENCE: context.reference ?? "",
-    LASSO_REPO: context.repo,
-    LASSO_BRANCH: context.branch,
-    LASSO_STAGE: request.stage,
-    LASSO_SESSION: request.sessionId,
-    ...(request.feedback ? { LASSO_ROUND: String(request.feedback.round), LASSO_MARKER: request.feedback.marker } : {}),
-  };
+  return withLegacyNames({
+    LAISSO_TICKET: context.id,
+    LAISSO_REFERENCE: context.reference ?? "",
+    LAISSO_REPO: context.repo,
+    LAISSO_BRANCH: context.branch,
+    LAISSO_STAGE: request.stage,
+    LAISSO_SESSION: request.sessionId,
+    ...(request.feedback ? { LAISSO_ROUND: String(request.feedback.round), LAISSO_MARKER: request.feedback.marker } : {}),
+  });
 }
 
 /**

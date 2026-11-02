@@ -19,13 +19,13 @@ interface ResultRecord {
 
 /**
  * Claude Code through `claude -p`. Headless runs stream JSON so stdout can be
- * tailed live; the last `result` record is the Outcome. Lasso chooses the
+ * tailed live; the last `result` record is the Outcome. Laisso chooses the
  * session id up front, so `findSession` has nothing to find.
  */
 export const claudeAdapter: RunnerAdapter = {
   name: "claude",
   honours: ["remainingSpendUsd"],
-  sessionIds: "lasso",
+  sessionIds: "laisso",
 
   command(request: RunRequest): Command {
     const prompt = renderPrompt(request, (name) => `/${name}`);
@@ -49,7 +49,7 @@ export const claudeAdapter: RunnerAdapter = {
     // A profile's permission replaces the mode; prompts stay off whatever it is, since nobody is there to answer.
     const mode = permission ? PERMISSION_MODES[permission] : "auto";
     const argv = ["claude", "-p", prompt, "--output-format", "stream-json", "--verbose", "--permission-mode", mode, "--permission-prompts", "none"];
-    // Resume re-enters the earlier session, which keeps its id; a fresh run takes the id Lasso chose.
+    // Resume re-enters the earlier session, which keeps its id; a fresh run takes the id Laisso chose.
     argv.push(...(request.resume ? ["--resume", request.runnerSessionId ?? request.sessionId] : ["--session-id", request.sessionId]));
     if (request.limits.remainingSpendUsd !== undefined) argv.push("--max-budget-usd", String(request.limits.remainingSpendUsd));
     argv.push(...extra);

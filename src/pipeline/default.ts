@@ -1,5 +1,5 @@
 /** The embedded default Pipeline, written to pipelines/default.yaml on first run and never touched again. */
-export const DEFAULT_PIPELINE_YAML = `# Lasso's default Pipeline. Edit freely: Lasso never overwrites this file.
+export const DEFAULT_PIPELINE_YAML = `# Laisso's default Pipeline. Edit freely: Laisso never overwrites this file.
 # Runner-run Stages take a prompt and/or skills; action Stages take an action.
 # A Runner Stage runs under the profile: it names, else the Pipeline's, else
 # config.yaml's default_profile. Thinking Stages use Fable, docs use Sonnet.
@@ -48,9 +48,9 @@ stages:
     skills: [code-review]
     artifact: pr-review
     prompt: |
-      Review each Owned PR of this Ticket ("lasso pr list" names them)
+      Review each Owned PR of this Ticket ("laisso pr list" names them)
       against its base with code-review. Post one PR review per Owned PR
-      with inline comments, each carrying Lasso's Stage marker, so the
+      with inline comments, each carrying Laisso's Stage marker, so the
       Review Stage addresses them as Feedback. Leave Referenced PRs alone.
 
   - action: tracker.transition
@@ -62,7 +62,7 @@ stages:
     prompt: |
       Address each unaddressed Feedback item below on this branch: failed
       checks and review threads. Reply on each thread with the marker,
-      commit, and push. Then resolve each thread you fixed; Lasso counts a
+      commit, and push. Then resolve each thread you fixed; Laisso counts a
       thread addressed only once it has a marked reply and is resolved.
       Leave a thread unresolved when you could not fix it, and say why in
       your reply.

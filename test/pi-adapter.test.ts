@@ -33,23 +33,23 @@ describe("pi adapter command", () => {
         "/skill:implement",
         "/skill:tdd",
         "",
-        "You are working Lasso Ticket 01J8ZK3M9Q4R5S6T7V8W9X0Y1Z (APP-12) in repo app on branch APP-12-add-dark-mode, Stage implement.",
+        "You are working Laisso Ticket 01J8ZK3M9Q4R5S6T7V8W9X0Y1Z (APP-12) in repo app on branch APP-12-add-dark-mode, Stage implement.",
         "Title: Add dark mode",
         "",
         "A toggle in settings.",
         "",
-        "If you open a PR on a branch other than APP-12-add-dark-mode, run `lasso pr link <url>` so Lasso tracks it as this Ticket's; for a PR you only read, add --referenced. `lasso pr list --json` shows the Ticket's PRs as they are now.",
+        "If you open a PR on a branch other than APP-12-add-dark-mode, run `laisso pr link <url>` so Laisso tracks it as this Ticket's; for a PR you only read, add --referenced. `laisso pr list --json` shows the Ticket's PRs as they are now.",
         "",
         "Do the work described by the Ticket.",
       ].join("\n"),
     );
     expect(cmd.argv).toHaveLength(8);
     expect(cmd.cwd).toBe(request.cwd);
-    expect(cmd.env.LASSO_SESSION).toBe(request.sessionId);
+    expect(cmd.env.LAISSO_SESSION).toBe(request.sessionId);
     expect(cmd.stdin).toBeUndefined();
-    // Pi has no budget flags: Lasso enforces every limit itself.
+    // Pi has no budget flags: Laisso enforces every limit itself.
     expect(piAdapter.honours).toEqual([]);
-    expect(piAdapter.sessionIds).toBe("lasso");
+    expect(piAdapter.sessionIds).toBe("laisso");
   });
 
   it("passes the profile's model under --model and its args through before the prompt", () => {
@@ -62,18 +62,18 @@ describe("pi adapter command", () => {
   it("resumes a headless run on the earlier Session's id while the new row keeps its own", () => {
     const cmd = piAdapter.command({ ...request, resume: true, runnerSessionId: "11111111-2222-4333-8444-555555555555" });
     expect(cmd.argv.slice(0, 6)).toEqual(["pi", "-p", "--mode", "json", "--session-id", "11111111-2222-4333-8444-555555555555"]);
-    expect(cmd.env.LASSO_SESSION).toBe(request.sessionId);
+    expect(cmd.env.LAISSO_SESSION).toBe(request.sessionId);
   });
 
   it("builds an interactive terminal command on the same session id with a display name", () => {
-    const cmd = piAdapter.command({ ...request, mode: "terminal", name: "Lasso: APP-12 grill", skills: ["grilling"], prompt: null });
-    expect(cmd.argv.slice(0, 6)).toEqual(["pi", "--session-id", request.sessionId, "-n", "Lasso: APP-12 grill", "-a"]);
+    const cmd = piAdapter.command({ ...request, mode: "terminal", name: "Laisso: APP-12 grill", skills: ["grilling"], prompt: null });
+    expect(cmd.argv.slice(0, 6)).toEqual(["pi", "--session-id", request.sessionId, "-n", "Laisso: APP-12 grill", "-a"]);
     expect(cmd.argv.at(-1)!.startsWith("/skill:grilling\n")).toBe(true);
     expect(cmd.argv).not.toContain("-p");
   });
 
   it("re-enters a held session id with no prompt", () => {
-    const cmd = piAdapter.command({ ...request, mode: "terminal", resume: true, name: "Lasso: APP-12 grill" });
+    const cmd = piAdapter.command({ ...request, mode: "terminal", resume: true, name: "Laisso: APP-12 grill" });
     expect(cmd.argv).toEqual(["pi", "--session-id", request.sessionId, "-a"]);
   });
 

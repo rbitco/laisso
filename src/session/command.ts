@@ -3,6 +3,7 @@ import { parseDuration } from "../duration.ts";
 import type { ActionConfig, Config } from "../server/config.ts";
 import type { TicketRow } from "../store/tickets.ts";
 import { ownedOf, type PrLinkRow } from "../store/links.ts";
+import { withLegacyNames } from "../legacy.ts";
 
 const KILL_GRACE_MS = 5000;
 /** How much of a command's latest output is kept in memory to find its last line. */
@@ -11,7 +12,7 @@ const TAIL_BYTES = 4096;
 /** How a command ended: its exit code, or why it has none, and the tail of what it wrote. */
 export interface CommandEnd {
   code: number | null;
-  /** Lasso killed it: past its timeout, or Lasso shutting down. */
+  /** Laisso killed it: past its timeout, or Laisso shutting down. */
   killed: "timeout" | "shutdown" | null;
   /** It never started (no shell, no worktree). */
   spawnError: string | null;
@@ -26,7 +27,7 @@ export interface RunningCommand {
 
 /**
  * Run an Action's command (ADR 0010) in a shell, in `cwd`, with `env` added
- * to Lasso's own. It is killed, process group and all, past the Action's
+ * to Laisso's own. It is killed, process group and all, past the Action's
  * timeout. Every chunk of output goes to `onOutput` as it arrives.
  */
 export function runCommand(action: ActionConfig, cwd: string, env: Record<string, string>, onOutput?: (chunk: Buffer) => void): RunningCommand {
@@ -64,24 +65,24 @@ export function runCommand(action: ActionConfig, cwd: string, env: Record<string
   return { kill, done };
 }
 
-/** What an Action's command is told (ADR 0010): the Ticket's details, as a Runner Session gets them and more, and one LASSO_<PARAM> per param. LASSO_PR is the Owned PR Review works. */
+/** What an Action's command is told (ADR 0010): the Ticket's details, as a Runner Session gets them and more, and one LAISSO_<PARAM> per param. LAISSO_PR is the Owned PR Review works. */
 export function actionEnv(config: Config, ticket: TicketRow, links: PrLinkRow[], stage: string, sessionId: string, params: Record<string, string>): Record<string, string> {
   const repo = config.repos[ticket.repo];
-  return {
-    LASSO_TICKET: ticket.id,
-    LASSO_REFERENCE: ticket.reference ?? "",
-    LASSO_REPO: ticket.repo,
-    LASSO_BRANCH: ticket.branch,
-    LASSO_STAGE: stage,
-    LASSO_SESSION: sessionId,
-    LASSO_TITLE: ticket.title,
-    LASSO_TRACKER: repo?.tracker ?? "",
-    LASSO_PROJECT: repo?.project ?? "",
-    LASSO_PR: ownedOf(links)?.url ?? "",
-    LASSO_WORKTREE: ticket.worktree,
-    LASSO_PIPELINE: ticket.pipeline,
-    ...Object.fromEntries(Object.entries(params).map(([key, value]) => [`LASSO_${key.toUpperCase()}`, value])),
-  };
+  return withLegacyNames({
+    LAISSO_TICKET: ticket.id,
+    LAISSO_REFERENCE: ticket.reference ?? "",
+    LAISSO_REPO: ticket.repo,
+    LAISSO_BRANCH: ticket.branch,
+    LAISSO_STAGE: stage,
+    LAISSO_SESSION: sessionId,
+    LAISSO_TITLE: ticket.title,
+    LAISSO_TRACKER: repo?.tracker ?? "",
+    LAISSO_PROJECT: repo?.project ?? "",
+    LAISSO_PR: ownedOf(links)?.url ?? "",
+    LAISSO_WORKTREE: ticket.worktree,
+    LAISSO_PIPELINE: ticket.pipeline,
+    ...Object.fromEntries(Object.entries(params).map(([key, value]) => [`LAISSO_${key.toUpperCase()}`, value])),
+  });
 }
 
 /** The params an Action needs that `given` lacks. */

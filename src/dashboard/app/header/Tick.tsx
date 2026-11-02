@@ -8,7 +8,7 @@ import { useEvents } from "../events.ts";
 import { showNotice } from "../notice.tsx";
 import { message } from "../ticket/ticket.ts";
 
-/** "connecting" until the first status or error, "down" while Lasso is unreachable, else the last Tick status sent. */
+/** "connecting" until the first status or error, "down" while Laisso is unreachable, else the last Tick status sent. */
 type Seen = TickStatus | "down" | "connecting";
 
 /** One cycle of the pulse animation, from the page's --pulse. */
@@ -18,8 +18,8 @@ function pulseMs(): number {
 }
 
 /**
- * The nav's status dot: green while Lasso is connected and ticking on time (pulsing while a Tick runs), orange when a
- * Tick is overdue, grey while Lasso is unreachable or not yet heard from. Clicking it opens a popover saying so in
+ * The nav's status dot: green while Laisso is connected and ticking on time (pulsing while a Tick runs), orange when a
+ * Tick is overdue, grey while Laisso is unreachable or not yet heard from. Clicking it opens a popover saying so in
  * words, when the last Tick ran and the next is due (moving each second), and Check now. `onChecked` follows a Check
  * now, so the page reads again.
  */
@@ -97,17 +97,17 @@ export function Tick({ onChecked }: { onChecked: () => void }) {
   const label = drawn?.label ?? "Connecting";
   return (
     <div className="tick" ref={box}>
-      <button type="button" className="tick-toggle" data-role="tick-toggle" aria-expanded={open} aria-controls="tick-pop" aria-label={"Lasso status: " + label} title={"Lasso status: " + label} onClick={() => setOpen((o) => !o)}>
+      <button type="button" className="tick-toggle" data-role="tick-toggle" aria-expanded={open} aria-controls="tick-pop" aria-label={"Laisso status: " + label} title={"Laisso status: " + label} onClick={() => setOpen((o) => !o)}>
         <span className={"dot tick-dot " + state} data-role="tick-dot" aria-hidden="true" />
       </button>
       {open && (
-        <div className={"tick-pop " + state} id="tick-pop" role="dialog" aria-label="Lasso status" data-role="tick-pop">
+        <div className={"tick-pop " + state} id="tick-pop" role="dialog" aria-label="Laisso status" data-role="tick-pop">
           <div className="tick-head">
             <span className={"dot tick-dot " + state} aria-hidden="true" />
             <strong data-role="tick-label">{label}</strong>
           </div>
           <div className="tick-status" data-role="tick-status">
-            {drawn?.detail ?? "Waiting for Lasso to answer"}
+            {drawn?.detail ?? "Waiting for Laisso to answer"}
           </div>
           <button type="button" data-role="check-now" disabled={!drawn || drawn.state === "down"} onClick={check}>
             <RefreshCw aria-hidden="true" />

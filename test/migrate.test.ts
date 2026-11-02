@@ -3,14 +3,14 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { parse } from "yaml";
-import { startLasso, startLassoWithRepos, waitFor, runnerFixture, type Lasso } from "./harness.ts";
+import { startLaisso, startLaissoWithRepos, waitFor, runnerFixture, type Laisso } from "./harness.ts";
 import type { TicketDetail, IntakeResult } from "../src/api/views.ts";
 import { migrateConfigText, migratePipelineText, migrateConfigProfilesText, migratePipelineProfilesText, JIRA_TRANSITION, GITHUB_TRANSITION } from "../src/server/migrate.ts";
 import { DEFAULT_CONFIG, DEFAULT_CONFIG_YAML, parseConfig } from "../src/server/config.ts";
 import { parsePipeline } from "../src/pipeline/load.ts";
 
-// tracker.transition moves from Lasso's code into config (ADR 0010, LASSO-53).
-const running: Lasso[] = [];
+// tracker.transition moves from Laisso's code into config (ADR 0010, LASSO-53).
+const running: Laisso[] = [];
 afterEach(async () => {
   while (running.length) await running.pop()!.destroy();
 });
@@ -30,9 +30,9 @@ stages:
 `;
 
 const jiraView = (key: string, summary: string) => JSON.stringify({ key, fields: { summary, description: "Body." } });
-const detailOf = (lasso: Lasso, id: string) => lasso.api<TicketDetail>(`/api/tickets/${id}`);
-const pull = (lasso: Lasso, id: string, trigger: string) => lasso.api<TicketDetail>(`/api/tickets/${id}/${trigger}`, { method: "POST", body: "{}" });
-const checkNow = (lasso: Lasso) => lasso.api("/api/check-now", { method: "POST" });
+const detailOf = (laisso: Laisso, id: string) => laisso.api<TicketDetail>(`/api/tickets/${id}`);
+const pull = (laisso: Laisso, id: string, trigger: string) => laisso.api<TicketDetail>(`/api/tickets/${id}/${trigger}`, { method: "POST", body: "{}" });
+const checkNow = (laisso: Laisso) => laisso.api("/api/check-now", { method: "POST" });
 
 describe("migrateConfigText", () => {
   const OLD = `# My config.
@@ -89,26 +89,26 @@ describe("migratePipelineText", () => {
 
 describe("the migration at startup", () => {
   it("rewrites config, Pipeline files and pinned Versions, so a live Ticket runs its next transition through config", async () => {
-    const started = await startLassoWithRepos({ app: { tracker: "jira", project: "APP", pipeline: "flow" }, web: { tracker: "github", project: "acme/web" } });
-    running.push(started.lasso);
-    const { lasso } = started;
-    await lasso.tracker.reply({ tool: "acli", match: ["workitem view APP-12", "summary,description"], stdout: jiraView("APP-12", "Add dark mode") });
-    await lasso.tracker.reply({ tool: "acli", match: ["workitem view APP-12", "--fields labels"], stdout: JSON.stringify({ key: "APP-12", fields: { labels: [] } }) });
-    await lasso.tracker.reply({ tool: "acli", match: ["workitem edit"], stdout: "✓ ok\n" });
-    await lasso.tracker.reply({ tool: "acli", match: ["workitem transition"], stdout: "✓ ok\n" });
-    const pipelineFile = path.join(lasso.home, "pipelines", "flow.yaml");
+    const started = await startLaissoWithRepos({ app: { tracker: "jira", project: "APP", pipeline: "flow" }, web: { tracker: "github", project: "acme/web" } });
+    running.push(started.laisso);
+    const { laisso } = started;
+    await laisso.tracker.reply({ tool: "acli", match: ["workitem view APP-12", "summary,description"], stdout: jiraView("APP-12", "Add dark mode") });
+    await laisso.tracker.reply({ tool: "acli", match: ["workitem view APP-12", "--fields labels"], stdout: JSON.stringify({ key: "APP-12", fields: { labels: [] } }) });
+    await laisso.tracker.reply({ tool: "acli", match: ["workitem edit"], stdout: "✓ ok\n" });
+    await laisso.tracker.reply({ tool: "acli", match: ["workitem transition"], stdout: "✓ ok\n" });
+    const pipelineFile = path.join(laisso.home, "pipelines", "flow.yaml");
     await writeFile(pipelineFile, migratePipelineText(OLD_PIPELINE)!);
-    const ticket = await lasso.api<IntakeResult>("/api/tickets", { method: "POST", body: JSON.stringify({ input: "APP-12" }) });
-    expect(await lasso.stop()).toBe(0);
+    const ticket = await laisso.api<IntakeResult>("/api/tickets", { method: "POST", body: JSON.stringify({ input: "APP-12" }) });
+    expect(await laisso.stop()).toBe(0);
 
-    // Put the home back as a Lasso from before ADR 0010 left it: no tracker.transition in config, status on the Stages.
-    const configFile = path.join(lasso.home, "config.yaml");
+    // Put the home back as a Laisso from before ADR 0010 left it: no tracker.transition in config, status on the Stages.
+    const configFile = path.join(laisso.home, "config.yaml");
     const config = parse(await readFile(configFile, "utf8"));
     delete config.actions;
     for (const repo of Object.values(config.repos) as Array<{ actions?: unknown }>) delete repo.actions;
     await writeFile(configFile, "# Hand-written.\n" + JSON.stringify(config, null, 2) + "\n");
     await writeFile(pipelineFile, OLD_PIPELINE);
-    const db = new DatabaseSync(path.join(lasso.home, "lasso.db"));
+    const db = new DatabaseSync(path.join(laisso.home, "laisso.db"));
     for (const row of db.prepare("SELECT pipeline, version, definition FROM pipeline_versions").all() as Array<{ pipeline: string; version: number; definition: string }>) {
       const definition = JSON.parse(row.definition);
       definition.stages = definition.stages.map((s: { kind: string; name: string; action: string; with?: { status: string } }) => (s.kind === "action" ? { kind: "action", name: s.name, action: s.action, status: s.with!.status } : s));
@@ -116,7 +116,7 @@ describe("the migration at startup", () => {
     }
     db.close();
 
-    const again = await startLasso({ home: lasso.home, pathDir: lasso.pathDir, port: lasso.port });
+    const again = await startLaisso({ home: laisso.home, pathDir: laisso.pathDir, port: laisso.port });
     running.push(again);
     const migratedConfig = await readFile(configFile, "utf8");
     expect(migratedConfig).toContain("# Hand-written.");
@@ -139,7 +139,7 @@ describe("the migration at startup", () => {
     // A second start finds nothing to do.
     expect(await again.stop()).toBe(0);
     const pipelineText = await readFile(pipelineFile, "utf8");
-    const third = await startLasso({ home: lasso.home, pathDir: lasso.pathDir, port: lasso.port });
+    const third = await startLaisso({ home: laisso.home, pathDir: laisso.pathDir, port: laisso.port });
     running.push(third);
     expect(await readFile(configFile, "utf8")).toBe(migratedConfig);
     expect(await readFile(pipelineFile, "utf8")).toBe(pipelineText);
@@ -189,7 +189,7 @@ describe("migratePipelineProfilesText", () => {
     expect(migratePipelineProfilesText("p", "stages:\n  - name: x\n    prompt: p\n")).toBeNull();
   });
 
-  it("leaves a Pipeline naming a Runner Lasso does not have for its refusal to explain", () => {
+  it("leaves a Pipeline naming a Runner Laisso does not have for its refusal to explain", () => {
     expect(() => migratePipelineProfilesText("p", "runner: gemini\nstages:\n  - name: x\n    prompt: p\n")).toThrow(/gemini/);
   });
 });
@@ -272,32 +272,32 @@ stages:
 `;
   const profiles = { codex: { runner: "codex" as const }, "release-implement": { runner: "codex" as const, args: ["--verbose"], skills_dir: "/opt/skills" } };
   const script = { stdout: runnerFixture("codex", "success.jsonl"), commands: [["git", "commit", "-q", "--allow-empty", "-m", "work"]], files: { "NOTES.md": "notes\n" } };
-  const intake = (lasso: Lasso) => lasso.api<IntakeResult>("/api/tickets", { method: "POST", body: JSON.stringify({ input: "Add dark mode", repo: "app", pipeline: "release" }) });
+  const intake = (laisso: Laisso) => laisso.api<IntakeResult>("/api/tickets", { method: "POST", body: JSON.stringify({ input: "Add dark mode", repo: "app", pipeline: "release" }) });
   /** A launch with one Ticket's names taken out, so two Tickets' launches compare. */
   const shape = (argv: string[], t: IntakeResult) => argv.map((a) => a.replaceAll(t.worktree, "<worktree>").replaceAll(t.branch, "<branch>").replaceAll(t.id, "<id>"));
 
   it("rewrites config, Pipeline files and pinned Versions from runner:, and a live Ticket launches as it would have", async () => {
-    const started = await startLassoWithRepos({ app: { pipeline: "release" } }, { profiles }, { release: NEW_PIPELINE });
-    running.push(started.lasso);
-    const { lasso } = started;
-    const before = await intake(lasso);
-    await lasso.runner.script(script);
-    await checkNow(lasso);
-    await waitFor(async () => ((await detailOf(lasso, before.id)).state === "done" ? true : null), "the first Ticket to be done");
+    const started = await startLaissoWithRepos({ app: { pipeline: "release" } }, { profiles }, { release: NEW_PIPELINE });
+    running.push(started.laisso);
+    const { laisso } = started;
+    const before = await intake(laisso);
+    await laisso.runner.script(script);
+    await checkNow(laisso);
+    await waitFor(async () => ((await detailOf(laisso, before.id)).state === "done" ? true : null), "the first Ticket to be done");
     // The second Ticket waits, pinned to the same Version, for after the restart.
-    const live = await intake(lasso);
+    const live = await intake(laisso);
     expect(live.pipelineVersion).toBe(before.pipelineVersion);
-    expect(await lasso.stop()).toBe(0);
+    expect(await laisso.stop()).toBe(0);
 
-    // Put the home back as a Lasso from before ADR 0011 left it.
-    const configFile = path.join(lasso.home, "config.yaml");
+    // Put the home back as a Laisso from before ADR 0011 left it.
+    const configFile = path.join(laisso.home, "config.yaml");
     const config = parse(await readFile(configFile, "utf8"));
     delete config.profiles;
     delete config.default_profile;
     await writeFile(configFile, "# Hand-written.\n" + JSON.stringify(config, null, 2) + "\n");
-    const pipelineFile = path.join(lasso.home, "pipelines", "release.yaml");
+    const pipelineFile = path.join(laisso.home, "pipelines", "release.yaml");
     await writeFile(pipelineFile, OLD);
-    const db = new DatabaseSync(path.join(lasso.home, "lasso.db"));
+    const db = new DatabaseSync(path.join(laisso.home, "laisso.db"));
     const rows = db.prepare("SELECT pipeline, version, definition FROM pipeline_versions").all() as Array<{ pipeline: string; version: number; definition: string }>;
     for (const row of rows) {
       const { name, profile, budget, stages } = JSON.parse(row.definition);
@@ -318,7 +318,7 @@ stages:
     db.prepare("UPDATE sessions SET profile = NULL").run();
     db.close();
 
-    const again = await startLasso({ home: lasso.home, pathDir: lasso.pathDir, port: lasso.port });
+    const again = await startLaisso({ home: laisso.home, pathDir: laisso.pathDir, port: laisso.port });
     running.push(again);
     expect(again.stdout()).toMatch(/migrated config=true pipelines=release versions=1/);
     const migratedConfig = await readFile(configFile, "utf8");
@@ -345,7 +345,7 @@ stages:
 
     // A second start finds nothing to do.
     expect(await again.stop()).toBe(0);
-    const third = await startLasso({ home: lasso.home, pathDir: lasso.pathDir, port: lasso.port });
+    const third = await startLaisso({ home: laisso.home, pathDir: laisso.pathDir, port: laisso.port });
     running.push(third);
     expect(await readFile(configFile, "utf8")).toBe(migratedConfig);
     expect(await readFile(pipelineFile, "utf8")).toBe(migratedPipeline);
@@ -376,23 +376,23 @@ describe("tracker.transition on a GitHub repo", () => {
 `;
 
   it("closes and reopens the issue through gh, and Flags a status GitHub does not have", async () => {
-    const started = await startLassoWithRepos({ web: { tracker: "github", project: "acme/web", pipeline: "gh" } }, {}, { gh: GH });
-    running.push(started.lasso);
-    const { lasso } = started;
-    await lasso.tracker.reply({ tool: "gh", match: ["issue view 7", "title,body"], stdout: JSON.stringify({ title: "Fix links", body: "" }) });
-    await lasso.tracker.reply({ tool: "gh", match: ["issue view 7", "--json labels"], stdout: JSON.stringify({ labels: [] }) });
-    await lasso.tracker.reply({ tool: "gh", match: ["issue"], stdout: "" });
-    const ticket = await lasso.api<IntakeResult>("/api/tickets", { method: "POST", body: JSON.stringify({ input: "acme/web#7" }) });
+    const started = await startLaissoWithRepos({ web: { tracker: "github", project: "acme/web", pipeline: "gh" } }, {}, { gh: GH });
+    running.push(started.laisso);
+    const { laisso } = started;
+    await laisso.tracker.reply({ tool: "gh", match: ["issue view 7", "title,body"], stdout: JSON.stringify({ title: "Fix links", body: "" }) });
+    await laisso.tracker.reply({ tool: "gh", match: ["issue view 7", "--json labels"], stdout: JSON.stringify({ labels: [] }) });
+    await laisso.tracker.reply({ tool: "gh", match: ["issue"], stdout: "" });
+    const ticket = await laisso.api<IntakeResult>("/api/tickets", { method: "POST", body: JSON.stringify({ input: "acme/web#7" }) });
     const through = async (stage: string) => {
-      await pull(lasso, ticket.id, "skip");
-      await checkNow(lasso);
-      return waitFor(async () => { const d = await detailOf(lasso, ticket.id); return d.stage.name === stage || d.flag ? d : null; }, `the Ticket to reach ${stage}`);
+      await pull(laisso, ticket.id, "skip");
+      await checkNow(laisso);
+      return waitFor(async () => { const d = await detailOf(laisso, ticket.id); return d.stage.name === stage || d.flag ? d : null; }, `the Ticket to reach ${stage}`);
     };
     expect((await through("check")).sessions[0]).toMatchObject({ outcome: "succeeded", finalMessage: "moved acme/web#7 to Closed" });
     expect((await through("triage")).sessions[0]).toMatchObject({ outcome: "succeeded", finalMessage: "moved acme/web#7 to open" });
     const flagged = await through("last");
     expect(flagged.flag).toMatchObject({ reason: "outcome.failed", detail: "tracker.transition exited 1: GitHub accepts only open and closed, not Shipped" });
-    const moves = (await lasso.tracker.calls()).map((c) => c.args.join(" ")).filter((a) => /^issue (close|reopen)/.test(a));
+    const moves = (await laisso.tracker.calls()).map((c) => c.args.join(" ")).filter((a) => /^issue (close|reopen)/.test(a));
     expect(moves).toEqual(["issue close 7 --repo acme/web", "issue reopen 7 --repo acme/web"]);
   });
 });

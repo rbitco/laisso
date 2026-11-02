@@ -137,7 +137,7 @@ export function SessionPane({ ticket: t, session: s, past = false, refresh }: { 
         </button>
       )}
       {s.mode === "terminal" && live && t.triggers.some((x) => x.action === "handback") && (
-        <button className="stop" type="button" disabled={busy} title="End this terminal Session and let Lasso run the Stage again" onClick={() => void post(ticketRoute(t.id) + "/handback", "{}")}>
+        <button className="stop" type="button" disabled={busy} title="End this terminal Session and let Laisso run the Stage again" onClick={() => void post(ticketRoute(t.id) + "/handback", "{}")}>
           Hand back
         </button>
       )}
@@ -149,7 +149,7 @@ export function SessionPane({ ticket: t, session: s, past = false, refresh }: { 
     return (
       <section className="session" data-role="session">
         {head}
-        <div className="hint">{opened + ". Lasso tracks this Session by its id only: the row ends when you mark the Stage done or skip it" + (t.triggers.some((x) => x.action === "handback") ? ", or hand it back to Lasso." : ".")}</div>
+        <div className="hint">{opened + ". Laisso tracks this Session by its id only: the row ends when you mark the Stage done or skip it" + (t.triggers.some((x) => x.action === "handback") ? ", or hand it back to Laisso." : ".")}</div>
         <div className="paths">
           <WorktreeChip ticket={t} />
           <CopyChip label="session id" value={s.id} />
@@ -169,7 +169,7 @@ export function SessionPane({ ticket: t, session: s, past = false, refresh }: { 
     return (
       <section className="session" data-role="session">
         {head}
-        <div className="hint">Lasso performed this Stage itself; there is no Runner output.</div>
+        <div className="hint">Laisso performed this Stage itself; there is no Runner output.</div>
         {final}
       </section>
     );

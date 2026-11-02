@@ -1,11 +1,12 @@
 import { readFileSync } from "node:fs";
 import { Document, isMap, isScalar, isSeq, parse, parseDocument, stringify } from "yaml";
 import { applyPatch, writeLike } from "../yaml-edit.ts";
-import type { LassoHome } from "./home.ts";
+import type { LaissoHome } from "./home.ts";
 import { count, duration, flag, isPlainObject, mapping, money, positive, text, type Fail } from "../fields.ts";
 import { parseDuration } from "../duration.ts";
 import { RUNNERS, type Pipeline, type RunnerName, type RunnerStage } from "../pipeline/load.ts";
 import { asksForIssues, type SearchSyntax } from "../prs/query.ts";
+import { laissoEnv } from "../legacy.ts";
 
 export interface RepoConfig {
   tracker: "jira" | "github";
@@ -26,7 +27,7 @@ export interface RepoConfig {
 export interface ReviewConfig {
   /** GitHub logins, matched without regard to case. */
   ignore_authors: string[];
-  /** Also ignore the login gh is authenticated as; Lasso's own replies are still told apart by marker. */
+  /** Also ignore the login gh is authenticated as; Laisso's own replies are still told apart by marker. */
   ignore_self: boolean;
 }
 
@@ -49,7 +50,7 @@ export interface NotificationConfig {
 /** A named shell command an action Stage runs (ADR 0010). */
 export interface ActionConfig {
   run: string;
-  /** Names a Stage must supply under `with:`; each reaches the command as LASSO_<PARAM>. */
+  /** Names a Stage must supply under `with:`; each reaches the command as LAISSO_<PARAM>. */
   params: string[];
   timeout: string;
 }
@@ -69,7 +70,7 @@ export interface ProfileBlock {
   effort?: Effort;
   /** In place of the adapter's baseline permission flag for the mode; Pi ignores it. */
   permission?: Permission;
-  /** Appended after every flag Lasso writes, so a repeated flag wins where the Runner lets the last one win; a block's follow the shared ones. */
+  /** Appended after every flag Laisso writes, so a repeated flag wins where the Runner lets the last one win; a block's follow the shared ones. */
   args?: string[];
 }
 
@@ -119,7 +120,7 @@ export interface Config {
   branch_prefix: string;
   port: number;
   notifications: NotificationConfig;
-  /** Where a human Stage's terminal opens; auto picks herdr or tmux when Lasso runs inside one. */
+  /** Where a human Stage's terminal opens; auto picks herdr or tmux when Laisso runs inside one. */
   terminal: TerminalSetting;
   /** The Pull Requests page's lists, by name, in the order config.yaml writes them. */
   pr_lists: Record<string, PrListConfig>;
@@ -164,8 +165,8 @@ export const DEFAULT_CONFIG: Config = {
   review: { ignore_authors: [], ignore_self: false },
 };
 
-export const DEFAULT_CONFIG_YAML = `# Lasso configuration. Every key is optional; the values shown are the defaults.
-# Repos Lasso may intake into, keyed by a short name.
+export const DEFAULT_CONFIG_YAML = `# Laisso configuration. Every key is optional; the values shown are the defaults.
+# Repos Laisso may intake into, keyed by a short name.
 repos: {}
 #  my-app:
 #    tracker: jira            # jira | github
@@ -177,12 +178,12 @@ repos: {}
 #    default_profile: claude-sonnet  # this repo's default, in place of the global default_profile below
 
 # Actions: shell commands an action Stage runs by name, in the Ticket's
-# worktree, with the Ticket's details as LASSO_* environment variables.
+# worktree, with the Ticket's details as LAISSO_* environment variables.
 actions: {}
 #  notify:
-#    params: [channel]        # a Stage supplies these under with:, as LASSO_CHANNEL
+#    params: [channel]        # a Stage supplies these under with:, as LAISSO_CHANNEL
 #    timeout: 60s             # killed and Flagged after this long
-#    run: echo "$LASSO_REFERENCE is at $LASSO_STAGE" >> ~/lasso-$LASSO_CHANNEL.log
+#    run: echo "$LAISSO_REFERENCE is at $LAISSO_STAGE" >> ~/laisso-$LAISSO_CHANNEL.log
 
 # Agent Profiles: the Runner a Stage runs under, and how. A Stage names one
 # with profile:, or inherits its Pipeline's, or default_profile below.
@@ -190,7 +191,7 @@ profiles:
   claude-fable:
     runner: claude           # claude | codex | pi
     model: fable             # passed to the Runner's model flag; unset keeps its default
-    permission: auto         # auto | edits | full; unset keeps Lasso's default per mode; Pi has none
+    permission: auto         # auto | edits | full; unset keeps Laisso's default per mode; Pi has none
   claude-opus:
     runner: claude
     model: opus
@@ -204,7 +205,7 @@ profiles:
 #    model: gpt-5-codex
 #    effort: high             # low | medium | high | xhigh | max; unset keeps the Runner's default
 #    permission: auto
-#    # args: [-c, foo=bar]    # extra flags, after the ones Lasso writes
+#    # args: [-c, foo=bar]    # extra flags, after the ones Laisso writes
 #    # skills_dir: ~/skills   # Codex only: where skills live; default ~/.agents/skills
 #    human:                   # only for human Stages; headless: is the same for the rest
 #      permission: edits      # model, effort and permission here replace the ones above
@@ -231,7 +232,7 @@ retention: 30      # days a done or abandoned Ticket's directory is kept
 branch_prefix: ""  # prefix for Ticket branches, e.g. your username; empty for none
 port: 7433         # dashboard and API port
 
-# Where a human Stage's terminal opens: auto uses herdr or tmux when Lasso
+# Where a human Stage's terminal opens: auto uses herdr or tmux when Laisso
 # runs inside one, else Terminal.app; herdr, tmux or terminal-app names one.
 terminal: auto
 
@@ -276,18 +277,18 @@ pr_page_layout: stacked
 export class ConfigError extends Error {}
 
 /**
- * The commented config.yaml a new Lasso home starts with, its port taken from LASSO_PORT when that is set: a dev
- * clone's `pnpm start` sets 7434, so its home listens beside the installed Lasso's on 7433.
+ * The commented config.yaml a new Laisso home starts with, its port taken from LAISSO_PORT when that is set: a dev
+ * clone's `pnpm start` sets 7434, so its home listens beside the installed Laisso's on 7433.
  */
 export function defaultConfigYaml(env: NodeJS.ProcessEnv = process.env): string {
-  const raw = env.LASSO_PORT;
+  const raw = laissoEnv(env, "PORT");
   if (!raw) return DEFAULT_CONFIG_YAML;
   const port = Number(raw);
-  if (!/^\d+$/.test(raw) || port < 1 || port > 65535) throw new ConfigError(`LASSO_PORT must be a port number, not ${raw}`);
+  if (!/^\d+$/.test(raw) || port < 1 || port > 65535) throw new ConfigError(`LAISSO_PORT must be a port number, not ${raw}`);
   return DEFAULT_CONFIG_YAML.replace(/^port: \d+ */m, (line) => `port: ${port}`.padEnd(line.length));
 }
 
-export function loadConfig(home: LassoHome, overrides: { port?: number } = {}): Config {
+export function loadConfig(home: LaissoHome, overrides: { port?: number } = {}): Config {
   let text: string;
   try {
     text = readFileSync(home.configFile, "utf8");
@@ -299,10 +300,10 @@ export function loadConfig(home: LassoHome, overrides: { port?: number } = {}): 
 
 /**
  * config.yaml as it stands now, for the Actions in it. Actions are edited by
- * hand only, so each use reads the file rather than the config Lasso started
+ * hand only, so each use reads the file rather than the config Laisso started
  * with; a file that no longer parses leaves `running` in force.
  */
-export function currentConfig(home: LassoHome, running: Config): Config {
+export function currentConfig(home: LaissoHome, running: Config): Config {
   try {
     return loadConfig(home);
   } catch {
@@ -385,7 +386,7 @@ function prListRefresh(value: unknown, tick: number, where: string): string {
 }
 const string = text;
 
-/** What the dashboard may set (spec: Lasso home and configuration); repos stay a hand edit in v1. */
+/** What the dashboard may set (spec: Laisso home and configuration); repos stay a hand edit in v1. */
 const EDITABLE: Record<string, Set<string> | null> = {
   budget: new Set(["rounds", "attempts", "wallTime", "spend", "routes"]),
   tick: null,
@@ -398,7 +399,7 @@ const EDITABLE: Record<string, Set<string> | null> = {
   terminal: null,
 };
 
-/** Keys whose new value only takes effect once Lasso restarts. */
+/** Keys whose new value only takes effect once Laisso restarts. */
 export const RESTART_KEYS = ["port", "tick"] as const;
 
 /**
@@ -619,7 +620,7 @@ export function reviewFor(config: Pick<Config, "review" | "repos">, repo: string
   return { ...config.review, ...config.repos[repo]?.review };
 }
 
-/** What an Action may be called, and what a param may be called so that LASSO_<PARAM> is a plain variable name. */
+/** What an Action may be called, and what a param may be called so that LAISSO_<PARAM> is a plain variable name. */
 export const ACTION_NAME = /^[a-z0-9][a-z0-9._-]*$/;
 export const PARAM_NAME = /^[a-z][a-z0-9_]*$/;
 export const DEFAULT_ACTION_TIMEOUT = "60s";

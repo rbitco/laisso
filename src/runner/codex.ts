@@ -19,8 +19,8 @@ interface Item {
  * a path outside its skill roots is ignored without a word, so a Stage
  * whose skills live elsewhere runs under a profile with `skills_dir`.
  * Its workspace-write sandbox turns the network off, loopback included, so
- * every workspace-write form turns it back on: `lasso route` and
- * `lasso pr link` call Lasso on localhost from inside the Session.
+ * every workspace-write form turns it back on: `laisso route` and
+ * `laisso pr link` call Laisso on localhost from inside the Session.
  */
 
 /** A profile's permission as Codex's flags, each accepted top-level, on exec and on resume (research/runner-cli-flags). */
@@ -43,7 +43,7 @@ export const codexAdapter: RunnerAdapter = {
   command(request: RunRequest): Command {
     const skillsDir = request.profile.skills_dir ?? path.join(homedir(), ".agents", "skills");
     const prompt = renderPrompt(request, (name) => `[$${name}](${path.join(skillsDir, name, "SKILL.md")})`);
-    // A terminal runs under the shell's environment: the home Lasso reads threads from must be the one Codex writes.
+    // A terminal runs under the shell's environment: the home Laisso reads threads from must be the one Codex writes.
     const env = { ...ticketEnv(request), ...(process.env.CODEX_HOME ? { CODEX_HOME: process.env.CODEX_HOME } : {}) };
     const args = profileArgs(request.profile, "-m", (level) => ["-c", `model_reasoning_effort=${level}`]);
     // Codex refuses a repeated -m, -s or -a, so a profile's permission is emitted alone in place of the baseline,

@@ -30,7 +30,7 @@ export interface PipelinePatch {
   order?: Array<string | Record<string, unknown>>;
 }
 
-/** The Pipeline files under the Lasso home, edited in place with their comments kept. */
+/** The Pipeline files under the Laisso home, edited in place with their comments kept. */
 export class PipelineFiles {
   private dir: string;
   private config: () => Config;

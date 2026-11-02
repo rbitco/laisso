@@ -34,8 +34,8 @@ interface Stored {
 
 type Sent = { method: string; route: string; body: unknown };
 
-/** A stand-in for Lasso's /api: the Pipeline files as they stand, their live Versions, and every write it was sent. */
-function fakeLasso(files: Record<string, Stored> = { default: { text: DEFAULT_TEXT, pipeline: DEFAULT, problem: null } }) {
+/** A stand-in for Laisso's /api: the Pipeline files as they stand, their live Versions, and every write it was sent. */
+function fakeLaisso(files: Record<string, Stored> = { default: { text: DEFAULT_TEXT, pipeline: DEFAULT, problem: null } }) {
   const sent: Sent[] = [];
   const state = { files, refuse: null as string | null, versions: {} as Record<string, LiveVersionView[]>, frozen: {} as Record<string, PipelineVersionView> };
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -101,7 +101,7 @@ afterEach(() => {
 
 describe("the Pipelines list", () => {
   it("draws each Pipeline as a line of its Stages, counted, and says when a file does not load", async () => {
-    fakeLasso({ default: { text: DEFAULT_TEXT, pipeline: DEFAULT, problem: null }, broken: { text: "stages: [", pipeline: null, problem: "bad YAML" } });
+    fakeLaisso({ default: { text: DEFAULT_TEXT, pipeline: DEFAULT, problem: null }, broken: { text: "stages: [", pipeline: null, problem: "bad YAML" } });
     await showPage("default");
     const links = within(list()).getAllByRole("link");
     expect(links.map((a) => a.getAttribute("href"))).toEqual(["#pipelines/default", "#pipelines/broken"]);
@@ -113,10 +113,10 @@ describe("the Pipelines list", () => {
   });
 
   it("reads the list again when another client changes a Pipeline", async () => {
-    const lasso = fakeLasso();
+    const laisso = fakeLaisso();
     await showPage();
     expect(screen.getByText("Pick a Pipeline to edit it, or make a new one.")).toBeTruthy();
-    lasso.state.files.quick = { text: DEFAULT_TEXT, pipeline: DEFAULT, problem: null };
+    laisso.state.files.quick = { text: DEFAULT_TEXT, pipeline: DEFAULT, problem: null };
     act(() => void events().dispatchEvent(new Event("pipeline")));
     await within(list()).findByText("quick");
   });
@@ -124,14 +124,14 @@ describe("the Pipelines list", () => {
 
 describe("+ New Pipeline", () => {
   it("creates a blank Pipeline, or a copy of one listed, and opens it", async () => {
-    const lasso = fakeLasso();
+    const laisso = fakeLaisso();
     const view = await showPage();
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "+ New Pipeline" }));
     await user.type(screen.getByLabelText("Name"), " hotfix ");
     await user.click(screen.getByRole("button", { name: "Create" }));
     await waitFor(() => expect(location.hash).toBe("#pipelines/hotfix"));
-    expect(lasso.sent).toEqual([{ method: "PUT", route: "/api/pipelines/hotfix", body: { text: BLANK_PIPELINE, create: true } }]);
+    expect(laisso.sent).toEqual([{ method: "PUT", route: "/api/pipelines/hotfix", body: { text: BLANK_PIPELINE, create: true } }]);
 
     // The new hash shows the page again, open on the new Pipeline, with + New Pipeline closed.
     view.rerender(<PipelinesPage name="hotfix" version={null} visit={2} />);
@@ -143,11 +143,11 @@ describe("+ New Pipeline", () => {
     await user.selectOptions(screen.getByLabelText("Start from"), "A copy of default");
     await user.click(screen.getByRole("button", { name: "Create" }));
     await waitFor(() => expect(location.hash).toBe("#pipelines/careful"));
-    expect(lasso.sent[1]).toEqual({ method: "PUT", route: "/api/pipelines/careful", body: { text: DEFAULT_TEXT, create: true } });
+    expect(laisso.sent[1]).toEqual({ method: "PUT", route: "/api/pipelines/careful", body: { text: DEFAULT_TEXT, create: true } });
   });
 
   it("shows the server's refusal and keeps the form, for a name already taken", async () => {
-    fakeLasso();
+    fakeLaisso();
     await showPage();
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "+ New Pipeline" }));
@@ -161,8 +161,8 @@ describe("+ New Pipeline", () => {
 
 describe("a Pipeline's editor", () => {
   it("opens on the Stage editor, with the Versions active Tickets still run", async () => {
-    const lasso = fakeLasso();
-    lasso.state.versions.default = [{ version: 1, createdAt: "2026-10-01T00:00:00Z", live: 2 }, { version: 3, createdAt: "2026-10-02T00:00:00Z", live: 1 }];
+    const laisso = fakeLaisso();
+    laisso.state.versions.default = [{ version: 1, createdAt: "2026-10-01T00:00:00Z", live: 2 }, { version: 3, createdAt: "2026-10-02T00:00:00Z", live: 1 }];
     await showPage("default");
     await screen.findByText("Pipeline settings");
     expect(screen.getByText("/p/default.yaml")).toBeTruthy();
@@ -177,25 +177,25 @@ describe("a Pipeline's editor", () => {
   it("deletes only on a second click, then goes back to the list", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
-      const lasso = fakeLasso();
+      const laisso = fakeLaisso();
       await showPage("default");
       const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
       await user.click(screen.getByRole("button", { name: "Delete" }));
-      expect(lasso.sent).toEqual([]);
+      expect(laisso.sent).toEqual([]);
       // Left alone, it disarms.
       act(() => void vi.advanceTimersByTime(4000));
       await user.click(screen.getByRole("button", { name: "Delete" }));
-      expect(lasso.sent).toEqual([]);
+      expect(laisso.sent).toEqual([]);
       await user.click(screen.getByRole("button", { name: "Click again to delete" }));
       await waitFor(() => expect(location.hash).toBe("#pipelines"));
-      expect(lasso.sent).toEqual([{ method: "DELETE", route: "/api/pipelines/default", body: null }]);
+      expect(laisso.sent).toEqual([{ method: "DELETE", route: "/api/pipelines/default", body: null }]);
     } finally {
       vi.useRealTimers();
     }
   });
 
   it("saves the whole file as text, then reads it again on the Stage editor", async () => {
-    const lasso = fakeLasso();
+    const laisso = fakeLaisso();
     await showPage("default");
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Edit as text" }));
@@ -205,14 +205,14 @@ describe("a Pipeline's editor", () => {
     await user.type(area, "# reviewed\n");
     await user.click(screen.getByRole("button", { name: "Save text" }));
     await waitFor(() => expect(notice().textContent).toBe("saved default"));
-    expect(lasso.sent).toEqual([{ method: "PUT", route: "/api/pipelines/default", body: { text: DEFAULT_TEXT + "# reviewed\n" } }]);
+    expect(laisso.sent).toEqual([{ method: "PUT", route: "/api/pipelines/default", body: { text: DEFAULT_TEXT + "# reviewed\n" } }]);
     await waitFor(() => expect(screen.getByRole("button", { name: "Edit as text" })).toBeTruthy());
     expect((await screen.findByText("Pipeline settings")).closest("[hidden]")).toBeNull();
   });
 
   it("shows a refused text save and keeps the text, to fix and save again", async () => {
-    const lasso = fakeLasso();
-    lasso.state.refuse = "stages[0]: a Stage needs a name";
+    const laisso = fakeLaisso();
+    laisso.state.refuse = "stages[0]: a Stage needs a name";
     await showPage("default");
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Edit as text" }));
@@ -227,7 +227,7 @@ describe("a Pipeline's editor", () => {
   });
 
   it("opens a file that does not load as text, with its problem shown", async () => {
-    fakeLasso({ broken: { text: "stages: [", pipeline: null, problem: "bad YAML at line 1" } });
+    fakeLaisso({ broken: { text: "stages: [", pipeline: null, problem: "bad YAML at line 1" } });
     await showPage("broken");
     await screen.findByText("This file does not load: bad YAML at line 1. Fix it as text.");
     const area = screen.getByRole("textbox", { name: "broken as text" }) as HTMLTextAreaElement;
@@ -242,8 +242,8 @@ describe("a frozen Version", () => {
   const frozen = (deleted: boolean): PipelineVersionView => ({ name: "default", version: 2, createdAt: new Date(Date.now() - 3 * 60_000).toISOString(), live: 1, deleted, pipeline: DEFAULT });
 
   it("shows read-only what a Ticket's Pipeline link points at, with a way to the current Pipeline", async () => {
-    const lasso = fakeLasso();
-    lasso.state.frozen["default/v2"] = frozen(false);
+    const laisso = fakeLaisso();
+    laisso.state.frozen["default/v2"] = frozen(false);
     await showPage("default", 2);
     await screen.findByText("default v2");
     expect(screen.getByText("Read-only. Frozen 3m ago, 1 active Ticket.")).toBeTruthy();
@@ -262,8 +262,8 @@ describe("a frozen Version", () => {
   });
 
   it("says when the Pipeline is gone, and when there is no such Version", async () => {
-    const lasso = fakeLasso();
-    lasso.state.frozen["default/v2"] = frozen(true);
+    const laisso = fakeLaisso();
+    laisso.state.frozen["default/v2"] = frozen(true);
     const view = await showPage("default", 2);
     await screen.findByText("Pipeline deleted");
     expect(screen.queryByRole("link", { name: "Open the current Pipeline" })).toBeNull();

@@ -7,7 +7,7 @@ import { showNotice } from "../notice.tsx";
 import { message } from "../ticket/ticket.ts";
 import { pipelineLine } from "../../metro.ts";
 
-/** What was pasted and what Lasso detected in it, waiting on the person to confirm. */
+/** What was pasted and what Laisso detected in it, waiting on the person to confirm. */
 export interface Detected {
   input: string;
   detection: Detection;
@@ -16,8 +16,8 @@ export interface Detected {
 const detect = (input: string, repo?: string) => api<Detection>("/api/intake/detect", { method: "POST", body: JSON.stringify({ input, repo }) });
 
 /**
- * The header's one input: paste a JIRA key or a GitHub issue, or type a prompt; Lasso says what it found before adding.
- * Busy while Lasso looks the input up, which can take a few seconds for a tracker reference.
+ * The header's one input: paste a JIRA key or a GitHub issue, or type a prompt; Laisso says what it found before adding.
+ * Busy while Laisso looks the input up, which can take a few seconds for a tracker reference.
  */
 export function IntakeForm({ text, onText, onDetected }: { text: string; onText: (text: string) => void; onDetected: (detected: Detected) => void }) {
   const [busy, setBusy] = useState(false);
@@ -56,7 +56,7 @@ interface Option {
 
 /**
  * One choice from a short list, every option in view: a row each, the chosen one marked as the Ledger marks its
- * selected row. Radio inputs underneath, so arrow keys move the choice. Nothing is chosen until Lasso suggests or
+ * selected row. Radio inputs underneath, so arrow keys move the choice. Nothing is chosen until Laisso suggests or
  * the person picks.
  */
 function Picker({ name, label, options, value, disabled, onChange, empty, children }: { name: string; label: string; options: Option[]; value: string; disabled: boolean; onChange: (value: string) => void; empty?: ReactNode; children?: ReactNode }) {

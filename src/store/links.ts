@@ -2,12 +2,12 @@ import type { DatabaseSync } from "node:sqlite";
 import { ticketLabel, type TicketRow } from "./tickets.ts";
 import type { PrState } from "../review/feedback.ts";
 
-/** Owned: the Ticket's own work, which Lasso drives. Referenced: context only, never acted on (CONTEXT.md). */
+/** Owned: the Ticket's own work, which Laisso drives. Referenced: context only, never acted on (CONTEXT.md). */
 export type PrRole = "owned" | "referenced";
 /** Who linked the PR: the Tick finding it on the Ticket's branch, a human at the CLI, or an agent in a Session. */
 export type PrSource = "branch" | "human" | "agent";
 
-/** One PR linked to a Ticket, with what Lasso last saw of it and the Review state kept per PR. */
+/** One PR linked to a Ticket, with what Laisso last saw of it and the Review state kept per PR. */
 export interface PrLinkRow {
   ticket: string;
   /** The PR's canonical URL; one link per Ticket and URL. */
@@ -37,7 +37,7 @@ export type PrLinkFacts = Partial<Pick<PrLinkRow, "title" | "head" | "base" | "a
 /** The per-PR Review state the poll and a Round keep on the link. */
 export type PrLinkReview = Partial<Pick<PrLinkRow, "status" | "feedback_watermark" | "feedback_due">>;
 
-/** The GitHub owner/name a Ticket's repo lives at, when Lasso knows it. */
+/** The GitHub owner/name a Ticket's repo lives at, when Laisso knows it. */
 export type GitHubOf = (repo: string) => { owner: string; name: string } | null;
 
 const PR_URL = /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/\d+/i;
@@ -94,7 +94,7 @@ export class PrLinks {
     return done.changes > 0;
   }
 
-  /** Whether this PR was unlinked from the Ticket and not linked again: what keeps Lasso's hands off it. */
+  /** Whether this PR was unlinked from the Ticket and not linked again: what keeps Laisso's hands off it. */
   unlinked(ticket: string, url: string): boolean {
     return this.row(ticket, url)?.unlinked_at != null;
   }

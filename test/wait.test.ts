@@ -2,18 +2,18 @@ import { describe, it, expect, afterEach } from "vitest";
 import { access, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { startLassoWithRepos, waitFor, claudeFixture, type Lasso, type LassoConfig } from "./harness.ts";
+import { startLaissoWithRepos, waitFor, claudeFixture, type Laisso, type LaissoConfig } from "./harness.ts";
 import type { TicketDetail, IntakeResult, PipelineListing, PipelineFile } from "../src/api/views.ts";
 import type { TickChange } from "../src/server/tick.ts";
 
 // Wait Stages (LASSO-195): a Stage that runs no Session but Watches a check
 // Action each Tick, moving on once it is met.
-const running: Lasso[] = [];
+const running: Laisso[] = [];
 afterEach(async () => {
   while (running.length) await running.pop()!.destroy();
 });
 
-const BIN = path.join(import.meta.dirname, "..", "bin", "lasso.js");
+const BIN = path.join(import.meta.dirname, "..", "bin", "laisso.js");
 
 const WAIT = `stages:
   - name: implement
@@ -27,48 +27,48 @@ const WAIT = `stages:
     human: true
 `;
 
-const ACTIONS: LassoConfig["actions"] = {
-  check: { run: 'sh "$(dirname "$(command -v lasso)")/check.sh"' },
+const ACTIONS: LaissoConfig["actions"] = {
+  check: { run: 'sh "$(dirname "$(command -v laisso)")/check.sh"' },
   branchy: { params: ["branch"], run: "exit 0" },
 };
 
-async function lassoWith(pipeline = WAIT, extra: LassoConfig = {}) {
-  const { lasso } = await startLassoWithRepos({ app: { pipeline: "work" } }, { actions: ACTIONS, ...extra }, { work: pipeline });
-  running.push(lasso);
-  await writeFile(path.join(lasso.pathDir, "lasso"), `#!/bin/sh\nexec '${process.execPath}' '${BIN}' --port ${lasso.port} "$@"\n`, { mode: 0o755 });
-  await lasso.runner.script({ stdout: claudeFixture("success.json") });
-  return lasso;
+async function laissoWith(pipeline = WAIT, extra: LaissoConfig = {}) {
+  const { laisso } = await startLaissoWithRepos({ app: { pipeline: "work" } }, { actions: ACTIONS, ...extra }, { work: pipeline });
+  running.push(laisso);
+  await writeFile(path.join(laisso.pathDir, "laisso"), `#!/bin/sh\nexec '${process.execPath}' '${BIN}' --port ${laisso.port} "$@"\n`, { mode: 0o755 });
+  await laisso.runner.script({ stdout: claudeFixture("success.json") });
+  return laisso;
 }
 
 /** check.sh: run n does the n-th script, counting from 1; past the last it does nothing, and so is met. */
-const check = (lasso: Lasso, ...runs: string[]) =>
+const check = (laisso: Laisso, ...runs: string[]) =>
   writeFile(
-    path.join(lasso.pathDir, "check.sh"),
-    `dir=$(dirname "$(command -v lasso)")\nn=$(( $(cat "$dir/check-count" 2>/dev/null || echo 0) + 1 ))\necho $n > "$dir/check-count"\ncase $n in\n${runs.map((r, i) => `${i + 1}) ${r} ;;`).join("\n")}\nesac\n`,
+    path.join(laisso.pathDir, "check.sh"),
+    `dir=$(dirname "$(command -v laisso)")\nn=$(( $(cat "$dir/check-count" 2>/dev/null || echo 0) + 1 ))\necho $n > "$dir/check-count"\ncase $n in\n${runs.map((r, i) => `${i + 1}) ${r} ;;`).join("\n")}\nesac\n`,
   );
 /** check.sh is met once the returned file exists, and not met ("CI is still red") until then; every run counts. */
-async function gated(lasso: Lasso): Promise<string> {
-  const green = path.join(lasso.pathDir, "green");
+async function gated(laisso: Laisso): Promise<string> {
+  const green = path.join(laisso.pathDir, "green");
   await writeFile(
-    path.join(lasso.pathDir, "check.sh"),
-    `dir=$(dirname "$(command -v lasso)")\necho $(( $(cat "$dir/check-count" 2>/dev/null || echo 0) + 1 )) > "$dir/check-count"\n[ -f "${green}" ] || { echo "CI is still red"; exit 1; }\n`,
+    path.join(laisso.pathDir, "check.sh"),
+    `dir=$(dirname "$(command -v laisso)")\necho $(( $(cat "$dir/check-count" 2>/dev/null || echo 0) + 1 )) > "$dir/check-count"\n[ -f "${green}" ] || { echo "CI is still red"; exit 1; }\n`,
   );
   return green;
 }
-const runsOf = async (lasso: Lasso) => Number((await readFile(path.join(lasso.pathDir, "check-count"), "utf8").catch(() => "0")).trim());
+const runsOf = async (laisso: Laisso) => Number((await readFile(path.join(laisso.pathDir, "check-count"), "utf8").catch(() => "0")).trim());
 const notMet = (n: number, line = "CI is still red") => Array.from({ length: n }, () => `echo "${line}"; exit 1`);
 
 const json = (body: unknown) => JSON.stringify(body);
-const add = (lasso: Lasso, input = "Add dark mode") => lasso.api<IntakeResult>("/api/tickets", { method: "POST", body: json({ input, repo: "app", pipeline: "work" }) });
-const detailOf = (lasso: Lasso, id: string) => lasso.api<TicketDetail>(`/api/tickets/${id}`);
-const checkNow = (lasso: Lasso) => lasso.api<{ changes: TickChange[] }>("/api/check-now", { method: "POST" });
-const pull = (lasso: Lasso, id: string, lever: string, body: unknown = {}) => lasso.api<TicketDetail>(`/api/tickets/${id}/${lever}`, { method: "POST", body: json(body) });
+const add = (laisso: Laisso, input = "Add dark mode") => laisso.api<IntakeResult>("/api/tickets", { method: "POST", body: json({ input, repo: "app", pipeline: "work" }) });
+const detailOf = (laisso: Laisso, id: string) => laisso.api<TicketDetail>(`/api/tickets/${id}`);
+const checkNow = (laisso: Laisso) => laisso.api<{ changes: TickChange[] }>("/api/check-now", { method: "POST" });
+const pull = (laisso: Laisso, id: string, lever: string, body: unknown = {}) => laisso.api<TicketDetail>(`/api/tickets/${id}/${lever}`, { method: "POST", body: json(body) });
 
 /** Tick until the Ticket stands at `stage` (or is Flagged), with nothing running. */
-const at = (lasso: Lasso, id: string, stage: string) =>
+const at = (laisso: Laisso, id: string, stage: string) =>
   waitFor(async () => {
-    await checkNow(lasso);
-    const d = await detailOf(lasso, id);
+    await checkNow(laisso);
+    const d = await detailOf(laisso, id);
     return !d.sessions.some((s) => s.running) && (d.flag || d.stage.name === stage) ? d : null;
   }, `the Ticket to reach ${stage}`, 20_000);
 
@@ -83,8 +83,8 @@ interface Visit {
   check_result: string | null;
 }
 
-function visitsOf(lasso: Lasso, ticket: string): Visit[] {
-  const db = new DatabaseSync(path.join(lasso.home, "lasso.db"));
+function visitsOf(laisso: Laisso, ticket: string): Visit[] {
+  const db = new DatabaseSync(path.join(laisso.home, "laisso.db"));
   try {
     return db.prepare(`SELECT id, stage, arrived_by, route, chosen_by, note, skipped_at, check_result FROM visits WHERE ticket = ? ORDER BY id`).all(ticket) as unknown as Visit[];
   } finally {
@@ -107,85 +107,85 @@ describe("the wait Stage rules", () => {
   ];
 
   it("refuses a dashboard save that breaks a rule, and saves the forms it allows", async () => {
-    const lasso = await lassoWith();
+    const laisso = await laissoWith();
     for (const [fields, problem] of BAD) {
-      await expect(lasso.api("/api/pipelines/work", { method: "PUT", body: json({ text: withWait(fields) }) })).rejects.toThrow(problem);
+      await expect(laisso.api("/api/pipelines/work", { method: "PUT", body: json({ text: withWait(fields) }) })).rejects.toThrow(problem);
     }
-    expect(await readFile(path.join(lasso.home, "pipelines", "work.yaml"), "utf8")).toBe(WAIT);
+    expect(await readFile(path.join(laisso.home, "pipelines", "work.yaml"), "utf8")).toBe(WAIT);
 
     const good = withWait("name: ci\nwait: { action: branchy, with: { branch: main } }\nbudget: { wallTime: 2h }\nadvance: false\nroutes:\n  back: { to: implement }");
-    const saved = await lasso.api<PipelineFile>("/api/pipelines/work", { method: "PUT", body: json({ text: good }) });
+    const saved = await laisso.api<PipelineFile>("/api/pipelines/work", { method: "PUT", body: json({ text: good }) });
     expect(saved.pipeline!.stages[1]).toEqual({ kind: "wait", name: "ci", label: "ci", wait: "action branchy", waitWith: { branch: "main" }, advance: false, budget: { wallTime: "2h" }, routes: { back: { to: "implement" } } });
   });
 
   it("reports a hand-written file that breaks a rule when it loads, and Intake refuses it", async () => {
-    const lasso = await lassoWith();
-    await writeFile(path.join(lasso.home, "pipelines", "work.yaml"), withWait(BAD[3]![0]));
-    const listing = await lasso.api<PipelineListing[]>("/api/pipelines");
+    const laisso = await laissoWith();
+    await writeFile(path.join(laisso.home, "pipelines", "work.yaml"), withWait(BAD[3]![0]));
+    const listing = await laisso.api<PipelineListing[]>("/api/pipelines");
     expect(listing.find((p) => p.name === "work")).toMatchObject({ stages: [], problem: expect.stringMatching(BAD[3]![1]) });
-    await expect(add(lasso)).rejects.toThrow(BAD[3]![1]);
+    await expect(add(laisso)).rejects.toThrow(BAD[3]![1]);
   });
 });
 
 describe("a wait Stage", () => {
   it("keeps Watching while its check is not met, holding no slot and raising nothing, then walks on once met", async () => {
-    const lasso = await lassoWith(WAIT, { concurrency: 1 });
-    const green = await gated(lasso);
-    const ticket = await add(lasso);
-    const fresh = await at(lasso, ticket.id, "ci");
+    const laisso = await laissoWith(WAIT, { concurrency: 1 });
+    const green = await gated(laisso);
+    const ticket = await add(laisso);
+    const fresh = await at(laisso, ticket.id, "ci");
     expect(fresh.flag).toBeNull();
     expect(fresh.display).toMatchObject({ state: "watching", label: "Watching" });
     expect(fresh.queue).toBeNull();
     expect(fresh.triggers.map((t) => t.action)).toEqual(["check", "skip", "abandon"]);
-    const before = (await lasso.notifications()).length;
+    const before = (await laisso.notifications()).length;
 
     // Each Tick runs the check once more; not met, the Ticket stays put with the check's line as its why.
-    await waitFor(async () => ((await runsOf(lasso)) >= 2 ? true : (await checkNow(lasso), null)), "two checks");
-    const watching = await detailOf(lasso, ticket.id);
+    await waitFor(async () => ((await runsOf(laisso)) >= 2 ? true : (await checkNow(laisso), null)), "two checks");
+    const watching = await detailOf(laisso, ticket.id);
     expect(watching.stage.name).toBe("ci");
     expect(watching.display.state).toBe("watching");
     expect(watching.display.why).toMatch(/^CI is still red · checked \d\d:\d\d$/);
     expect(watching.check).toMatchObject({ action: "check", result: "not_met", line: "CI is still red" });
 
     // Watching holds no slot: with a cap of one, another Ticket's Session still runs.
-    const other = await add(lasso, "Add light mode");
+    const other = await add(laisso, "Add light mode");
     const started = await waitFor(async () => {
-      await checkNow(lasso);
-      const d = await detailOf(lasso, other.id);
+      await checkNow(laisso);
+      const d = await detailOf(laisso, other.id);
       return d.sessions.length > 0 ? d : null;
     }, "the other Ticket to start");
     expect(started.queue).toBeNull();
-    expect(await lasso.notifications()).toHaveLength(before);
+    expect(await laisso.notifications()).toHaveLength(before);
 
     // Met: the Ticket walks on to ship.
     await writeFile(green, "");
-    const shipped = await at(lasso, ticket.id, "ship");
+    const shipped = await at(laisso, ticket.id, "ship");
     expect(shipped.flag).toBeNull();
-    const visits = visitsOf(lasso, ticket.id);
+    const visits = visitsOf(laisso, ticket.id);
     expect(visits.map((v) => [v.stage, v.arrived_by])).toEqual([["implement", "intake"], ["ci", "walk"], ["ship", "walk"]]);
     expect(JSON.parse(visits[1]!.check_result!)).toMatchObject({ action: "check", result: "met" });
   });
 
   it("takes the Route a met check picked", async () => {
-    const lasso = await lassoWith();
-    await check(lasso, 'lasso route back --note "lint failed"; echo "red"', 'echo "green"');
-    const ticket = await add(lasso);
-    const shipped = await at(lasso, ticket.id, "ship");
+    const laisso = await laissoWith();
+    await check(laisso, 'laisso route back --note "lint failed"; echo "red"', 'echo "green"');
+    const ticket = await add(laisso);
+    const shipped = await at(laisso, ticket.id, "ship");
     expect(shipped.flag).toBeNull();
-    const visits = visitsOf(lasso, ticket.id);
+    const visits = visitsOf(laisso, ticket.id);
     expect(visits.map((v) => v.stage)).toEqual(["implement", "ci", "implement", "ci", "ship"]);
     expect(visits[2]).toMatchObject({ arrived_by: "route", route: "back", chosen_by: "check", note: "lint failed" });
-    const prompts = (await lasso.runner.calls()).map((c) => c.argv.join("\n"));
+    const prompts = (await laisso.runner.calls()).map((c) => c.argv.join("\n"));
     expect(prompts[1]).toContain("Do the work.\n\nFix what CI found.");
   });
 
   it("holds after a met check when advance is false", async () => {
-    const lasso = await lassoWith(WAIT.replace("wait: action check\n", "wait: action check\n    advance: false\n"));
-    await check(lasso);
-    const ticket = await add(lasso);
+    const laisso = await laissoWith(WAIT.replace("wait: action check\n", "wait: action check\n    advance: false\n"));
+    await check(laisso);
+    const ticket = await add(laisso);
     const holding = await waitFor(async () => {
-      await checkNow(lasso);
-      const d = await detailOf(lasso, ticket.id);
+      await checkNow(laisso);
+      const d = await detailOf(laisso, ticket.id);
       return d.display.state === "holding" ? d : null;
     }, "ci to hold");
     expect(holding.triggers.map((t) => t.action)).toEqual(["start", "skip", "abandon"]);
@@ -193,23 +193,23 @@ describe("a wait Stage", () => {
 
   it("holds before the Route its check picked when advance is false; Start takes it, Skip declines it", async () => {
     const HOLDS = WAIT.replace("wait: action check\n", "wait: action check\n    advance: false\n");
-    const holdAt = (lasso: Lasso, id: string) =>
+    const holdAt = (laisso: Laisso, id: string) =>
       waitFor(async () => {
-        await checkNow(lasso);
-        const d = await detailOf(lasso, id);
+        await checkNow(laisso);
+        const d = await detailOf(laisso, id);
         return d.display.state === "holding" ? d : null;
       }, "ci to hold");
 
     for (const lever of ["start", "skip"] as const) {
-      const lasso = await lassoWith(HOLDS);
-      await check(lasso, 'lasso route back --note "lint failed"', ...notMet(20));
-      const ticket = await add(lasso);
-      const held = await holdAt(lasso, ticket.id);
+      const laisso = await laissoWith(HOLDS);
+      await check(laisso, 'laisso route back --note "lint failed"', ...notMet(20));
+      const ticket = await add(laisso);
+      const held = await holdAt(laisso, ticket.id);
       expect(held).toMatchObject({ stage: { name: "ci" }, display: { why: "Start implement via back when ready" } });
       expect(held.triggers.map((t) => t.label)).toEqual(["Start implement via back", "Skip ci", "Abandon"]);
 
-      const pulled = await pull(lasso, ticket.id, lever);
-      const visits = visitsOf(lasso, ticket.id);
+      const pulled = await pull(laisso, ticket.id, lever);
+      const visits = visitsOf(laisso, ticket.id);
       if (lever === "start") {
         expect(visits[2]).toMatchObject({ stage: "implement", arrived_by: "route", route: "back", chosen_by: "check", note: "lint failed" });
       } else {
@@ -221,28 +221,28 @@ describe("a wait Stage", () => {
   });
 
   it("Flags artifact.error when its check breaks, and Retry Watches again", async () => {
-    const lasso = await lassoWith();
-    await check(lasso, 'echo "no credentials"; exit 3');
-    const ticket = await add(lasso);
-    const flagged = await at(lasso, ticket.id, "ci");
+    const laisso = await laissoWith();
+    await check(laisso, 'echo "no credentials"; exit 3');
+    const ticket = await add(laisso);
+    const flagged = await at(laisso, ticket.id, "ci");
     expect(flagged.flag).toMatchObject({ reason: "artifact.error", detail: "action check: check exited 3: no credentials" });
     expect(flagged.triggers.map((t) => t.action)).toEqual(["retry", "extend", "skip", "abandon"]);
     // Flagged, the check does not run on the Tick.
-    await checkNow(lasso);
-    expect(await runsOf(lasso)).toBe(1);
+    await checkNow(laisso);
+    expect(await runsOf(laisso)).toBe(1);
 
-    await pull(lasso, ticket.id, "retry");
-    expect((await at(lasso, ticket.id, "ship")).flag).toBeNull();
-    expect(await runsOf(lasso)).toBe(2);
+    await pull(laisso, ticket.id, "retry");
+    expect((await at(laisso, ticket.id, "ship")).flag).toBeNull();
+    expect(await runsOf(laisso)).toBe(2);
   });
 
   it("Flags budget.wall_time when it Watches past its wallTime", async () => {
-    const lasso = await lassoWith(WAIT.replace("wait: action check\n", "wait: action check\n    budget: { wallTime: 1s }\n"));
-    await check(lasso, ...notMet(50));
-    const ticket = await add(lasso);
+    const laisso = await laissoWith(WAIT.replace("wait: action check\n", "wait: action check\n    budget: { wallTime: 1s }\n"));
+    await check(laisso, ...notMet(50));
+    const ticket = await add(laisso);
     const flagged = await waitFor(async () => {
-      await checkNow(lasso);
-      const d = await detailOf(lasso, ticket.id);
+      await checkNow(laisso);
+      const d = await detailOf(laisso, ticket.id);
       return d.flag ? d : null;
     }, "the wall time to run out", 20_000);
     expect(flagged.stage.name).toBe("ci");
@@ -250,42 +250,42 @@ describe("a wait Stage", () => {
   });
 
   it("Skips as if met without taking a Route, and refuses Mark done", async () => {
-    const lasso = await lassoWith();
-    await check(lasso, 'lasso route back; echo "red"; exit 1', ...notMet(20));
-    const ticket = await add(lasso);
-    await at(lasso, ticket.id, "ci");
-    await expect(pull(lasso, ticket.id, "done")).rejects.toThrow("ci is a wait Stage; it has no Mark done. Skip advances it as if its check were met");
+    const laisso = await laissoWith();
+    await check(laisso, 'laisso route back; echo "red"; exit 1', ...notMet(20));
+    const ticket = await add(laisso);
+    await at(laisso, ticket.id, "ci");
+    await expect(pull(laisso, ticket.id, "done")).rejects.toThrow("ci is a wait Stage; it has no Mark done. Skip advances it as if its check were met");
 
-    const skipped = await pull(lasso, ticket.id, "skip");
+    const skipped = await pull(laisso, ticket.id, "skip");
     expect(skipped.stage.name).toBe("ship");
-    const visits = visitsOf(lasso, ticket.id);
+    const visits = visitsOf(laisso, ticket.id);
     expect(visits.map((v) => [v.stage, v.arrived_by])).toEqual([["implement", "intake"], ["ci", "walk"], ["ship", "walk"]]);
     expect(visits[1]!.skipped_at).not.toBeNull();
   });
 });
 
 describe("Send to Stage with a wait Stage", () => {
-  const send = (lasso: Lasso, id: string, body: Record<string, unknown>) => pull(lasso, id, "send", body);
+  const send = (laisso: Laisso, id: string, body: Record<string, unknown>) => pull(laisso, id, "send", body);
 
   it("sends a Ticket into a wait Stage and out of one", async () => {
-    const lasso = await lassoWith();
-    const green = await gated(lasso);
-    const ticket = await add(lasso);
-    await at(lasso, ticket.id, "ci");
+    const laisso = await laissoWith();
+    const green = await gated(laisso);
+    const ticket = await add(laisso);
+    await at(laisso, ticket.id, "ci");
     // Out of a wait Stage: back to implement, which runs and walks on to ci again, Watching there.
-    await send(lasso, ticket.id, { stage: "implement", instructions: "Fix the flaky test." });
+    await send(laisso, ticket.id, { stage: "implement", instructions: "Fix the flaky test." });
     await waitFor(async () => {
-      await checkNow(lasso);
-      return visitsOf(lasso, ticket.id).length === 4 ? true : null;
+      await checkNow(laisso);
+      return visitsOf(laisso, ticket.id).length === 4 ? true : null;
     }, "implement to walk on to ci");
-    expect((await lasso.runner.calls()).length).toBe(2);
-    expect((await detailOf(lasso, ticket.id)).display.state).toBe("watching");
+    expect((await laisso.runner.calls()).length).toBe(2);
+    expect((await detailOf(laisso, ticket.id)).display.state).toBe("watching");
     // Met, it goes on to ship; sent back into ci from there, it Watches again and, still met, returns.
     await writeFile(green, "");
-    await at(lasso, ticket.id, "ship");
-    await send(lasso, ticket.id, { stage: "ci" });
-    await at(lasso, ticket.id, "ship");
-    expect(visitsOf(lasso, ticket.id).map((v) => [v.stage, v.arrived_by])).toEqual([
+    await at(laisso, ticket.id, "ship");
+    await send(laisso, ticket.id, { stage: "ci" });
+    await at(laisso, ticket.id, "ship");
+    expect(visitsOf(laisso, ticket.id).map((v) => [v.stage, v.arrived_by])).toEqual([
       ["implement", "intake"],
       ["ci", "walk"],
       ["implement", "send"],
@@ -297,28 +297,28 @@ describe("Send to Stage with a wait Stage", () => {
   });
 
   it("keeps a check's result on the Visit it ran for when the Ticket is sent mid-run", async () => {
-    const lasso = await lassoWith();
-    const release = path.join(lasso.pathDir, "release");
-    const started = path.join(lasso.pathDir, "started");
-    await check(lasso, `touch "${started}"; while [ ! -f "${release}" ]; do sleep 0.1; done; echo "green at last"`, ...notMet(20));
-    const ticket = await add(lasso);
+    const laisso = await laissoWith();
+    const release = path.join(laisso.pathDir, "release");
+    const started = path.join(laisso.pathDir, "started");
+    await check(laisso, `touch "${started}"; while [ ! -f "${release}" ]; do sleep 0.1; done; echo "green at last"`, ...notMet(20));
+    const ticket = await add(laisso);
     // The check blocks the Tick that runs it, so nothing here waits on a Tick until it is released.
     const ticks: Array<Promise<unknown>> = [];
     await waitFor(async () => {
       if (await access(started).then(() => true, () => false)) return true;
-      if (ticks.length < 200) ticks.push(checkNow(lasso));
+      if (ticks.length < 200) ticks.push(checkNow(laisso));
       return null;
     }, "the check to start");
 
     // Sent back into ci while its check runs: the new Visit is there before the check ends.
-    const sent = send(lasso, ticket.id, { stage: "ci", instructions: "Look again." });
-    await waitFor(async () => (visitsOf(lasso, ticket.id).length === 3 ? true : null), "the send to land");
+    const sent = send(laisso, ticket.id, { stage: "ci", instructions: "Look again." });
+    await waitFor(async () => (visitsOf(laisso, ticket.id).length === 3 ? true : null), "the send to land");
     await writeFile(release, "");
     await Promise.all([sent, ...ticks]);
 
-    const detail = await detailOf(lasso, ticket.id);
+    const detail = await detailOf(laisso, ticket.id);
     expect(detail.stage.name).toBe("ci");
-    const visits = visitsOf(lasso, ticket.id);
+    const visits = visitsOf(laisso, ticket.id);
     expect(visits.map((v) => [v.stage, v.arrived_by])).toEqual([["implement", "intake"], ["ci", "walk"], ["ci", "send"]]);
     expect(JSON.parse(visits[1]!.check_result!)).toMatchObject({ result: "met", line: "green at last" });
     expect(visits[2]!.check_result).toBeNull();

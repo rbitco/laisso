@@ -1,4 +1,4 @@
-import type { LassoHome } from "../server/home.ts";
+import type { LaissoHome } from "../server/home.ts";
 import type { Logger } from "../server/log.ts";
 import type { Tickets, TicketRow } from "../store/tickets.ts";
 import type { PipelineVersions } from "../store/versions.ts";
@@ -48,7 +48,7 @@ export interface UpgradeRequest {
 }
 
 export interface UpgradeDeps {
-  home: LassoHome;
+  home: LaissoHome;
   tickets: Tickets;
   versions: PipelineVersions;
   sessions: Sessions;

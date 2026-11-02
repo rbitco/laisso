@@ -43,15 +43,15 @@ export function relative(iso: string | null, now: number = Date.now()): string {
 /** How long past its due time a Tick may start before the dot calls it late. */
 export const TICK_GRACE_MS = 5_000;
 
-/** What the nav's status dot shows: green while connected and ticking on time, orange when a Tick is overdue, grey when Lasso is unreachable. */
+/** What the nav's status dot shows: green while connected and ticking on time, orange when a Tick is overdue, grey when Laisso is unreachable. */
 export type TickHealth = "healthy" | "running" | "late" | "down";
 
 /**
- * The nav's status dot ('down' in place of a status while Lasso is unreachable): its state, the word its popover leads
+ * The nav's status dot ('down' in place of a status while Laisso is unreachable): its state, the word its popover leads
  * with, and the line under it saying when the last Tick ran and the next is due, or why something is wrong.
  */
 export function tickIndicator(status: TickStatus | "down", now: number): { state: TickHealth; label: string; detail: string } {
-  if (status === "down") return { state: "down", label: "Not connected", detail: "Can't reach Lasso; reconnecting on its own" };
+  if (status === "down") return { state: "down", label: "Not connected", detail: "Can't reach Laisso; reconnecting on its own" };
   if (status.running) return { state: "running", label: "Healthy", detail: "tick running" };
   if (!status.lastTick) return { state: "healthy", label: "Healthy", detail: "no tick yet" };
   const last = "last tick " + relative(status.lastTick, now);
@@ -89,7 +89,7 @@ export function stageInfo(t: MetroTicket, index: number) {
     cur,
     ahead: !done && !cur,
     sessions,
-    // A terminal Session stays open until the human marks the Stage done; only a headless one is Lasso's work in flight.
+    // A terminal Session stays open until the human marks the Stage done; only a headless one is Laisso's work in flight.
     running: sessions.some((s) => s.running && s.mode === "headless"),
     last: sessions[0] || null,
     attempts: sessions.filter((s) => s.mode !== "action" && s.round === null),

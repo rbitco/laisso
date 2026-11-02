@@ -19,7 +19,7 @@ const LEDGER: Place = { route: { view: "ledger" }, visit: 0 };
  * The dashboard: the nav (the views, the Tick dot and Check now), the header (intake, the version notice, any missing
  * tools), then the view the hash names. A
  * Ticket's page swaps in once its data is here, so until then the view before it stays; with a Ticket open the Ledger
- * collapses to a column between the nav and the page. When Lasso comes back after a restart, the view shown reads everything again, as
+ * collapses to a column between the nav and the page. When Laisso comes back after a restart, the view shown reads everything again, as
  * it may have missed some changes.
  */
 export function App() {

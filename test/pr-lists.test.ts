@@ -11,24 +11,24 @@ import type { PrPageLayout } from "../src/server/config.ts";
 // PR Lists (LASSO-138): the search each list's query becomes, the repos it is scoped to, and the cache the page reads.
 // PR rows (LASSO-132): each row's verdict and check counts, and the checks cell's words.
 // Reviewers (LASSO-133): who reviews a PR, in what state, worst first, and who "Needs review" waits on.
-// Tickets on rows (LASSO-137): the Lasso Ticket each PR matches, by PR URL or by repo and branch, and its Flag.
+// Tickets on rows (LASSO-137): the Laisso Ticket each PR matches, by PR URL or by repo and branch, and its Flag.
 // Refresh on the Tick (LASSO-134): when the cache fetches, over a fake clock and a fake GitHub.
 
-const LASSO: GitHubRepo = { owner: "rbitco", name: "lasso" };
+const LAISSO: GitHubRepo = { owner: "rbitco", name: "laisso" };
 const SITE: GitHubRepo = { owner: "rbitco", name: "site" };
 
 describe("a PR List's search", () => {
   const cases: { what: string; query: string; repos: GitHubRepo[]; search: string }[] = [
-    { what: "adds is:pr, the repo and the default sort", query: "is:open author:@me", repos: [LASSO], search: "is:pr is:open author:@me repo:rbitco/lasso sort:updated-desc" },
-    { what: "adds one repo: per configured repo", query: "is:open", repos: [LASSO, SITE], search: "is:pr is:open repo:rbitco/lasso repo:rbitco/site sort:updated-desc" },
-    { what: "names a repo once when two configured repos share it", query: "is:open", repos: [LASSO, { owner: "RBITCO", name: "Lasso" }], search: "is:pr is:open repo:rbitco/lasso sort:updated-desc" },
-    { what: "does not add is:pr twice", query: "is:pr is:open", repos: [LASSO], search: "is:pr is:open repo:rbitco/lasso sort:updated-desc" },
-    { what: "leaves a query naming repo: unscoped", query: "is:open repo:nodejs/node", repos: [LASSO], search: "is:pr is:open repo:nodejs/node sort:updated-desc" },
-    { what: "leaves a query naming org: unscoped", query: "is:open org:example", repos: [LASSO], search: "is:pr is:open org:example sort:updated-desc" },
-    { what: "leaves a query naming user: unscoped", query: "is:open user:matt", repos: [LASSO], search: "is:pr is:open user:matt sort:updated-desc" },
-    { what: "keeps a sort: the query names", query: "is:open sort:created-asc", repos: [LASSO], search: "is:pr is:open sort:created-asc repo:rbitco/lasso" },
-    { what: "takes a quoted repo: as text, not scope", query: 'is:open "repo:nodejs/node"', repos: [LASSO], search: 'is:pr is:open "repo:nodejs/node" repo:rbitco/lasso sort:updated-desc' },
-    { what: "keeps a quoted qualifier value as one term", query: 'is:open label:"needs review"', repos: [LASSO], search: 'is:pr is:open label:"needs review" repo:rbitco/lasso sort:updated-desc' },
+    { what: "adds is:pr, the repo and the default sort", query: "is:open author:@me", repos: [LAISSO], search: "is:pr is:open author:@me repo:rbitco/laisso sort:updated-desc" },
+    { what: "adds one repo: per configured repo", query: "is:open", repos: [LAISSO, SITE], search: "is:pr is:open repo:rbitco/laisso repo:rbitco/site sort:updated-desc" },
+    { what: "names a repo once when two configured repos share it", query: "is:open", repos: [LAISSO, { owner: "RBITCO", name: "Laisso" }], search: "is:pr is:open repo:rbitco/laisso sort:updated-desc" },
+    { what: "does not add is:pr twice", query: "is:pr is:open", repos: [LAISSO], search: "is:pr is:open repo:rbitco/laisso sort:updated-desc" },
+    { what: "leaves a query naming repo: unscoped", query: "is:open repo:nodejs/node", repos: [LAISSO], search: "is:pr is:open repo:nodejs/node sort:updated-desc" },
+    { what: "leaves a query naming org: unscoped", query: "is:open org:example", repos: [LAISSO], search: "is:pr is:open org:example sort:updated-desc" },
+    { what: "leaves a query naming user: unscoped", query: "is:open user:matt", repos: [LAISSO], search: "is:pr is:open user:matt sort:updated-desc" },
+    { what: "keeps a sort: the query names", query: "is:open sort:created-asc", repos: [LAISSO], search: "is:pr is:open sort:created-asc repo:rbitco/laisso" },
+    { what: "takes a quoted repo: as text, not scope", query: 'is:open "repo:nodejs/node"', repos: [LAISSO], search: 'is:pr is:open "repo:nodejs/node" repo:rbitco/laisso sort:updated-desc' },
+    { what: "keeps a quoted qualifier value as one term", query: 'is:open label:"needs review"', repos: [LAISSO], search: 'is:pr is:open label:"needs review" repo:rbitco/laisso sort:updated-desc' },
     { what: "searches with no GitHub repos when the query names its own scope", query: "is:open org:example", repos: [], search: "is:pr is:open org:example sort:updated-desc" },
   ];
   for (const c of cases) {
@@ -39,11 +39,11 @@ describe("a PR List's search", () => {
 
   // Advanced search (LASSO-161): the query in parentheses, the repos in one OR group, the sort outside both.
   const advanced: { what: string; query: string; repos: GitHubRepo[]; search: string }[] = [
-    { what: "groups the query and the repos so the query's OR stays its own", query: "is:open (author:@me OR assignee:@me) (-status:success OR -review:approved)", repos: [LASSO, SITE], search: "is:pr (is:open (author:@me OR assignee:@me) (-status:success OR -review:approved)) (repo:rbitco/lasso OR repo:rbitco/site) sort:updated-desc" },
-    { what: "adds a lone repo without a group", query: "is:open author:@me OR assignee:@me", repos: [LASSO], search: "is:pr (is:open author:@me OR assignee:@me) repo:rbitco/lasso sort:updated-desc" },
-    { what: "moves the query's sort: outside the parentheses", query: "is:open sort:created-asc", repos: [LASSO], search: "is:pr (is:open) repo:rbitco/lasso sort:created-asc" },
-    { what: "reads a scope inside parentheses as the query's own", query: "is:open (repo:nodejs/node OR org:example)", repos: [LASSO], search: "is:pr (is:open (repo:nodejs/node OR org:example)) sort:updated-desc" },
-    { what: "does not add is:pr twice, in parentheses or not", query: "(is:pr is:open)", repos: [LASSO], search: "((is:pr is:open)) repo:rbitco/lasso sort:updated-desc" },
+    { what: "groups the query and the repos so the query's OR stays its own", query: "is:open (author:@me OR assignee:@me) (-status:success OR -review:approved)", repos: [LAISSO, SITE], search: "is:pr (is:open (author:@me OR assignee:@me) (-status:success OR -review:approved)) (repo:rbitco/laisso OR repo:rbitco/site) sort:updated-desc" },
+    { what: "adds a lone repo without a group", query: "is:open author:@me OR assignee:@me", repos: [LAISSO], search: "is:pr (is:open author:@me OR assignee:@me) repo:rbitco/laisso sort:updated-desc" },
+    { what: "moves the query's sort: outside the parentheses", query: "is:open sort:created-asc", repos: [LAISSO], search: "is:pr (is:open) repo:rbitco/laisso sort:created-asc" },
+    { what: "reads a scope inside parentheses as the query's own", query: "is:open (repo:nodejs/node OR org:example)", repos: [LAISSO], search: "is:pr (is:open (repo:nodejs/node OR org:example)) sort:updated-desc" },
+    { what: "does not add is:pr twice, in parentheses or not", query: "(is:pr is:open)", repos: [LAISSO], search: "((is:pr is:open)) repo:rbitco/laisso sort:updated-desc" },
   ];
   for (const c of advanced) {
     it(`advanced: ${c.what}`, () => {
@@ -56,18 +56,18 @@ describe("a PR List's search", () => {
   });
 
   it("links the same search on github.com", () => {
-    expect(searchUrl("is:pr is:open author:@me repo:rbitco/lasso sort:updated-desc")).toBe("https://github.com/pulls?q=is%3Apr%20is%3Aopen%20author%3A%40me%20repo%3Arbitco%2Flasso%20sort%3Aupdated-desc");
-    const built = buildSearch('label:"needs review"', [LASSO]);
-    expect("url" in built && new URL(built.url).searchParams.get("q")).toBe('is:pr label:"needs review" repo:rbitco/lasso sort:updated-desc');
+    expect(searchUrl("is:pr is:open author:@me repo:rbitco/laisso sort:updated-desc")).toBe("https://github.com/pulls?q=is%3Apr%20is%3Aopen%20author%3A%40me%20repo%3Arbitco%2Flaisso%20sort%3Aupdated-desc");
+    const built = buildSearch('label:"needs review"', [LAISSO]);
+    expect("url" in built && new URL(built.url).searchParams.get("q")).toBe('is:pr label:"needs review" repo:rbitco/laisso sort:updated-desc');
   });
 });
 
 describe("a repo's GitHub origin", () => {
   it("reads github.com SSH and HTTPS URLs, and leaves other hosts out", () => {
-    for (const url of ["git@github.com:rbitco/lasso.git", "git@github.com:rbitco/lasso", "ssh://git@github.com/rbitco/lasso.git", "https://github.com/rbitco/lasso.git", "https://github.com/rbitco/lasso", "https://token@github.com/rbitco/lasso.git\n"]) {
-      expect(parseGitHubRemote(url)).toEqual(LASSO);
+    for (const url of ["git@github.com:rbitco/laisso.git", "git@github.com:rbitco/laisso", "ssh://git@github.com/rbitco/laisso.git", "https://github.com/rbitco/laisso.git", "https://github.com/rbitco/laisso", "https://token@github.com/rbitco/laisso.git\n"]) {
+      expect(parseGitHubRemote(url)).toEqual(LAISSO);
     }
-    for (const url of ["git@gitlab.com:rbitco/lasso.git", "https://github.example.com/rbitco/lasso.git", "/srv/git/lasso.git"]) expect(parseGitHubRemote(url)).toBeNull();
+    for (const url of ["git@gitlab.com:rbitco/laisso.git", "https://github.example.com/rbitco/laisso.git", "/srv/git/laisso.git"]) expect(parseGitHubRemote(url)).toBeNull();
   });
 });
 
@@ -75,7 +75,7 @@ describe("the PR List cache", () => {
   const TICK = 60_000;
   const REFRESH = 5 * TICK;
   const START = Date.parse("2026-10-15T12:00:00Z");
-  const node = (n: number) => ({ number: n, title: `PR ${n}`, url: `https://github.com/rbitco/lasso/pull/${n}`, updatedAt: "2026-10-15T12:00:00Z", repository: { nameWithOwner: "rbitco/lasso" }, author: { login: "matt" } });
+  const node = (n: number) => ({ number: n, title: `PR ${n}`, url: `https://github.com/rbitco/laisso/pull/${n}`, updatedAt: "2026-10-15T12:00:00Z", repository: { nameWithOwner: "rbitco/laisso" }, author: { login: "matt" } });
   const ok = (total: number, ...ns: number[]): SearchResult => ({ ok: true, total, nodes: ns.map(node), rateLimit: { remaining: 4990, resetAt: "2026-10-15T13:00:00Z" } });
   const MINE: PrListSetting = { name: "Mine", query: "is:open author:@me", limit: 25 };
   const REVIEW: PrListSetting = { name: "Review requested", query: "is:open review-requested:@me", limit: 2 };
@@ -119,7 +119,7 @@ describe("the PR List cache", () => {
         }
       },
     };
-    t.cache = new PrLists({ lists: () => lists, repos: async () => opts.repos ?? { lasso: LASSO }, search, tickMs: () => TICK, refreshMs: () => REFRESH, changed: () => t.changes++, example: "pr_lists: ...", layout: opts.layout, now: () => now });
+    t.cache = new PrLists({ lists: () => lists, repos: async () => opts.repos ?? { laisso: LAISSO }, search, tickMs: () => TICK, refreshMs: () => REFRESH, changed: () => t.changes++, example: "pr_lists: ...", layout: opts.layout, now: () => now });
     return t;
   }
 
@@ -142,7 +142,7 @@ describe("the PR List cache", () => {
       ["Review requested", [1, 2], 31, "2026-10-15T12:00:00.000Z", false],
       ["Mine", [3], 1, "2026-10-15T12:00:00.000Z", false],
     ]);
-    expect(fetched.lists[0]!.url).toBe(searchUrl("is:pr is:open review-requested:@me repo:rbitco/lasso sort:updated-desc"));
+    expect(fetched.lists[0]!.url).toBe(searchUrl("is:pr is:open review-requested:@me repo:rbitco/laisso sort:updated-desc"));
     expect(t.calls).toHaveLength(2);
   });
 
@@ -419,7 +419,7 @@ describe("the PR List cache", () => {
     ]);
     t.release();
     await t.cache.settle();
-    expect(t.calls.slice(2)).toEqual(["is:pr is:open author:@me draft:false repo:rbitco/lasso sort:updated-desc", "is:pr is:open draft:true author:@me repo:rbitco/lasso sort:updated-desc"]);
+    expect(t.calls.slice(2)).toEqual(["is:pr is:open author:@me draft:false repo:rbitco/laisso sort:updated-desc", "is:pr is:open draft:true author:@me repo:rbitco/laisso sort:updated-desc"]);
     // Once fetched, the edited list is not fetched again by a read.
     t.setLists([{ ...MINE, query: "is:open author:@me draft:false" }]);
     await t.cache.read();
@@ -430,13 +430,13 @@ describe("the PR List cache", () => {
     const t = setup({ lists: [{ ...MINE, query: "is:open author:@me OR assignee:@me", search: "advanced" }] });
     await t.cache.read();
     await t.cache.settle();
-    expect(t.calls).toEqual(["is:pr (is:open author:@me OR assignee:@me) repo:rbitco/lasso sort:updated-desc"]);
+    expect(t.calls).toEqual(["is:pr (is:open author:@me OR assignee:@me) repo:rbitco/laisso sort:updated-desc"]);
     expect(t.syntaxes).toEqual(["advanced"]);
     // Back on legacy: the same words make a different search, so the list starts again.
     t.setLists([{ ...MINE, query: "is:open author:@me OR assignee:@me" }]);
     await t.cache.read();
     await t.cache.settle();
-    expect(t.calls[1]).toBe("is:pr is:open author:@me OR assignee:@me repo:rbitco/lasso sort:updated-desc");
+    expect(t.calls[1]).toBe("is:pr is:open author:@me OR assignee:@me repo:rbitco/laisso sort:updated-desc");
     expect(t.syntaxes).toEqual(["advanced", "legacy"]);
   });
 });
@@ -446,9 +446,9 @@ describe("a PR row", () => {
   const pr = (fields: Partial<PrNode> = {}, runs: Counts = [], statuses: Counts = []): PrNode => ({
     number: 7,
     title: "Add the PR page",
-    url: "https://github.com/rbitco/lasso/pull/7",
+    url: "https://github.com/rbitco/laisso/pull/7",
     updatedAt: "2026-10-15T12:00:00Z",
-    repository: { nameWithOwner: "rbitco/lasso" },
+    repository: { nameWithOwner: "rbitco/laisso" },
     author: { login: "matt" },
     isDraft: false,
     mergeable: "MERGEABLE",
@@ -461,9 +461,9 @@ describe("a PR row", () => {
   it("reads a node's fields, and skips a node that is not a PR", () => {
     expect(prRow(pr())).toEqual({
       title: "Add the PR page",
-      repo: "rbitco/lasso",
+      repo: "rbitco/laisso",
       number: 7,
-      url: "https://github.com/rbitco/lasso/pull/7",
+      url: "https://github.com/rbitco/laisso/pull/7",
       author: "matt",
       updatedAt: "2026-10-15T12:00:00Z",
       verdict: { word: "Ready to merge", reason: "approved", tone: "good" },
@@ -537,8 +537,8 @@ describe("a PR's reviewers", () => {
   /** A PR by matt from its three review lists, as GitHub sends them. */
   const pr = ({ latest = [], opinionated = [], requests = [], decision = "REVIEW_REQUIRED" }: { latest?: Rv[]; opinionated?: Rv[]; requests?: Rq[]; decision?: string }): PrNode => ({
     number: 7,
-    url: "https://github.com/rbitco/lasso/pull/7",
-    repository: { nameWithOwner: "rbitco/lasso" },
+    url: "https://github.com/rbitco/laisso/pull/7",
+    repository: { nameWithOwner: "rbitco/laisso" },
     author: { login: "matt" },
     reviewDecision: decision,
     headRefOid: HEAD,
@@ -636,26 +636,26 @@ describe("a PR row's Ticket", () => {
   const node = (fields: Partial<PrNode> = {}): PrNode => ({
     number: 7,
     title: "Add the PR page",
-    url: "https://github.com/rbitco/lasso/pull/7",
-    repository: { nameWithOwner: "rbitco/lasso" },
+    url: "https://github.com/rbitco/laisso/pull/7",
+    repository: { nameWithOwner: "rbitco/laisso" },
     author: { login: "matt" },
-    headRefName: "lasso-7-pr-page",
+    headRefName: "laisso-7-pr-page",
     reviewDecision: "APPROVED",
     commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { checkRunCountsByState: [{ state: "IN_PROGRESS", count: 1 }] } } } }] },
     ...fields,
   });
   type Row = Parameters<typeof ticketForPr>[0];
-  const row = (fields: Partial<Row> = {}): Row => ({ id: ID, name: null, reference: "LASSO-7", stage: "review", state: "active", flagged_at: null, flag_reason: null, owned: [], referenced: [], branch: "lasso-7-pr-page", ...fields });
-  const one = (fields: Partial<Row> = {}, github: GitHubRepo | null = LASSO) => ticketForPr(row(fields), github)!;
+  const row = (fields: Partial<Row> = {}): Row => ({ id: ID, name: null, reference: "LASSO-7", stage: "review", state: "active", flagged_at: null, flag_reason: null, owned: [], referenced: [], branch: "laisso-7-pr-page", ...fields });
+  const one = (fields: Partial<Row> = {}, github: GitHubRepo | null = LAISSO) => ticketForPr(row(fields), github)!;
   const ticketOf = (pr: PrNode, ...tickets: TicketForPr[]) => prRow(pr, ticketMatcher(tickets))!.ticket;
 
   it("matches by PR URL, ignoring case and trailing slashes", () => {
-    expect(ticketOf(node(), one({ owned: ["https://GitHub.com/rbitco/Lasso/pull/7/"], branch: "something-else" }, null))).toEqual({ id: ID, ref: "LASSO-7", stage: "review", flag: null });
-    expect(ticketOf(node(), one({ owned: ["https://github.com/rbitco/lasso/pull/8"], branch: "something-else" }))).toBeNull();
+    expect(ticketOf(node(), one({ owned: ["https://GitHub.com/rbitco/Laisso/pull/7/"], branch: "something-else" }, null))).toEqual({ id: ID, ref: "LASSO-7", stage: "review", flag: null });
+    expect(ticketOf(node(), one({ owned: ["https://github.com/rbitco/laisso/pull/8"], branch: "something-else" }))).toBeNull();
   });
 
   it("matches by GitHub repo and head branch when no Ticket has the PR's URL", () => {
-    expect(ticketOf(node(), one({}, { owner: "RBITCO", name: "lasso" }))?.ref).toBe("LASSO-7");
+    expect(ticketOf(node(), one({}, { owner: "RBITCO", name: "laisso" }))?.ref).toBe("LASSO-7");
     // The same branch in another repo, a repo not on github.com, or a PR with no head branch: no match.
     expect(ticketOf(node(), one({}, SITE))).toBeNull();
     expect(ticketOf(node(), one({}, null))).toBeNull();
@@ -664,7 +664,7 @@ describe("a PR row's Ticket", () => {
 
   it("prefers a URL match over a branch match, and an active Ticket over a done one", () => {
     const byBranch = one({ id: "BRANCH", reference: "LASSO-1" });
-    const byUrl = one({ id: "URL", reference: "LASSO-2", branch: "other", owned: ["https://github.com/rbitco/lasso/pull/7"] });
+    const byUrl = one({ id: "URL", reference: "LASSO-2", branch: "other", owned: ["https://github.com/rbitco/laisso/pull/7"] });
     expect(ticketOf(node(), byBranch, byUrl)?.id).toBe("URL");
     const done = one({ id: "DONE", state: "done" });
     expect(ticketOf(node(), done, one({ id: "ACTIVE" }))?.id).toBe("ACTIVE");
@@ -673,7 +673,7 @@ describe("a PR row's Ticket", () => {
   });
 
   it("leaves Abandoned Tickets out, and a row with no Ticket empty", () => {
-    expect(ticketForPr(row({ state: "abandoned" }), LASSO)).toBeNull();
+    expect(ticketForPr(row({ state: "abandoned" }), LAISSO)).toBeNull();
     expect(ticketOf(node())).toBeNull();
   });
 
@@ -687,12 +687,12 @@ describe("a PR row's Ticket", () => {
   });
 
   describe("ref: chips", () => {
-    const PR = "https://github.com/rbitco/lasso/pull/7";
+    const PR = "https://github.com/rbitco/laisso/pull/7";
     const rowOf = (...tickets: TicketForPr[]) => prRow(node(), ticketMatcher(tickets))!;
 
     it("follows the owner's chip with one for each Ticket that references the PR", () => {
       const owner = one({ id: "OWNER", reference: "LASSO-7", owned: [PR] });
-      const first = one({ id: "REF1", reference: "LASSO-8", branch: "other", stage: "implement", referenced: ["https://GitHub.com/rbitco/Lasso/pull/7/"] });
+      const first = one({ id: "REF1", reference: "LASSO-8", branch: "other", stage: "implement", referenced: ["https://GitHub.com/rbitco/Laisso/pull/7/"] });
       const second = one({ id: "REF2", reference: "LASSO-9", branch: "another", state: "done", referenced: [PR] });
       const row = rowOf(first, owner, second);
       expect(row.ticket).toEqual({ id: "OWNER", ref: "LASSO-7", stage: "review", flag: null });
@@ -703,12 +703,12 @@ describe("a PR row's Ticket", () => {
     });
 
     it("never shows an Abandoned Ticket that references the PR", () => {
-      expect(ticketForPr(row({ id: "GONE", branch: "other", state: "abandoned", referenced: [PR] }), LASSO)).toBeNull();
+      expect(ticketForPr(row({ id: "GONE", branch: "other", state: "abandoned", referenced: [PR] }), LAISSO)).toBeNull();
       expect(rowOf(one({ owned: [PR] })).refs).toEqual([]);
     });
 
     it("shows only ref: chips on a PR with no owner", () => {
-      const row = rowOf(one({ id: "REF1", reference: "LASSO-8", branch: "other", referenced: [PR] }), one({ id: "ELSE", branch: "other", referenced: ["https://github.com/rbitco/lasso/pull/8"] }));
+      const row = rowOf(one({ id: "REF1", reference: "LASSO-8", branch: "other", referenced: [PR] }), one({ id: "ELSE", branch: "other", referenced: ["https://github.com/rbitco/laisso/pull/8"] }));
       expect(row.ticket).toBeNull();
       expect(row.refs.map((r) => r.id)).toEqual(["REF1"]);
     });
@@ -716,10 +716,10 @@ describe("a PR row's Ticket", () => {
     it("are read from the Tickets' Referenced links at each read of the cache", async () => {
       const cache = new PrLists({
         lists: () => [{ name: "Mine", query: "is:open", limit: 25 }],
-        repos: async () => ({ lasso: LASSO }),
+        repos: async () => ({ laisso: LAISSO }),
         tickets: () => [
-          { ...row({ id: "REF", reference: "LASSO-8", branch: "other", referenced: [PR] }), repo: "lasso" } as TicketRow & TicketWithOwned,
-          { ...row({ id: "GONE", reference: "LASSO-9", branch: "other", state: "abandoned", referenced: [PR] }), repo: "lasso" } as TicketRow & TicketWithOwned,
+          { ...row({ id: "REF", reference: "LASSO-8", branch: "other", referenced: [PR] }), repo: "laisso" } as TicketRow & TicketWithOwned,
+          { ...row({ id: "GONE", reference: "LASSO-9", branch: "other", state: "abandoned", referenced: [PR] }), repo: "laisso" } as TicketRow & TicketWithOwned,
         ],
         search: async () => ({ ok: true, total: 1, nodes: [node()], rateLimit: null }),
         tickMs: () => 60_000,
@@ -738,7 +738,7 @@ describe("a PR row's Ticket", () => {
     let fetches = 0;
     const cache = new PrLists({
       lists: () => [{ name: "Mine", query: "is:open", limit: 25 }],
-      repos: async () => ({ lasso: LASSO }),
+      repos: async () => ({ laisso: LAISSO }),
       tickets: () => tickets,
       search: async () => {
         fetches++;
@@ -751,7 +751,7 @@ describe("a PR row's Ticket", () => {
     await cache.settle();
     expect((await cache.read()).lists[0]!.rows[0]!.ticket).toBeNull();
     // A Ticket in a repo with no GitHub origin can't match by branch.
-    tickets = [{ ...row({ id: "ELSEWHERE" }), repo: "elsewhere" } as TicketRow & TicketWithOwned, { ...row({ stage: "implement" }), repo: "lasso" } as TicketRow & TicketWithOwned];
+    tickets = [{ ...row({ id: "ELSEWHERE" }), repo: "elsewhere" } as TicketRow & TicketWithOwned, { ...row({ stage: "implement" }), repo: "laisso" } as TicketRow & TicketWithOwned];
     expect((await cache.read()).lists[0]!.rows[0]!.ticket).toMatchObject({ id: ID, stage: "implement" });
     expect(fetches).toBe(1);
   });

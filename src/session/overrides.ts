@@ -1,5 +1,5 @@
 import { currentConfig, profilesFor, resolveProfile, type Config, type ProfileScope, type ResolvedProfile } from "../server/config.ts";
-import type { LassoHome } from "../server/home.ts";
+import type { LaissoHome } from "../server/home.ts";
 import type { Logger } from "../server/log.ts";
 import { overrideFor, type Tickets, type TicketRow } from "../store/tickets.ts";
 import { runnerOf, type SessionRow } from "../store/sessions.ts";
@@ -26,7 +26,7 @@ export function resumeRefusal(stage: string, last: SessionRow, profile: Resolved
 
 export interface OverridesDeps {
   config: Config;
-  home: LassoHome;
+  home: LaissoHome;
   tickets: Tickets;
   progress: Progress;
   log: Logger;

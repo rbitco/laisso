@@ -4,7 +4,7 @@ import { PACKAGE_NAME } from "./package-root.ts";
 export const DEV_VERSION = "0.0.0-dev";
 
 /**
- * What Lasso has to say about its own version: nothing, a newer version published (`available`), or a newer version
+ * What Laisso has to say about its own version: nothing, a newer version published (`available`), or a newer version
  * already installed on disk while this process still runs the old one (`restart`). `version` is the newer one.
  */
 export type VersionNotice = { kind: "none" } | { kind: "available" | "restart"; version: string };
@@ -21,10 +21,10 @@ export function versionNotice(running: string, onDisk: string, latest: string | 
   return { kind: "none" };
 }
 
-/** The line the dashboard header and `lasso status` show, or null when there is nothing to say. */
+/** The line the dashboard header and `laisso status` show, or null when there is nothing to say. */
 export function noticeText(notice: VersionNotice): string | null {
   if (notice.kind === "available") return `v${notice.version} available: npm update -g ${PACKAGE_NAME}`;
-  if (notice.kind === "restart") return `v${notice.version} installed: restart lasso to use it`;
+  if (notice.kind === "restart") return `v${notice.version} installed: restart laisso to use it`;
   return null;
 }
 

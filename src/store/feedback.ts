@@ -18,7 +18,7 @@ export interface FeedbackRow {
   log: string | null;
   /** The URL of the PR the item is on. */
   pr: string | null;
-  /** How Lasso saw it addressed after the Round, or null while it stands. */
+  /** How Laisso saw it addressed after the Round, or null while it stands. */
   addressed: string | null;
 }
 

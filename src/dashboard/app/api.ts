@@ -10,7 +10,7 @@ export class ApiError extends Error {
   }
 }
 
-/** One JSON request against Lasso's /api. A non-2xx answer throws ApiError with the server's error message. */
+/** One JSON request against Laisso's /api. A non-2xx answer throws ApiError with the server's error message. */
 export async function api<T>(route: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(route, { headers: { "content-type": "application/json" }, ...init });
   const text = await res.text();

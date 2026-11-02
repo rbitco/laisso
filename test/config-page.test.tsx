@@ -16,7 +16,7 @@ class FakeEventSource extends EventTarget {
 }
 vi.stubGlobal("EventSource", FakeEventSource);
 
-const FILE = "/home/me/.lasso/config.yaml";
+const FILE = "/home/me/.laisso/config.yaml";
 
 /** A patch applied as config.yaml takes it: a null clears its key, which reads back as the default. */
 function patched(config: Config, patch: Record<string, unknown>): Config {
@@ -27,8 +27,8 @@ function patched(config: Config, patch: Record<string, unknown>): Config {
   return { ...merge(config, DEFAULT_CONFIG, patch), budget: merge(config.budget, DEFAULT_CONFIG.budget, patch.budget), notifications: merge(config.notifications, DEFAULT_CONFIG.notifications, patch.notifications) };
 }
 
-/** A stand-in for Lasso's /api: config as it stands, every PATCH it was sent, and how it answers the next one. */
-function fakeLasso(config: Config, actions: ActionListing[] = []) {
+/** A stand-in for Laisso's /api: config as it stands, every PATCH it was sent, and how it answers the next one. */
+function fakeLaisso(config: Config, actions: ActionListing[] = []) {
   const patches: unknown[] = [];
   const state = { config, refuse: null as string | null, restart: [] as string[] };
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -52,10 +52,10 @@ const field = (label: string) => screen.getByLabelText(label) as HTMLInputElemen
 const save = () => screen.getByRole("button", { name: "Save changes" });
 
 async function showPage(config: Config = DEFAULT_CONFIG, actions: ActionListing[] = []) {
-  const lasso = fakeLasso(config, actions);
+  const laisso = fakeLaisso(config, actions);
   render(<ConfigPage visit={1} />);
   await screen.findByText(FILE);
-  return lasso;
+  return laisso;
 }
 
 /** What the app draws over every view: the notice line and the profile drawer. */
@@ -78,7 +78,7 @@ afterEach(() => {
 
 describe("the Config page's settings", () => {
   it("shows config's values, and saves only what changed", async () => {
-    const lasso = await showPage();
+    const laisso = await showPage();
     expect(field("Sessions at once").value).toBe("3");
     expect(field("Time per Session").value).toBe("30m");
     const user = userEvent.setup();
@@ -87,32 +87,32 @@ describe("the Config page's settings", () => {
     await user.click(screen.getByLabelText("A Stage finished and the next waits for Start"));
     await user.click(save());
     await waitFor(() => expect(notice().textContent).toBe("saved"));
-    expect(lasso.patches).toEqual([{ concurrency: 4, notifications: { gate: false } }]);
+    expect(laisso.patches).toEqual([{ concurrency: 4, notifications: { gate: false } }]);
     expect(screen.getByText("No unsaved changes")).toBeTruthy();
   });
 
   it("says when a saved setting applies only after a restart", async () => {
-    const lasso = await showPage();
-    lasso.state.restart = ["port"];
+    const laisso = await showPage();
+    laisso.state.restart = ["port"];
     const user = userEvent.setup();
     await user.clear(field("Port"));
     await user.type(field("Port"), "7500");
     await user.click(save());
     await waitFor(() => expect(notice().textContent).toBe("saved; port apply after a restart"));
-    expect(lasso.patches).toEqual([{ port: 7500 }]);
+    expect(laisso.patches).toEqual([{ port: 7500 }]);
   });
 
   it("clears a key left blank, back to its default", async () => {
-    const lasso = await showPage({ ...DEFAULT_CONFIG, branch_prefix: "lasso/" });
+    const laisso = await showPage({ ...DEFAULT_CONFIG, branch_prefix: "laisso/" });
     const user = userEvent.setup();
     await user.clear(field("Branch prefix"));
     await user.clear(field("Rounds per repeating Stage"));
     await user.click(save());
-    await waitFor(() => expect(lasso.patches).toEqual([{ budget: { rounds: null }, branch_prefix: null }]));
+    await waitFor(() => expect(laisso.patches).toEqual([{ budget: { rounds: null }, branch_prefix: null }]));
   });
 
   it("sets where human Stages open, and clears the key when it goes back to auto", async () => {
-    const lasso = await showPage({ ...DEFAULT_CONFIG, terminal: "tmux" });
+    const laisso = await showPage({ ...DEFAULT_CONFIG, terminal: "tmux" });
     const select = screen.getByLabelText("Human Stages open in") as HTMLSelectElement;
     expect(select.value).toBe("tmux");
     const user = userEvent.setup();
@@ -121,7 +121,7 @@ describe("the Config page's settings", () => {
     await waitFor(() => expect(notice().textContent).toBe("saved"));
     await user.selectOptions(select, "auto");
     await user.click(save());
-    await waitFor(() => expect(lasso.patches).toEqual([{ terminal: "herdr" }, { terminal: null }]));
+    await waitFor(() => expect(laisso.patches).toEqual([{ terminal: "herdr" }, { terminal: null }]));
   });
 
   it("marks the form unsaved while it differs from config, and not once it matches again", async () => {
@@ -138,8 +138,8 @@ describe("the Config page's settings", () => {
   });
 
   it("shows the server's reason when it refuses a save, and keeps the edit", async () => {
-    const lasso = await showPage();
-    lasso.state.refuse = "config.yaml: tick: must be a positive number";
+    const laisso = await showPage();
+    laisso.state.refuse = "config.yaml: tick: must be a positive number";
     const user = userEvent.setup();
     await user.clear(field("Check every (seconds)"));
     await user.type(field("Check every (seconds)"), "0");
@@ -151,20 +151,20 @@ describe("the Config page's settings", () => {
   });
 
   it("sends nothing while a number field holds something else, and puts the cursor there", async () => {
-    const lasso = await showPage();
+    const laisso = await showPage();
     const user = userEvent.setup();
     await user.type(field("Attempts per Stage"), "x");
     await user.click(save());
     expect(notice().textContent).toBe("attempts must be a number");
     expect(document.activeElement).toBe(field("Attempts per Stage"));
-    expect(lasso.patches).toEqual([]);
+    expect(laisso.patches).toEqual([]);
   });
 
   it("says so when Save has nothing to send", async () => {
-    const lasso = await showPage();
+    const laisso = await showPage();
     await userEvent.setup().click(save());
     expect(notice().textContent).toBe("nothing changed");
-    expect(lasso.patches).toEqual([]);
+    expect(laisso.patches).toEqual([]);
   });
 
   it("greys out the kinds of notification while notifications are off", async () => {
@@ -177,22 +177,22 @@ describe("the Config page's settings", () => {
   });
 
   it("shows config another client saved in every field not being edited, and keeps the edits", async () => {
-    const lasso = await showPage();
-    lasso.state.config = { ...DEFAULT_CONFIG, concurrency: 6 };
+    const laisso = await showPage();
+    laisso.state.config = { ...DEFAULT_CONFIG, concurrency: 6 };
     act(() => void events().dispatchEvent(new Event("config")));
     await waitFor(() => expect(field("Sessions at once").value).toBe("6"));
 
     const user = userEvent.setup();
     await user.clear(field("Keep finished Tickets (days)"));
     await user.type(field("Keep finished Tickets (days)"), "90");
-    lasso.state.config = { ...DEFAULT_CONFIG, concurrency: 8 };
+    laisso.state.config = { ...DEFAULT_CONFIG, concurrency: 8 };
     act(() => void events().dispatchEvent(new Event("config")));
     await waitFor(() => expect(field("Sessions at once").value).toBe("8"));
     expect(field("Keep finished Tickets (days)").value).toBe("90");
     expect(screen.getByText("Unsaved changes")).toBeTruthy();
     // Save sends only the edit, so the other client's change stands.
     await user.click(save());
-    await waitFor(() => expect(lasso.patches).toEqual([{ retention: 90 }]));
+    await waitFor(() => expect(laisso.patches).toEqual([{ retention: 90 }]));
   });
 });
 

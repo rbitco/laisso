@@ -15,7 +15,7 @@ const FLAG_LABEL: Record<keyof NotificationConfig, string> = {
 
 /** Every value terminal: takes, in config's order (the server's config module is not for the browser). */
 const TERMINAL_LABEL: Record<TerminalSetting, string> = {
-  auto: "herdr or tmux when Lasso runs inside one, else Terminal.app",
+  auto: "herdr or tmux when Laisso runs inside one, else Terminal.app",
   herdr: "a herdr tab",
   tmux: "a tmux window",
   "terminal-app": "a Terminal.app window",
@@ -94,7 +94,7 @@ export function SettingsForm({ config, onSaved }: { config: Config; onSaved: (sa
           {text("routes", "Times each Route may be taken")}
         </div>
       </Setting>
-      <Setting title="Server" about="How often Lasso checks for work, how much it runs at once, and how long it keeps finished Tickets.">
+      <Setting title="Server" about="How often Laisso checks for work, how much it runs at once, and how long it keeps finished Tickets.">
         <div className="fields">
           {text("tick", "Check every (seconds)")}
           {text("concurrency", "Sessions at once")}

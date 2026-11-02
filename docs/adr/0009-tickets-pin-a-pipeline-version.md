@@ -8,7 +8,7 @@ The dashboard needed to add, remove, and reorder Stages, and any such
 edit could strand a live Ticket: its current Stage is found by name, so a
 removal Flags it and a reorder silently skips or repeats Stages. We could
 have warned before saving, or blocked edits that touch a live Ticket's
-Stage. We decided instead that Intake freezes the Pipeline into Lasso's
+Stage. We decided instead that Intake freezes the Pipeline into Laisso's
 store and pins the Ticket to that Version, so no later edit to the file,
 by hand or from the dashboard, reaches a Ticket already under way. The
 YAML file stays the only thing a human edits and is always the current
@@ -21,8 +21,8 @@ Pipeline; Versions exist only where a Ticket uses them. This amends ADR
   several Tickets mid-flight, and says nothing about hand edits.
 - Block edits touching a live Ticket's Stage: makes the editor unusable
   whenever the default Pipeline is busy, which is most of the time.
-- Versioned files on disk or git history of `~/.lasso`: makes hand
-  edits either create files themselves or pull git into Lasso's home.
+- Versioned files on disk or git history of `~/.laisso`: makes hand
+  edits either create files themselves or pull git into Laisso's home.
 
 ## Consequences
 

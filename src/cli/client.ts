@@ -3,7 +3,7 @@ import { loadConfig } from "../server/config.ts";
 
 export class NotRunning extends Error {
   constructor() {
-    super("lasso is not running");
+    super("laisso is not running");
   }
 }
 
@@ -14,12 +14,12 @@ export interface Client {
   delete<T>(route: string, body?: unknown): Promise<T>;
 }
 
-/** A thin client over the localhost API; every CLI command except `lasso` itself goes through it. Inside a Session it sends the Session id. */
+/** A thin client over the localhost API; every CLI command except `laisso` itself goes through it. Inside a Session it sends the Session id. */
 export function createClient(portFlag?: number): Client {
   const config = loadConfig(resolveHome(), { port: portFlag });
   const url = `http://localhost:${config.port}`;
-  const session = process.env.LASSO_SESSION;
-  const headers: Record<string, string> = { "content-type": "application/json", ...(session ? { "x-lasso-session": session } : {}) };
+  const session = process.env.LAISSO_SESSION;
+  const headers: Record<string, string> = { "content-type": "application/json", ...(session ? { "x-laisso-session": session } : {}) };
   const request = async <T>(route: string, init: RequestInit): Promise<T> => {
     let res: Response;
     try {
@@ -27,7 +27,7 @@ export function createClient(portFlag?: number): Client {
     } catch {
       throw new NotRunning();
     }
-    if (!res.headers.has("x-lasso-version")) throw new NotRunning();
+    if (!res.headers.has("x-laisso-version")) throw new NotRunning();
     const text = await res.text();
     const body = text ? JSON.parse(text) : undefined;
     if (!res.ok) throw new Error(typeof body?.error === "string" ? body.error : `${res.status} ${route}`);

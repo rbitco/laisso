@@ -45,7 +45,7 @@ export interface SessionRow {
   pid: number | null;
   /** When a terminal Session's window was last opened (Open terminal, or Resume). */
   opened_at: string | null;
-  /** The id the Runner gave this Session when it names its own (a Codex thread); null when it took Lasso's. */
+  /** The id the Runner gave this Session when it names its own (a Codex thread); null when it took Laisso's. */
   runner_session_id: string | null;
   /** A SessionProfile as JSON; null for action Sessions and those from before Agent Profiles. */
   profile: string | null;

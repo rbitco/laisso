@@ -1,14 +1,14 @@
 {
-  "name": "@rbitco/lasso",
+  "name": "@rbitco/laisso",
   "version": "0.0.0-dev",
   "type": "module",
   "description": "Drives a Ticket through a Pipeline of Stages using a coding-agent Runner.",
   "bin": {
-    "lasso": "dist/lasso.js"
+    "laisso": "dist/laisso.js"
   },
   "files": [
-    "dist/lasso.js",
-    "dist/lasso.js.map",
+    "dist/laisso.js",
+    "dist/laisso.js.map",
     "dist/dashboard",
     "skills"
   ],
@@ -21,7 +21,7 @@
   "scripts": {
     "start": "vite build --logLevel warn && node scripts/start.ts",
     "build": "vite build",
-    "bundle": "esbuild bin/lasso.js --bundle --platform=node --format=esm --target=node24 --packages=external --sourcemap --outfile=dist/lasso.js --log-level=warning",
+    "bundle": "esbuild bin/laisso.js --bundle --platform=node --format=esm --target=node24 --packages=external --sourcemap --outfile=dist/laisso.js --log-level=warning",
     "prepack": "npm run typecheck && npm run build && npm run bundle",
     "dev": "vite",
     "typecheck": "tsc --noEmit",

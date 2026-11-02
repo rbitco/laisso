@@ -48,9 +48,9 @@ export interface ServeOptions {
   portFlag?: number;
 }
 
-/** The one foreground lasso process (ADR 0008). Resolves with the exit code once it has shut down. */
+/** The one foreground laisso process (ADR 0008). Resolves with the exit code once it has shut down. */
 export async function serve(opts: ServeOptions): Promise<number> {
-  // Lasso's own version and dashboard, found the same way from source and from an installed bundle.
+  // Laisso's own version and dashboard, found the same way from source and from an installed bundle.
   const pkg = findPackageRoot();
   let dashboard: Dashboard;
   try {
@@ -82,7 +82,7 @@ export async function serve(opts: ServeOptions): Promise<number> {
 
   let store: Store;
   try {
-    // Copies the store to backups/ before migrating it; refuses one a newer Lasso migrated.
+    // Copies the store to backups/ before migrating it; refuses one a newer Laisso migrated.
     store = new Store(home.dbFile, { backupsDir: home.backupsDir });
   } catch (error) {
     if (error instanceof StoreTooNew) {
@@ -230,7 +230,7 @@ export async function serve(opts: ServeOptions): Promise<number> {
   log.info("started", { home: home.root, port: config.port, pid: process.pid, version: pkg.version });
   const opensIn = chooseTerminal(config.terminal, process.env);
   log.info("terminal", { terminal: opensIn.kind, why: opensIn.why });
-  console.log(`lasso listening at ${url}`);
+  console.log(`laisso listening at ${url}`);
   versionCheck.start();
 
   // Ctrl-C is honoured from here on, before reconciliation and the startup tick: a shutdown that

@@ -19,14 +19,14 @@ interface AssistantMessage {
 /**
  * Pi through `pi -p --mode json`. The first line is the session header;
  * once `agent_end` says the loop finished, the last assistant `message_end`
- * is the Outcome. Pi takes the session id Lasso chose, has no approval
+ * is the Outcome. Pi takes the session id Laisso chose, has no approval
  * prompt (so a profile's permission is ignored) and no budget flags, and
  * is told to trust the worktree so project skills load.
  */
 export const piAdapter: RunnerAdapter = {
   name: "pi",
   honours: [],
-  sessionIds: "lasso",
+  sessionIds: "laisso",
 
   command(request: RunRequest): Command {
     const prompt = renderPrompt(request, (name) => `/skill:${name}`);

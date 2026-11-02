@@ -6,8 +6,8 @@ import { api } from "../api.ts";
 const DEV_TITLE = "(dev) ";
 
 /**
- * A "dev" badge beside the header's name, and "(dev)" before the tab's title, while the Lasso that served the page is
- * a dev build: an installed Lasso and a dev clone's can be open side by side, and this tells them apart. Nothing until
+ * A "dev" badge beside the header's name, and "(dev)" before the tab's title, while the Laisso that served the page is
+ * a dev build: an installed Laisso and a dev clone's can be open side by side, and this tells them apart. Nothing until
  * /api/health answers, and nothing for a release.
  */
 export function DevBadge() {
@@ -25,7 +25,7 @@ export function DevBadge() {
   }, [dev]);
   if (!dev) return null;
   return (
-    <span className="dev-badge" data-role="dev-badge" title={`dev build, Lasso home ${health.home}`}>
+    <span className="dev-badge" data-role="dev-badge" title={`dev build, Laisso home ${health.home}`}>
       dev
     </span>
   );

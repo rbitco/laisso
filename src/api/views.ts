@@ -17,7 +17,7 @@ import type { PrState } from "../review/feedback.ts";
 import { roundDue, type PrLinkRow, type PrRole, type PrSource } from "../store/links.ts";
 import type { VersionNotice } from "../version-notice.ts";
 
-/** /api/health: which Lasso answered. The version and Lasso home tell an installed Lasso from a dev clone's. */
+/** /api/health: which Laisso answered. The version and Laisso home tell an installed Laisso from a dev clone's. */
 export interface Health {
   ok: true;
   pid: number;
@@ -126,11 +126,11 @@ export interface TicketView {
 export interface PrView {
   url: string;
   number: number;
-  /** Empty until Lasso has read the PR. */
+  /** Empty until Laisso has read the PR. */
   title: string;
   role: PrRole;
   source: PrSource;
-  /** Null until Lasso has read the PR. */
+  /** Null until Laisso has read the PR. */
   state: PrState | null;
   /** The head and base branch names, and who opened the PR; null until read. */
   head: string | null;
@@ -141,7 +141,7 @@ export interface PrView {
   checks: PrStatus["checks"];
 }
 
-/** The Route a Session has picked for leaving its Stage (`lasso route`), or none after --clear. */
+/** The Route a Session has picked for leaving its Stage (`laisso route`), or none after --clear. */
 export interface RoutePickView {
   ticket: string;
   stage: string;
@@ -328,7 +328,7 @@ export interface SendView {
  */
 export interface MarkDoneView {
   routes: SendRoute[];
-  /** The terminal agent's pick on this Visit (`lasso route`), which the menu pre-selects with its note; null for none. */
+  /** The terminal agent's pick on this Visit (`laisso route`), which the menu pre-selects with its note; null for none. */
   suggested: { route: string; note: string | null } | null;
 }
 
@@ -436,7 +436,7 @@ export interface PrListsYaml {
 export type { PrListsView, PrListView, PrListError, PrListsStatus, GhProblem } from "../prs/lists.ts";
 export type { CheckCounts, PrRow, PrTicket, Reviewer, ReviewerState } from "../prs/rows.ts";
 
-/** The running version and what Lasso has to say about it; `text` is the line to show, null when there is nothing to say. */
+/** The running version and what Laisso has to say about it; `text` is the line to show, null when there is nothing to say. */
 export interface VersionView {
   version: string;
   notice: VersionNotice;
@@ -814,7 +814,7 @@ function resumableHeadless(rows: SessionRow[], stage: string): SessionRow | null
   const last = rows.find((r) => r.stage === stage && r.mode === "headless");
   if (!last) return null;
   const runner = runnerOf(last);
-  return runner === null || adapterFor(runner).sessionIds === "lasso" || last.runner_session_id !== null ? last : null;
+  return runner === null || adapterFor(runner).sessionIds === "laisso" || last.runner_session_id !== null ? last : null;
 }
 
 /**
@@ -866,8 +866,8 @@ function ticketTriggers(ticket: TicketRow, stage: Stage | null, rows: SessionRow
   }
   return [
     { action: "terminal", label: "Open terminal" },
-    // A taken-over Stage can go back to Lasso: its Rounds, or a headless Session on the terminal's session.
-    ...(takenOver ? [{ action: "handback" as const, label: "Hand back to Lasso" }] : []),
+    // A taken-over Stage can go back to Laisso: its Rounds, or a headless Session on the terminal's session.
+    ...(takenOver ? [{ action: "handback" as const, label: "Hand back to Laisso" }] : []),
     { action: "done", label: `Mark ${stage.name} done` },
     skip,
     abandon,
@@ -893,7 +893,7 @@ export function sortForLedger(views: TicketView[]): TicketView[] {
   });
 }
 
-/** A tool Lasso needs that PATH lacked at startup, and what needs it. */
+/** A tool Laisso needs that PATH lacked at startup, and what needs it. */
 export interface MissingTool {
   name: string;
   reasons: string[];

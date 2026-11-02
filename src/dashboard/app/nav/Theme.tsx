@@ -4,7 +4,7 @@ import { Monitor, Moon, Sun, type LucideIcon } from "lucide-react";
 export type Theme = "system" | "light" | "dark";
 
 /** Where this browser keeps the chosen theme; index.html reads it too, so the page draws in it from the start. */
-export const THEME_KEY = "lasso.theme";
+export const THEME_KEY = "laisso.theme";
 
 const MODES: Record<Theme, { label: string; icon: LucideIcon; next: Theme }> = {
   system: { label: "System", icon: Monitor, next: "light" },

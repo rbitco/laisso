@@ -17,7 +17,7 @@ const request: RunRequest = {
   prompt: "Do the work described by the Ticket.",
   skills: ["implement", "tdd"],
   context: { id: "01J8ZK3M9Q4R5S6T7V8W9X0Y1Z", reference: "APP-12", repo: "app", branch: "APP-12-add-dark-mode", title: "Add dark mode", body: "A toggle in settings.", prs: [] },
-  cwd: "/tmp/lasso-fixture/worktree",
+  cwd: "/tmp/laisso-fixture/worktree",
   mode: "headless",
   sessionId: "3e728ae2-8d99-42f3-a7ba-6066de05d169",
   limits: { wallTimeMs: 60_000, remainingSpendUsd: 4.5 },
@@ -27,28 +27,28 @@ const request: RunRequest = {
 describe("codex adapter command", () => {
   it("builds a headless codex exec with approvals never, workspace-write with network, JSON, the worktree, and skills as link-form mentions", () => {
     const cmd = codexAdapter.command(request);
-    expect(cmd.argv.slice(0, 11)).toEqual(["codex", "-a", "never", "exec", "--json", "-C", "/tmp/lasso-fixture/worktree", "-s", "workspace-write", "-c", "sandbox_workspace_write.network_access=true"]);
+    expect(cmd.argv.slice(0, 11)).toEqual(["codex", "-a", "never", "exec", "--json", "-C", "/tmp/laisso-fixture/worktree", "-s", "workspace-write", "-c", "sandbox_workspace_write.network_access=true"]);
     const skills = path.join(homedir(), ".agents", "skills");
     expect(cmd.argv.at(-1)).toBe(
       [
         `[$implement](${skills}/implement/SKILL.md)`,
         `[$tdd](${skills}/tdd/SKILL.md)`,
         "",
-        "You are working Lasso Ticket 01J8ZK3M9Q4R5S6T7V8W9X0Y1Z (APP-12) in repo app on branch APP-12-add-dark-mode, Stage implement.",
+        "You are working Laisso Ticket 01J8ZK3M9Q4R5S6T7V8W9X0Y1Z (APP-12) in repo app on branch APP-12-add-dark-mode, Stage implement.",
         "Title: Add dark mode",
         "",
         "A toggle in settings.",
         "",
-        "If you open a PR on a branch other than APP-12-add-dark-mode, run `lasso pr link <url>` so Lasso tracks it as this Ticket's; for a PR you only read, add --referenced. `lasso pr list --json` shows the Ticket's PRs as they are now.",
+        "If you open a PR on a branch other than APP-12-add-dark-mode, run `laisso pr link <url>` so Laisso tracks it as this Ticket's; for a PR you only read, add --referenced. `laisso pr list --json` shows the Ticket's PRs as they are now.",
         "",
         "Do the work described by the Ticket.",
       ].join("\n"),
     );
     expect(cmd.argv).toHaveLength(12);
     expect(cmd.cwd).toBe(request.cwd);
-    expect(cmd.env.LASSO_SESSION).toBe(request.sessionId);
+    expect(cmd.env.LAISSO_SESSION).toBe(request.sessionId);
     expect(cmd.stdin).toBeUndefined();
-    // Codex has no budget flag: Lasso enforces every limit itself.
+    // Codex has no budget flag: Laisso enforces every limit itself.
     expect(codexAdapter.honours).toEqual([]);
     expect(codexAdapter.sessionIds).toBe("runner");
   });
@@ -78,18 +78,18 @@ describe("codex adapter command", () => {
     expect(cmd.argv.slice(0, 11)).toEqual(["codex", "-a", "never", "-s", "workspace-write", "-c", "sandbox_workspace_write.network_access=true", "exec", "resume", "--json", "01a0e17d-746e-7123-93ce-e3f3b05e8375"]);
     expect(cmd.argv).not.toContain("-C");
     expect(cmd.cwd).toBe(request.cwd);
-    expect(cmd.env.LASSO_SESSION).toBe(request.sessionId);
+    expect(cmd.env.LAISSO_SESSION).toBe(request.sessionId);
   });
 
   it("builds an interactive terminal command in the worktree with the prompt, and resumes by thread id", () => {
-    const opened = codexAdapter.command({ ...request, mode: "terminal", name: "Lasso: APP-12 grill", skills: ["grilling"], prompt: null });
+    const opened = codexAdapter.command({ ...request, mode: "terminal", name: "Laisso: APP-12 grill", skills: ["grilling"], prompt: null });
     expect(opened.argv.slice(0, 3)).toEqual(["codex", "-s", "workspace-write"]);
     expect(opened.argv.at(-1)!.startsWith("[$grilling](")).toBe(true);
     expect(opened.argv).not.toContain("exec");
-    const resumed = codexAdapter.command({ ...request, mode: "terminal", resume: true, runnerSessionId: "01a0e17d-746e-7123-93ce-e3f3b05e8375", name: "Lasso: APP-12 grill" });
+    const resumed = codexAdapter.command({ ...request, mode: "terminal", resume: true, runnerSessionId: "01a0e17d-746e-7123-93ce-e3f3b05e8375", name: "Laisso: APP-12 grill" });
     expect(resumed.argv).toEqual(["codex", "resume", "01a0e17d-746e-7123-93ce-e3f3b05e8375", "-s", "workspace-write", "-c", "sandbox_workspace_write.network_access=true"]);
-    // LASSO_SESSION always names Lasso's own row, whatever Codex calls the thread.
-    expect(resumed.env.LASSO_SESSION).toBe(request.sessionId);
+    // LAISSO_SESSION always names Laisso's own row, whatever Codex calls the thread.
+    expect(resumed.env.LAISSO_SESSION).toBe(request.sessionId);
   });
 
   it("has no transcript path to promise before the thread exists", () => {
@@ -114,11 +114,11 @@ describe("codex adapter effort and permission", () => {
     ["codex", ...permission, ...extra, "<prompt>"],
     ["codex", "resume", "t", ...permission, ...extra],
   ];
-  /** Workspace-write turns the network off; Lasso turns it on so `lasso route` reaches localhost. */
+  /** Workspace-write turns the network off; Laisso turns it on so `laisso route` reaches localhost. */
   const network = ["-c", "sandbox_workspace_write.network_access=true"];
   const baseline = ["-s", "workspace-write", ...network];
   const never = ["-a", "never"];
-  /** Codex refuses a single-value flag given twice in one scope; Lasso never gives one twice at all. */
+  /** Codex refuses a single-value flag given twice in one scope; Laisso never gives one twice at all. */
   const repeats = (argv: string[]) => ["-m", "-s", "-a", "--approve-for-me", "--dangerously-bypass-approvals-and-sandbox"].filter((flag) => argv.filter((a) => a === flag).length > 1);
 
   it("keeps today's baseline in every form with effort and permission unset", () => {

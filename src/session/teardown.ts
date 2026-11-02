@@ -1,7 +1,7 @@
 import { existsSync, rmSync } from "node:fs";
 import path from "node:path";
 import type { Config } from "../server/config.ts";
-import type { LassoHome } from "../server/home.ts";
+import type { LaissoHome } from "../server/home.ts";
 import type { Logger } from "../server/log.ts";
 import type { TickChange } from "../server/tick.ts";
 import { TicketWork } from "../server/ticket-work.ts";
@@ -11,11 +11,11 @@ import { expandHome } from "../intake/intake.ts";
 import type { PullRequests } from "../review/github.ts";
 import type { PrLinks } from "../store/links.ts";
 
-export const WIP_MESSAGE = "wip: abandoned in Lasso";
+export const WIP_MESSAGE = "wip: abandoned in Laisso";
 
 export interface TeardownDeps {
   config: Config;
-  home: LassoHome;
+  home: LaissoHome;
   tickets: Tickets;
   links: PrLinks;
   log: Logger;
@@ -27,7 +27,7 @@ export interface TeardownDeps {
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
- * A Ticket's end of life (ADR 0007): what only Lasso needed goes, what a
+ * A Ticket's end of life (ADR 0007): what only Laisso needed goes, what a
  * human might still want stays. Done removes the worktree and the local
  * branch, since the PR is merged. Abandon first commits and pushes whatever
  * the Runner left, keeps the branch as the salvage point, and closes the
@@ -125,13 +125,13 @@ export class Teardown {
 
   /**
    * Close one PR if it is open right now, with the marked comment naming its own head branch as kept (ADR 0007).
-   * A null URL means the PR on the Ticket's branch, which a human's unlink keeps Lasso's hands off.
+   * A null URL means the PR on the Ticket's branch, which a human's unlink keeps Laisso's hands off.
    */
   private async closePr(ticket: TicketRow, url: string | null, head: string): Promise<void> {
     await this.step(ticket, "pr", async () => {
       const ref = await this.deps.prs.open({ branch: ticket.branch, worktree: ticket.worktree, pr: url });
       if (!ref || (!url && this.deps.links.unlinked(ticket.id, ref.url))) return;
-      await this.deps.prs.close(ref, `Abandoned in Lasso. The branch \`${head}\` is kept.\n\n<!-- lasso:${ticket.id}:abandoned -->`);
+      await this.deps.prs.close(ref, `Abandoned in Laisso. The branch \`${head}\` is kept.\n\n<!-- laisso:${ticket.id}:abandoned -->`);
       this.deps.log.info("ticket.pr_closed", { ticket: ticket.id, pr: ref.url });
     });
   }

@@ -5,7 +5,7 @@ import { streamSSE } from "hono/streaming";
 import type { Changes, Change } from "../server/changes.ts";
 import { ConfigError, patchConfigText, writeProfileText, deleteProfileText, repoDefaultText, profileNamers, applyLive, RESTART_KEYS, parseConfig, currentConfig, prListsBlock, prListsText, type Config } from "../server/config.ts";
 import type { PrLists } from "../prs/lists.ts";
-import type { LassoHome } from "../server/home.ts";
+import type { LaissoHome } from "../server/home.ts";
 import type { Tick } from "../server/tick.ts";
 import { parseName, ticketLabel, type Tickets, type TicketRow } from "../store/tickets.ts";
 import type { PipelineVersions } from "../store/versions.ts";
@@ -35,7 +35,7 @@ import { noticeText, type VersionNotice } from "../version-notice.ts";
 
 export interface AppDeps {
   config: Config;
-  home: LassoHome;
+  home: LaissoHome;
   tick: Tick;
   tickets: Tickets;
   versions: PipelineVersions;
@@ -101,10 +101,10 @@ export function createApp(deps: AppDeps): Hono {
     return { ...views, queuePosition: (ticket) => positions.get(ticket.id) ?? null, profiles: currentConfig(deps.home, deps.config) };
   };
 
-  // Every response carries the version, so a client can tell Lasso from a stranger on the port.
+  // Every response carries the version, so a client can tell Laisso from a stranger on the port.
   app.use("*", async (c, next) => {
     await next();
-    c.header("x-lasso-version", deps.version);
+    c.header("x-laisso-version", deps.version);
   });
 
   app.onError((error, c) => {
@@ -278,9 +278,9 @@ export function createApp(deps: AppDeps): Hono {
     return c.json(ticketDetail(deps.overrides.clear(ticket, c.req.param("stage")), viewContext()));
   });
 
-  // A Ticket's PR links (LASSO-164), what `lasso pr` drives. A PR is given as a URL, owner/repo#N, #N or N; the bare
+  // A Ticket's PR links (LASSO-164), what `laisso pr` drives. A PR is given as a URL, owner/repo#N, #N or N; the bare
   // forms are in the Ticket's repo. A link or unlink on an active Ticket kicks a Tick so the PR is polled at once;
-  // on a done Ticket it is only recorded. A request carrying a Session id (x-lasso-session) links as the agent.
+  // on a done Ticket it is only recorded. A request carrying a Session id (x-laisso-session) links as the agent.
   const prsRoute = "/api/tickets/:id/prs";
   app.get(prsRoute, (c) => {
     const ticket = deps.tickets.find(c.req.param("id"));
@@ -302,7 +302,7 @@ export function createApp(deps: AppDeps): Hono {
       if (error instanceof PullRequestError) return c.json({ error: error.message }, 400);
       throw error;
     }
-    const linked = deps.links.link(ticket, found.url, role, c.req.header("x-lasso-session") ? "agent" : "human");
+    const linked = deps.links.link(ticket, found.url, role, c.req.header("x-laisso-session") ? "agent" : "human");
     if ("refused" in linked) return c.json({ error: linked.refused }, 409);
     const link = deps.links.update(ticket.id, found.url, { title: found.title, state: found.state, head: found.head, base: found.base, author: found.author })!;
     if (ticket.state === "active") deps.tick.kick("pr-link");
@@ -326,12 +326,12 @@ export function createApp(deps: AppDeps): Hono {
     return c.json(prView(link));
   });
 
-  // `lasso route` (LASSO-190): the Session or check run (LASSO-192) the x-lasso-session header names picks the Route its Stage leaves by,
+  // `laisso route` (LASSO-190): the Session or check run (LASSO-192) the x-laisso-session header names picks the Route its Stage leaves by,
   // over any it picked before; { route: null } drops the pick. The name is checked against the Stage's Routes now,
   // so the caller can fix it at once; the pick is taken, or not, when the run ends.
   app.post("/api/route", async (c) => {
-    const session = c.req.header("x-lasso-session");
-    if (!session) return c.json({ error: "lasso route runs inside a Session, where $LASSO_SESSION names it" }, 400);
+    const session = c.req.header("x-laisso-session");
+    if (!session) return c.json({ error: "laisso route runs inside a Session, where $LAISSO_SESSION names it" }, 400);
     const body = ((await c.req.json().catch(() => null)) ?? {}) as { route?: unknown; note?: unknown };
     if (body.route !== null && (typeof body.route !== "string" || !body.route)) return c.json({ error: "route must name a Route, or be null to drop the pick" }, 400);
     if (body.note !== undefined && body.note !== null && typeof body.note !== "string") return c.json({ error: "note must be text" }, 400);
@@ -362,7 +362,7 @@ export function createApp(deps: AppDeps): Hono {
     return c.json(sessionView(await deps.runs.stop(found.session)));
   });
 
-  // Pipeline files, edited in place (spec: Lasso home and configuration). Nothing is written that does not parse.
+  // Pipeline files, edited in place (spec: Laisso home and configuration). Nothing is written that does not parse.
   const pipelines = new PipelineFiles(deps.home.pipelinesDir, () => currentConfig(deps.home, deps.config));
   app.get("/api/pipelines", (c) => c.json(pipelines.list().map(pipelineListing)));
   app.get("/api/pipelines/:name", (c) => {

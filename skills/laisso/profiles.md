@@ -12,9 +12,9 @@ Runner, model, effort and permission, defined in config.yaml under
 | `runner` | required: `claude`, `codex` or `pi` |
 | `model` | non-empty text, passed to the Runner's model flag as written (`--model` for Claude and Pi, `-m` for Codex). Unset keeps the Runner's default. |
 | `effort` | `low`, `medium`, `high`, `xhigh` or `max`. Claude `--effort`, Codex `-c model_reasoning_effort=<level>`, Pi `--thinking`. Unset keeps the Runner's default. |
-| `permission` | `auto`, `edits` or `full`. Unset keeps Lasso's baseline per mode (below). Pi has no permission layer and ignores it. |
-| `args` | list of extra arguments, put after every flag Lasso writes |
-| `skills_dir` | Codex only: where Stage skills live, default `~/.agents/skills`. Codex silently ignores a skill outside its skill roots, so set this when the skills live elsewhere. Lasso does not expand `~` here: write an absolute path. |
+| `permission` | `auto`, `edits` or `full`. Unset keeps Laisso's baseline per mode (below). Pi has no permission layer and ignores it. |
+| `args` | list of extra arguments, put after every flag Laisso writes |
+| `skills_dir` | Codex only: where Stage skills live, default `~/.agents/skills`. Codex silently ignores a skill outside its skill roots, so set this when the skills live elsewhere. Laisso does not expand `~` here: write an absolute path. |
 | `headless` / `human` | optional blocks with `model`, `effort`, `permission`, `args` for one mode only |
 
 Any other field, in a profile or a block, is an error. Profile names are
@@ -32,8 +32,8 @@ How `permission` maps, per Runner:
 
 Codex's workspace-write sandbox (every row but `full`) also gets
 `-c sandbox_workspace_write.network_access=true`: without it a Codex
-Session cannot reach Lasso on localhost, so `lasso route` and
-`lasso pr link` fail.
+Session cannot reach Laisso on localhost, so `laisso route` and
+`laisso pr link` fail.
 
 Headless Claude Sessions always run with permission prompts off, whatever
 the permission, since nobody is there to answer.
@@ -44,7 +44,7 @@ A human Stage's Sessions use the `human:` block; every other Session uses
 `headless:`. A block's `model`, `effort` and `permission` replace the shared
 ones; its `args` follow the shared `args`.
 
-```yaml lasso-config
+```yaml laisso-config
 profiles:
   codex-high:
     runner: codex
@@ -83,7 +83,7 @@ A profile under `repos.<name>.profiles:` named like a global one replaces it
 **whole** for that repo's Tickets: no field is merged from the global one.
 A repo may also have profiles no other repo sees.
 
-```yaml lasso-config
+```yaml laisso-config
 repos:
   web:
     tracker: github
@@ -107,5 +107,5 @@ claude-opus`. An install from before profiles was migrated to runner-only
 `profiles:` entirely brings the three shipped ones back; to have none, write
 `profiles: {}`.
 
-`lasso doctor` lists each Runner some profile in use needs and whether it
+`laisso doctor` lists each Runner some profile in use needs and whether it
 is on PATH and logged in (Claude only; Codex and Pi have no status check).

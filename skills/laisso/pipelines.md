@@ -1,8 +1,8 @@
 # Pipelines
 
-A Pipeline is one YAML file in `<Lasso home>/pipelines/`. Its name is the
+A Pipeline is one YAML file in `<Laisso home>/pipelines/`. Its name is the
 file name without `.yaml` (or `.yml`): lowercase letters, digits and
-hyphens, starting with a letter or digit. Lasso writes `default.yaml` and
+hyphens, starting with a letter or digit. Laisso writes `default.yaml` and
 `pr-review.yaml` on first start and never touches them again; edit them or
 add others freely.
 
@@ -59,18 +59,18 @@ lowercase letters, digits and hyphens, unique in the Pipeline.
 | `repeat` | none | only `feedback`: the Review loop. Needs an `artifact` as its end condition: `pr-merged`, or a [check Action](#check-actions). |
 | `budget` | inherit | `rounds`, `attempts` (whole numbers, 0 or more), `wallTime` (duration). `spend` belongs on the Pipeline. |
 | `routes` | none | ways out to other Stages; see [Routes](#routes) |
-| `agentRoutes` | `false` | `true` lets the Stage's agent choose one of its `routes` with `lasso route`; needs `routes`. See [Routes](#routes). |
+| `agentRoutes` | `false` | `true` lets the Stage's agent choose one of its `routes` with `laisso route`; needs `routes`. See [Routes](#routes). |
 
 Any other field is an error; `runner` and `runnerOptions` are the old forms
 and name the fix.
 
-Every Runner Session's prompt starts with a preamble Lasso writes: the
+Every Runner Session's prompt starts with a preamble Laisso writes: the
 Ticket id and reference, repo, branch, Stage, the issue title, and its body
 (or the prompt, for a prompt Ticket), then the Ticket's linked PRs and a
-line telling the Runner to `lasso pr link` any PR it opens off the Ticket's
-branch (see [prs.md](prs.md)). The Session also gets `LASSO_TICKET`,
-`LASSO_REFERENCE`, `LASSO_REPO`, `LASSO_BRANCH`, `LASSO_STAGE`,
-`LASSO_SESSION`, and in a Round `LASSO_ROUND` and `LASSO_MARKER`. So a
+line telling the Runner to `laisso pr link` any PR it opens off the Ticket's
+branch (see [prs.md](prs.md)). The Session also gets `LAISSO_TICKET`,
+`LAISSO_REFERENCE`, `LAISSO_REPO`, `LAISSO_BRANCH`, `LAISSO_STAGE`,
+`LAISSO_SESSION`, and in a Round `LAISSO_ROUND` and `LAISSO_MARKER`. So a
 prompt need not restate the Ticket.
 
 A headless Stage is done when its Session's Outcome is succeeded and its
@@ -82,7 +82,7 @@ overridden.
 Take over in terminal stops a headless Stage's running Session (or clears
 its Flag) and re-enters that Runner session in a terminal; from then the
 Stage is worked as a human Stage. Codex can be taken over only once it has
-reported its thread id. Hand back gives a taken-over Stage back to Lasso:
+reported its thread id. Hand back gives a taken-over Stage back to Laisso:
 a Review Stage returns to Rounds (Feedback that arrived meanwhile opens the
 next one), and any other Stage runs headless again on the same Runner
 session. A Review Stage taken over and never handed back runs no Rounds.
@@ -90,7 +90,7 @@ session. A Review Stage taken over and never handed back runs no Rounds.
 For an approval step, let one Stage draft and stop for Start, then a second
 act on the draft:
 
-```yaml lasso-pipeline
+```yaml laisso-pipeline
 stages:
   - name: plan
     prompt: Draft a plan in PLAN.md. Do not change any code.
@@ -101,7 +101,7 @@ stages:
 ```
 
 While the Ticket holds after `plan`, **Open plan in terminal** re-enters the
-draft's session to read or revise it (Lasso keeps no Session row for that
+draft's session to read or revise it (Laisso keeps no Session row for that
 window), and **Start implement** is the approval.
 
 **Skip** passes over a Stage without running it: the current Stage while it
@@ -109,16 +109,16 @@ has not started (no Session of it yet), a held Ticket's next Stage, a human
 or taken-over Stage, or a Flagged one. The Ticket advances as if the Stage
 had finished, so a held Ticket after `plan` with Skip pressed goes on to the
 Stage after `implement`. The Stage shows as skipped on the Ticket page and
-in `lasso status`. A Stage with a Session running or already run cannot be
+in `laisso status`. A Stage with a Session running or already run cannot be
 skipped this way; Flag it or let it finish.
 
 ### Repeating Stage (`repeat: feedback`)
 
-Each Tick Lasso polls every Owned PR of the Ticket with `gh`; Referenced
+Each Tick Laisso polls every Owned PR of the Ticket with `gh`; Referenced
 PRs are never polled. New Feedback (failed checks, review threads,
 comments, a changes-requested verdict) on any open Owned PR starts a
 Round: one Session whose prompt lists what to address, grouped by PR, and the marker
-(`<!-- lasso:<ticket>:<stage>:round-<n> -->`) the Runner must end each PR
+(`<!-- laisso:<ticket>:<stage>:round-<n> -->`) the Runner must end each PR
 comment with. Comments by the logins under `review.ignore_authors`, or by
 the `gh` user with `review.ignore_self`, are not Feedback (see
 [config.md](config.md#review)). A thread counts as addressed once it has a marked reply and
@@ -136,7 +136,7 @@ Arriving by a Route or a send starts a Round at once; see
 | `action` | required: an Action name from config.yaml |
 | `with` | mapping of param to a single value; must supply exactly the Action's `params` |
 | `name` | optional; defaults to the Action's last dotted part plus the param values, hyphenated: `tracker.transition` with `status: In Progress` is `transition-in-progress` |
-| `routes` | optional; ways out to other Stages, which the Action picks with `lasso route`; see [Routes](#routes) |
+| `routes` | optional; ways out to other Stages, which the Action picks with `laisso route`; see [Routes](#routes) |
 
 Nothing else is allowed (`status:` is the old form of `with: { status: ... }`).
 An action Stage always advances on success. Parsing alone cannot see
@@ -144,7 +144,7 @@ config.yaml: Intake and saving from the dashboard also check that the
 Action exists for the repo and the params match, and that every profile
 named exists.
 
-```yaml lasso-pipeline
+```yaml laisso-pipeline
 stages:
   - name: implement
     skills: [implement]
@@ -166,7 +166,7 @@ Ticket arrives.
 | --- | --- |
 | `name` | required |
 | `wait` | required: a check Action, as `action <name>` or `{ action: <name>, with: { ... } }` |
-| `routes` | optional; the check may pick one with `lasso route` |
+| `routes` | optional; the check may pick one with `laisso route` |
 | `budget` | optional; only `wallTime`: Flag `budget.wall_time` when not met within it. No limit by default |
 | `advance` | `true` (default); `false` holds once met, as for a Runner Stage, including before a Route the check picked (Start takes it, Skip declines it) |
 
@@ -187,7 +187,7 @@ has no Mark done. Send to Stage works to and from a wait Stage; a check
 still running when the Ticket is sent keeps its result on the Visit it ran
 for.
 
-```yaml lasso-pipeline
+```yaml laisso-pipeline
 stages:
   - name: implement
     skills: [implement]
@@ -222,11 +222,11 @@ Saving from the dashboard, loading the file, and Intake all refuse a
 Pipeline whose Route breaks a rule, naming the Stage and Route.
 
 An action Stage's command picks a Route by running
-`lasso route <name> [--note "..."]`, and drops its pick with
-`lasso route --clear`; the last call in the run wins. The pick is taken
+`laisso route <name> [--note "..."]`, and drops its pick with
+`laisso route --clear`; the last call in the run wins. The pick is taken
 only when the command exits 0. A non-zero exit Flags the Ticket
 (`outcome.failed`) and names the Route not taken. With no pick the Ticket
-walks on to the next Stage as before. `lasso route` refuses a name the
+walks on to the next Stage as before. `laisso route` refuses a name the
 Stage does not declare, and works only in an action Stage's Session, a
 check run, or a Runner Stage's Session when the Stage says
 `agentRoutes: true`.
@@ -234,7 +234,7 @@ check run, or a Runner Stage's Session when the Stage says
 With `agentRoutes: true` on a Runner Stage (headless or `human: true`), the
 agent picks the same way, from a headless or terminal Session. Its preamble
 lists each Route as `name -> target`, with its count against its Budget
-and its `when:` text, and tells it how to call `lasso route` and that with
+and its `when:` text, and tells it how to call `laisso route` and that with
 no call the Ticket continues to the next Stage. A Route at its limit stays
 listed, marked "choosing it Flags the Ticket for a human", and the call
 accepts it. The pick is taken only when the Session ends as one that would
@@ -250,7 +250,7 @@ over). Without the opt-in, the agent's call is refused, while the Stage's
 check may still pick.
 
 A [check Action](#check-actions) can pick a Route the same way. Each check
-run gets its own `LASSO_SESSION`, and its pick counts only when that run is
+run gets its own `LAISSO_SESSION`, and its pick counts only when that run is
 met (exit 0): a not-met or broken run's pick is dropped, and a call that
 arrives after its run has ended is refused. A met run without a call walks
 forward. Without `--note` the note is the check's last line of output. When
@@ -276,7 +276,7 @@ source Stage, naming the Route. Extend with a higher `routes` limit takes
 the Route; Mark done and Skip walk forward instead; Retry runs the Stage
 again.
 
-```yaml lasso-pipeline
+```yaml laisso-pipeline
 stages:
   - name: implement
     prompt: Implement the issue. Commit to the current branch.
@@ -291,11 +291,11 @@ stages:
 ```
 
 With an Action `ci` whose command is
-`pnpm test || { lasso route fix --note "pnpm test failed"; exit 0; }`, a
+`pnpm test || { laisso route fix --note "pnpm test failed"; exit 0; }`, a
 failing test run sends the Ticket back to `implement` with that note, and a
 passing one walks on to `ship`.
 
-```yaml lasso-pipeline
+```yaml laisso-pipeline
 stages:
   - name: review-pr
     skills: [code-review]
@@ -312,7 +312,7 @@ stages:
     prompt: Say the review is finished.
 ```
 
-Here the reviewing agent runs `lasso route approved` when nothing is left
+Here the reviewing agent runs `laisso route approved` when nothing is left
 to raise, and the Ticket skips `publish`; otherwise it walks on to it.
 
 ### Holding before a Route
@@ -352,7 +352,7 @@ a terminal too:
 A Route chosen here is the human's: it never counts against the Route's
 `budget` and is never refused for one, but a hold still applies: a source
 Stage or Route with `advance: false` holds before it, and Start takes it.
-With `agentRoutes: true`, the terminal agent's last `lasso route` call
+With `agentRoutes: true`, the terminal agent's last `laisso route` call
 pre-selects its entry with its note. Through the API, `POST
 /api/tickets/<id>/done` takes `{}` (or `{ "override": true }`) to walk
 forward, or `{ "route": "...", "note": "..." }` to take a Route.
@@ -365,7 +365,7 @@ terminal opened there starts on the prompt with the Route's text and note.
 
 A [repeating Stage](#repeating-stage-repeat-feedback) with `agentRoutes: true`
 lets each Round's agent pick a Route. A Round that succeeds with a pick
-leaves at once: Lasso records what it addressed, skips the check that every
+leaves at once: Laisso records what it addressed, skips the check that every
 item was addressed, and takes the Route without the Stage's artifact being
 met. Whatever it left standing stays on the PR, and the first Round of the
 Stage's next Visit carries it.
@@ -422,7 +422,7 @@ it began) and `arcs`.
 
 The `pr-*` Artifacts never count Referenced PRs. When one is not met, its message names each Owned PR that falls short, such as `nobody has reviewed PR #12, #15` or `PR #12, #15 not merged`.
 | `file <path>` | `<path>` exists in the worktree; relative, no `..` |
-| `tracker-spec`, `tracker-comment` | accepted, but **this Lasso cannot check them yet**: a headless Stage declaring one is Flagged `artifact.missing` ("cannot be checked yet") every time, and Mark done on a human Stage always warns. Leave them off headless Stages. |
+| `tracker-spec`, `tracker-comment` | accepted, but **this Laisso cannot check them yet**: a headless Stage declaring one is Flagged `artifact.missing` ("cannot be checked yet") every time, and Mark done on a human Stage always warns. Leave them off headless Stages. |
 
 | `action <name>`, or `{ action: <name>, with: {...} }` | the [check Action](#check-actions) `<name>` from config.yaml exits 0 |
 
@@ -432,7 +432,7 @@ Any other artifact is an error. A Stage with a `pr-*` artifact or
 ### Check Actions
 
 A Stage's artifact may name an Action from config.yaml (the repo's own
-wins, as for action Stages). Lasso runs it in the Ticket's worktree, with
+wins, as for action Stages). Laisso runs it in the Ticket's worktree, with
 the Action's `timeout`, wherever it would check an artifact: after a
 successful headless Session, and on Mark done. The exit code is the verdict:
 
@@ -444,14 +444,14 @@ successful headless Session, and on Mark done. The exit code is the verdict:
 
 The last line of output is the detail. Params go under `with:` on the
 artifact, and must be exactly the Action's `params`, as for an action
-Stage; the shorthand `action <name>` is for an Action with none. Lasso keeps
+Stage; the shorthand `action <name>` is for an Action with none. Laisso keeps
 only the latest result per Visit (no Session row), shown on the Ticket page.
-A met check may also send the Ticket along a Route with `lasso route`; see
+A met check may also send the Ticket along a Route with `laisso route`; see
 [Routes](#routes).
 
 On a repeating Stage, a check Action is the end condition in place of the
 merge. It runs after each Round, and on each poll while the Ticket waits
-(so also on `lasso check` and Check now), before any new Round starts:
+(so also on `laisso check` and Check now), before any new Round starts:
 
 - met: the Stage finishes, whatever Feedback is still standing;
 - not met, PR open: Rounds go on as Feedback arrives;
@@ -462,7 +462,7 @@ It does not run while the Ticket is Flagged, before the branch has a PR, or
 while another check for the Ticket is running. A PR closed unmerged still
 Flags `review.pr_closed`.
 
-```yaml lasso-pipeline
+```yaml laisso-pipeline
 stages:
   - name: implement
     prompt: Implement the issue, push, and open a PR.
@@ -477,12 +477,12 @@ stages:
 
 with, in config.yaml:
 
-```yaml lasso-config
+```yaml laisso-config
 actions:
   ci-green:
     params: [workflow]
     timeout: 2m
-    run: gh run list --branch "$LASSO_BRANCH" --workflow "$LASSO_WORKFLOW" --limit 1 --json conclusion --jq '.[0].conclusion' | grep -qx success
+    run: gh run list --branch "$LAISSO_BRANCH" --workflow "$LAISSO_WORKFLOW" --limit 1 --json conclusion --jq '.[0].conclusion' | grep -qx success
 ```
 
 ## Budget
@@ -491,7 +491,7 @@ The most specific value wins per dimension: the Ticket's own (set by
 Extend), then the Stage's (`rounds`, `attempts`, `wallTime`) or the
 Pipeline's (`spend`), then config.yaml's `budget:`.
 
-```yaml lasso-pipeline
+```yaml laisso-pipeline
 profile: claude-opus
 budget:
   spend: 40
@@ -507,7 +507,7 @@ stages:
 
 ## The default Pipeline
 
-`default.yaml` as Lasso writes it runs grill (human, holds before the next
+`default.yaml` as Laisso writes it runs grill (human, holds before the next
 Stage), a `tracker.transition` to `In Progress`, plan, implement, document
 (opens the PR), code-review, a transition to `In Review`, review (the
 repeating Stage), and a transition to `Done`. Its grill and plan Stages
@@ -520,7 +520,7 @@ Runner.
 ## The pr-review Pipeline
 
 `pr-review.yaml` reviews someone else's PR. It runs only when chosen, as in
-`lasso add "<what to look for>" --pr owner/repo#N --pipeline pr-review`:
+`laisso add "<what to look for>" --pr owner/repo#N --pipeline pr-review`:
 `--pr` (repeatable) links each PR as Referenced, and without `--repo` the
 Ticket's repo is the configured one whose origin is the first PR's repo. The
 Ticket's branch starts at the head of the first Referenced PR in its repo.

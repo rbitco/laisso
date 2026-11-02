@@ -11,7 +11,7 @@ export interface StatusOptions {
 export async function status(opts: StatusOptions): Promise<number> {
   const client = createClient(opts.portFlag);
   try {
-    // Text output leads with which Lasso answered, so an installed Lasso and a dev clone's are never confused, then any version notice.
+    // Text output leads with which Laisso answered, so an installed Laisso and a dev clone's are never confused, then any version notice.
     let which = "";
     if (!opts.json) {
       const notice = await versionNotice(client);
@@ -35,7 +35,7 @@ export async function status(opts: StatusOptions): Promise<number> {
   }
 }
 
-/** The version notice line, if Lasso has one; a Lasso too old to have /api/version has nothing to say. */
+/** The version notice line, if Laisso has one; a Laisso too old to have /api/version has nothing to say. */
 async function versionNotice(client: Client): Promise<string | null> {
   try {
     return (await client.get<VersionView>("/api/version")).text;
@@ -45,7 +45,7 @@ async function versionNotice(client: Client): Promise<string | null> {
 }
 
 function renderWhich(h: Health): string {
-  return `lasso ${h.version}  home ${h.home}`;
+  return `laisso ${h.version}  home ${h.home}`;
 }
 
 function renderLedger(tickets: TicketView[]): string {

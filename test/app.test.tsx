@@ -47,7 +47,7 @@ function ticket(id: string): TicketDetail {
     stage: { name: "plan", kind: "runner", label: "plan", human: false, index: 0, total: 1, repeat: false, override: null },
     state: "active", flag: null, prs: [], display: { state: "quiet", label: "Quiet", why: "waiting" }, queue: null, triggers: [], budget: BUDGET,
     stages: [{ name: "plan", kind: "runner", label: "plan", human: false, skippedAt: null }],
-    mirrorPending: false, createdAt: ago(60), updatedAt: ago(5), url: `http://lasso/#${id}`,
+    mirrorPending: false, createdAt: ago(60), updatedAt: ago(5), url: `http://laisso/#${id}`,
     session: null, sessions: [], pipelineDrift: "same", profiles: [], send: null, markDone: null, visit: null, visits: [], arcs: [], upgrades: [],
   };
 }
@@ -69,8 +69,8 @@ const REVIEWERS: Reviewer[] = [
 /** Two PR Lists: Mine cut short at its limit of one, Review requested whole. */
 const PR_LISTS: PrListsView = {
   lists: [
-    { name: "Mine", query: "is:open author:@me", search: "is:pr is:open author:@me repo:rbitco/lasso sort:updated-desc", url: "https://github.com/pulls?q=mine", limit: 1, total: 4, fetchedAt: ago(30), fetching: false, error: null, hidden: false, rows: [{ title: "Tick grace when the laptop sleeps", repo: "rbitco/lasso", number: 101, url: "https://github.com/rbitco/lasso/pull/101", author: "matt", updatedAt: ago(45 * 60), verdict: { word: "Checks failing", reason: "a required check failed", tone: "crit" }, checks: { passed: 7, failing: 2 }, reviewers: REVIEWERS, ticket: null, refs: [] }] },
-    { name: "Review requested", query: "is:open review-requested:@me", search: "is:pr is:open review-requested:@me repo:rbitco/lasso sort:updated-desc", url: "https://github.com/pulls?q=review", limit: 25, total: 0, fetchedAt: ago(30), fetching: false, error: null, hidden: false, rows: [] },
+    { name: "Mine", query: "is:open author:@me", search: "is:pr is:open author:@me repo:rbitco/laisso sort:updated-desc", url: "https://github.com/pulls?q=mine", limit: 1, total: 4, fetchedAt: ago(30), fetching: false, error: null, hidden: false, rows: [{ title: "Tick grace when the laptop sleeps", repo: "rbitco/laisso", number: 101, url: "https://github.com/rbitco/laisso/pull/101", author: "matt", updatedAt: ago(45 * 60), verdict: { word: "Checks failing", reason: "a required check failed", tone: "crit" }, checks: { passed: 7, failing: 2 }, reviewers: REVIEWERS, ticket: null, refs: [] }] },
+    { name: "Review requested", query: "is:open review-requested:@me", search: "is:pr is:open review-requested:@me repo:rbitco/laisso sort:updated-desc", url: "https://github.com/pulls?q=review", limit: 25, total: 0, fetchedAt: ago(30), fetching: false, error: null, hidden: false, rows: [] },
   ],
   layout: "stacked",
   pausedUntil: null,
@@ -85,8 +85,8 @@ const freshTick = (): TickStatus => ({ tickSeconds: 30, lastTick: ago(10), nextT
 
 type Sent = { method: string; route: string; body: unknown };
 
-/** A stand-in for Lasso's /api: Tickets, one Pipeline and its Version 2, config, the Tick, the version notice, and intake; every request it was sent. */
-function fakeLasso() {
+/** A stand-in for Laisso's /api: Tickets, one Pipeline and its Version 2, config, the Tick, the version notice, and intake; every request it was sent. */
+function fakeLaisso() {
   const sent: Sent[] = [];
   const state = {
     tickets: [ticket("A"), ticket("B")],
@@ -117,7 +117,7 @@ function fakeLasso() {
       const t = state.tickets.find((x) => x.id === one[1]);
       return t ? json(t) : json({ error: `no Ticket matches ${one[1]}` }, 404);
     }
-    if (url === "/api/health") return json({ ok: true, pid: 1, version: state.build, home: "/Users/me/.lasso", missingTools: [] } satisfies Health);
+    if (url === "/api/health") return json({ ok: true, pid: 1, version: state.build, home: "/Users/me/.laisso", missingTools: [] } satisfies Health);
     if (url === "/api/tick") return json(state.tick);
     if (url === "/api/version") return json(state.version);
     if (url === "/api/check-now") return json({ at: ago(0), changes: state.changes } satisfies TickResult);
@@ -159,32 +159,32 @@ afterEach(() => {
 });
 
 describe("the status dot", () => {
-  it("is grey until Lasso answers, green when Ticks are on time, orange when one is overdue, and grey while unreachable", async () => {
-    const lasso = fakeLasso();
+  it("is grey until Laisso answers, green when Ticks are on time, orange when one is overdue, and grey while unreachable", async () => {
+    const laisso = fakeLaisso();
     render(<App />);
     await screen.findByText("Ticket A");
     expect(dot().className).toBe("dot tick-dot connecting");
-    expect(toggle().getAttribute("aria-label")).toBe("Lasso status: Connecting");
-    send("hello", (lasso.state.tick = freshTick()));
+    expect(toggle().getAttribute("aria-label")).toBe("Laisso status: Connecting");
+    send("hello", (laisso.state.tick = freshTick()));
     expect(dot().className).toBe("dot tick-dot healthy");
-    expect(screen.getByRole("button", { name: "Lasso status: Healthy" })).toBe(toggle());
-    send("tick", { ...lasso.state.tick, running: true });
+    expect(screen.getByRole("button", { name: "Laisso status: Healthy" })).toBe(toggle());
+    send("tick", { ...laisso.state.tick, running: true });
     expect(dot().className).toBe("dot tick-dot running");
     // The next Tick was due two minutes ago.
     send("tick", { tickSeconds: 30, lastTick: ago(150), nextTick: ago(120), running: false });
     // The running Tick's pulse is held one cycle first.
     await waitFor(() => expect(dot().className).toBe("dot tick-dot late"), { timeout: 3000 });
-    expect(toggle().getAttribute("aria-label")).toBe("Lasso status: Tick delayed");
+    expect(toggle().getAttribute("aria-label")).toBe("Laisso status: Tick delayed");
     send("error");
     expect(dot().className).toBe("dot tick-dot down");
-    expect(toggle().getAttribute("aria-label")).toBe("Lasso status: Not connected");
+    expect(toggle().getAttribute("aria-label")).toBe("Laisso status: Not connected");
   });
 
   it("opens a popover with the status in words, the Tick's timing and Check now; Escape or a click away closes it", async () => {
-    const lasso = fakeLasso();
+    const laisso = fakeLaisso();
     render(<App />);
     await screen.findByText("Ticket A");
-    send("hello", (lasso.state.tick = freshTick()));
+    send("hello", (laisso.state.tick = freshTick()));
     expect(popover()).toBeNull();
     const user = userEvent.setup();
     await user.click(toggle());
@@ -206,58 +206,58 @@ describe("the status dot", () => {
   });
 
   it("holds a fast Tick's pulse for one cycle, though the popover follows at once", async () => {
-    const lasso = fakeLasso();
+    const laisso = fakeLaisso();
     render(<App />);
-    send("hello", (lasso.state.tick = freshTick()));
+    send("hello", (laisso.state.tick = freshTick()));
     await userEvent.setup().click(toggle());
     // The Tick ran and ended between two events: a newer lastTick than a still status.
-    send("tick", { ...lasso.state.tick, lastTick: ago(0) });
+    send("tick", { ...laisso.state.tick, lastTick: ago(0) });
     expect(dot().className).toBe("dot tick-dot running");
     expect(status().textContent).toMatch(/^last tick 0s ago/);
     await waitFor(() => expect(dot().className).toBe("dot tick-dot healthy"), { timeout: 3000 });
   });
 
   it("moves its countdown each second", async () => {
-    const lasso = fakeLasso();
+    const laisso = fakeLaisso();
     render(<App />);
-    send("hello", (lasso.state.tick = freshTick()));
+    send("hello", (laisso.state.tick = freshTick()));
     await userEvent.setup().click(toggle());
     expect(status().textContent).toBe("last tick 10s ago · next in 20s");
     await waitFor(() => expect(status().textContent).toBe("last tick 11s ago · next in 19s"), { timeout: 2000 });
   });
 
-  it("reads everything again when Lasso comes back after being unreachable", async () => {
-    const lasso = fakeLasso();
+  it("reads everything again when Laisso comes back after being unreachable", async () => {
+    const laisso = fakeLaisso();
     render(<App />);
     await screen.findByText("Ticket A");
-    send("hello", (lasso.state.tick = freshTick()));
+    send("hello", (laisso.state.tick = freshTick()));
     // One read for the Ledger, one for the nav's needs-you count.
-    expect(lasso.gets("/api/tickets")).toBe(2);
+    expect(laisso.gets("/api/tickets")).toBe(2);
     send("error");
-    send("hello", (lasso.state.tick = freshTick()));
+    send("hello", (laisso.state.tick = freshTick()));
     expect(dot().className).toBe("dot tick-dot healthy");
-    await waitFor(() => expect(lasso.gets("/api/tickets")).toBe(4));
+    await waitFor(() => expect(laisso.gets("/api/tickets")).toBe(4));
   });
 });
 
 describe("the version notice", () => {
   const versionNotice = () => document.querySelector('[data-role="version-notice"]');
 
-  it("shows in the header when Lasso has one, and follows it as it changes", async () => {
-    const lasso = fakeLasso();
-    lasso.state.version = { version: "1.2.0", notice: { kind: "available", version: "1.3.0" }, text: "v1.3.0 available: npm update -g @rbitco/lasso" };
+  it("shows in the header when Laisso has one, and follows it as it changes", async () => {
+    const laisso = fakeLaisso();
+    laisso.state.version = { version: "1.2.0", notice: { kind: "available", version: "1.3.0" }, text: "v1.3.0 available: npm update -g @rbitco/laisso" };
     render(<App />);
-    expect(await screen.findByText("v1.3.0 available: npm update -g @rbitco/lasso")).toBeTruthy();
-    lasso.state.version = { version: "1.2.0", notice: { kind: "restart", version: "1.3.0" }, text: "v1.3.0 installed: restart lasso to use it" };
+    expect(await screen.findByText("v1.3.0 available: npm update -g @rbitco/laisso")).toBeTruthy();
+    laisso.state.version = { version: "1.2.0", notice: { kind: "restart", version: "1.3.0" }, text: "v1.3.0 installed: restart laisso to use it" };
     send("version");
-    expect(await screen.findByText("v1.3.0 installed: restart lasso to use it")).toBeTruthy();
-    lasso.state.version = { version: "1.3.0", notice: { kind: "none" }, text: null };
-    send("hello", (lasso.state.tick = freshTick()));
+    expect(await screen.findByText("v1.3.0 installed: restart laisso to use it")).toBeTruthy();
+    laisso.state.version = { version: "1.3.0", notice: { kind: "none" }, text: null };
+    send("hello", (laisso.state.tick = freshTick()));
     await waitFor(() => expect(versionNotice()).toBeNull());
   });
 
   it("is absent when there is nothing to say", async () => {
-    fakeLasso();
+    fakeLaisso();
     render(<App />);
     await screen.findByText("Ticket A");
     expect(versionNotice()).toBeNull();
@@ -266,36 +266,36 @@ describe("the version notice", () => {
 
 describe("the dev badge", () => {
   beforeEach(() => {
-    document.title = "Lasso";
+    document.title = "Laisso";
   });
 
   it("marks a dev build in the header and the tab title", async () => {
-    const lasso = fakeLasso();
-    lasso.state.build = "0.0.0-dev";
+    const laisso = fakeLaisso();
+    laisso.state.build = "0.0.0-dev";
     render(<App />);
     const badge = await screen.findByText("dev");
     expect(badge.closest("h1")).toBeTruthy();
     // The title is set in an effect, which may run after the badge first paints.
-    await waitFor(() => expect(document.title).toBe("(dev) Lasso"));
+    await waitFor(() => expect(document.title).toBe("(dev) Laisso"));
   });
 
   it("is absent for a release", async () => {
-    const lasso = fakeLasso();
+    const laisso = fakeLaisso();
     render(<App />);
     await screen.findByText("Ticket A");
-    await waitFor(() => expect(lasso.gets("/api/health")).toBeGreaterThan(0));
+    await waitFor(() => expect(laisso.gets("/api/health")).toBeGreaterThan(0));
     expect(document.querySelector('[data-role="dev-badge"]')).toBeNull();
-    expect(document.title).toBe("Lasso");
+    expect(document.title).toBe("Laisso");
   });
 });
 
 describe("Check now", () => {
   it("pulses the dot at once, runs a Tick, says what changed, and reads the page again", async () => {
-    const lasso = fakeLasso();
+    const laisso = fakeLaisso();
     render(<App />);
     await screen.findByText("Ticket A");
-    send("hello", (lasso.state.tick = freshTick()));
-    lasso.state.changes = [
+    send("hello", (laisso.state.tick = freshTick()));
+    laisso.state.changes = [
       { ticket: "A", summary: "APP-A: review started" },
       { ticket: "B", summary: "APP-B: PR merged" },
     ];
@@ -304,16 +304,16 @@ describe("Check now", () => {
     await user.click(screen.getByRole("button", { name: "Check now" }));
     expect(dot().className).toBe("dot tick-dot running");
     await waitFor(() => expect(notice().textContent).toBe("APP-A: review started; APP-B: PR merged"));
-    expect(lasso.sent.filter((s) => s.method === "POST").map((s) => s.route)).toEqual(["/api/check-now"]);
-    await waitFor(() => expect(lasso.gets("/api/tick")).toBe(1));
+    expect(laisso.sent.filter((s) => s.method === "POST").map((s) => s.route)).toEqual(["/api/check-now"]);
+    await waitFor(() => expect(laisso.gets("/api/tick")).toBe(1));
     // The Ledger's first read and the nav's needs-you count, then the Ledger again.
-    await waitFor(() => expect(lasso.gets("/api/tickets")).toBe(3));
+    await waitFor(() => expect(laisso.gets("/api/tickets")).toBe(3));
   });
 
   it("says nothing new when nothing changed", async () => {
-    const lasso = fakeLasso();
+    const laisso = fakeLaisso();
     render(<App />);
-    send("hello", (lasso.state.tick = freshTick()));
+    send("hello", (laisso.state.tick = freshTick()));
     const user = userEvent.setup();
     await user.click(toggle());
     await user.click(screen.getByRole("button", { name: "Check now" }));
@@ -323,15 +323,15 @@ describe("Check now", () => {
 
 describe("intake", () => {
   it("detects what was pasted, asks for the repo, re-picks the Pipeline and notes with it, and adds the Ticket on Confirm", async () => {
-    const lasso = fakeLasso();
-    lasso.state.branchExisted = true;
+    const laisso = fakeLaisso();
+    laisso.state.branchExisted = true;
     render(<App />);
     const user = userEvent.setup();
     await user.type(screen.getByRole("textbox", { name: "Intake" }), "APP-7");
     await user.click(screen.getByRole("button", { name: "Import" }));
     const confirm = section("confirm");
     await within(confirm).findByText("jira APP-7");
-    expect(lasso.sent.filter((s) => s.route === "/api/intake/detect").at(-1)).toMatchObject({ method: "POST", body: { input: "APP-7" } });
+    expect(laisso.sent.filter((s) => s.route === "/api/intake/detect").at(-1)).toMatchObject({ method: "POST", body: { input: "APP-7" } });
     expect(within(confirm).getByText("Fix the login page")).toBeTruthy();
     expect(within(confirm).getByText("pick a repo to see the branch")).toBeTruthy();
     const repos = within(within(confirm).getByRole("radiogroup", { name: "Repo" })).getAllByRole("radio") as HTMLInputElement[];
@@ -347,21 +347,21 @@ describe("intake", () => {
     await user.click(repos[1]!);
     expect(chosen(confirm, "Pipeline")).toBe("frontend");
     await within(confirm).findByText("branch app-7 on web");
-    expect(lasso.sent.filter((s) => s.route === "/api/intake/detect").at(-1)).toMatchObject({ body: { input: "APP-7", repo: "web" } });
+    expect(laisso.sent.filter((s) => s.route === "/api/intake/detect").at(-1)).toMatchObject({ body: { input: "APP-7", repo: "web" } });
 
     const name = within(confirm).getByRole("textbox", { name: "Name" }) as HTMLInputElement;
     expect(name.placeholder).toBe("optional; shown in place of APP-7");
     await user.type(name, " Login fix ");
     await user.click(within(confirm).getByRole("button", { name: "Confirm" }));
     await waitFor(() => expect(document.querySelector('[data-role="confirm"]')).toBeNull());
-    expect(lasso.sent.find((s) => s.method === "POST" && s.route === "/api/tickets")!.body).toEqual({ input: "APP-7", repo: "web", pipeline: "frontend", name: "Login fix" });
+    expect(laisso.sent.find((s) => s.method === "POST" && s.route === "/api/tickets")!.body).toEqual({ input: "APP-7", repo: "web", pipeline: "frontend", name: "Login fix" });
     expect(notice().textContent).toBe("checked out existing branch app-7-fix");
     expect((screen.getByRole("textbox", { name: "Intake" }) as HTMLInputElement).value).toBe("");
     expect(location.hash).toBe("");
   });
 
   it("closes the confirm step on Cancel, and shows a refused detection", async () => {
-    fakeLasso();
+    fakeLaisso();
     render(<App />);
     const user = userEvent.setup();
     await user.type(screen.getByRole("textbox", { name: "Intake" }), "APP-7");
@@ -374,7 +374,7 @@ describe("intake", () => {
   });
 
   it("says when no repo can take the Ticket, links to Config, and holds Confirm", async () => {
-    fakeLasso();
+    fakeLaisso();
     const answer = fetch;
     vi.stubGlobal("fetch", async (url: string, init?: RequestInit) =>
       url === "/api/intake/detect" ? new Response(JSON.stringify({ ...DETECTED, repo: { suggestion: null, choices: [] } })) : answer(url, init),
@@ -390,9 +390,9 @@ describe("intake", () => {
   });
 
   it("shows Add, the repo check and Confirm as busy, with their buttons disabled, until each answers", async () => {
-    const lasso = fakeLasso();
+    const laisso = fakeLaisso();
     let release = () => {};
-    const hold = () => (lasso.state.intakeHeld = new Promise<void>((r) => (release = r)));
+    const hold = () => (laisso.state.intakeHeld = new Promise<void>((r) => (release = r)));
     render(<App />);
     const user = userEvent.setup();
     await user.type(screen.getByRole("textbox", { name: "Intake" }), "APP-7");
@@ -427,7 +427,7 @@ describe("intake", () => {
 
 describe("the page's views", () => {
   it("links Tickets, Pull Requests, Pipelines and Config, marking the one shown", async () => {
-    fakeLasso();
+    fakeLaisso();
     render(<App />);
     expect(within(document.querySelector("nav .views")!).getAllByRole("link").map((a) => [a.textContent, a.getAttribute("href")])).toEqual([
       ["Tickets", "#"],
@@ -453,43 +453,43 @@ describe("the page's views", () => {
   });
 
   it("counts the Tickets that need you on Tickets, and keeps the count up as Tickets change", async () => {
-    const lasso = fakeLasso();
+    const laisso = fakeLaisso();
     const needs = (t: TicketDetail): TicketDetail => ({ ...t, display: { state: "needs_you", label: "Needs you", why: "waiting on you" } });
     const flagged = (t: TicketDetail): TicketDetail => ({ ...t, display: { state: "flagged", label: "Flagged", why: "attempts exhausted" } });
-    lasso.state.tickets = [needs(ticket("A")), ticket("B")];
+    laisso.state.tickets = [needs(ticket("A")), ticket("B")];
     render(<App />);
     const tickets = () => within(section("nav")).getByRole("link", { name: /^Tickets/ });
     await waitFor(() => expect(tickets().textContent).toBe("Tickets1 need you"));
-    lasso.state.tickets = [needs(ticket("A")), flagged(ticket("B"))];
+    laisso.state.tickets = [needs(ticket("A")), flagged(ticket("B"))];
     send("ticket", { ticket: "B" });
     await waitFor(() => expect(tickets().textContent).toBe("Tickets2 need you"));
-    lasso.state.tickets = [ticket("A"), ticket("B")];
+    laisso.state.tickets = [ticket("A"), ticket("B")];
     send("ticket", { ticket: "A" });
     await waitFor(() => expect(section("needs-you")).toBeNull());
     expect(tickets().textContent).toBe("Tickets");
   });
 
   it("puts an amber dot on Pull Requests while a PR List is failing, on every page, without reading the lists", async () => {
-    const lasso = fakeLasso();
-    lasso.state.prStatus = { failing: true };
+    const laisso = fakeLaisso();
+    laisso.state.prStatus = { failing: true };
     render(<App />);
     const prs = () => within(section("nav")).getByRole("link", { name: /^Pull Requests/ });
     await waitFor(() => expect(prs().textContent).toBe("Pull Requests a PR List's last refresh failed"));
     // A refresh succeeds: its "prlists" event re-reads the status, and the dot clears.
-    lasso.state.prStatus = { failing: false };
+    laisso.state.prStatus = { failing: false };
     send("prlists");
     await waitFor(() => expect(section("prs-failing")).toBeNull());
-    // It fails again while Lasso was away: the reconnect's hello re-reads.
-    lasso.state.prStatus = { failing: true };
+    // It fails again while Laisso was away: the reconnect's hello re-reads.
+    laisso.state.prStatus = { failing: true };
     send("hello", freshTick());
     send("hello", freshTick());
     await waitFor(() => expect(section("prs-failing")).not.toBeNull());
     // Only the light status was read: reading the lists would count as the page being open.
-    expect(lasso.gets("/api/pr-lists")).toBe(0);
+    expect(laisso.gets("/api/pr-lists")).toBe(0);
   });
 
   it("shrinks the nav to an icon rail on a Ticket's page, its links and status dot still named", async () => {
-    fakeLasso();
+    fakeLaisso();
     render(<App />);
     await screen.findByText("Ticket A");
     expect(section("nav").className).toBe("pages");
@@ -498,35 +498,35 @@ describe("the page's views", () => {
     expect(section("nav").className).toBe("pages compact");
     expect(section("shell").className).toBe("shell compact");
     expect(within(section("nav")).getAllByRole("link").map((a) => [a.textContent, a.getAttribute("title")])).toEqual([
-      ["LASSOL", null],
+      ["LAISSOL", null],
       ["Tickets", "Tickets"],
       ["Pull Requests", "Pull Requests"],
       ["Pipelines", "Pipelines"],
       ["Config", "Config"],
     ]);
-    expect(within(section("nav")).getByRole("link", { name: "LASSO" }).getAttribute("href")).toBe("#");
-    expect(within(section("nav")).getByRole("button", { name: "Lasso status: Connecting" }).getAttribute("title")).toBe("Lasso status: Connecting");
+    expect(within(section("nav")).getByRole("link", { name: "LAISSO" }).getAttribute("href")).toBe("#");
+    expect(within(section("nav")).getByRole("button", { name: "Laisso status: Connecting" }).getAttribute("title")).toBe("Laisso status: Connecting");
     go("");
     await waitFor(() => expect(section("nav").className).toBe("pages"));
   });
 
   it("opens a Pipeline Version from its link", async () => {
-    const lasso = fakeLasso();
+    const laisso = fakeLaisso();
     location.hash = "#pipelines/default/v2";
     // jsdom announces a hash change a moment later; let it pass, as a page load would.
     await new Promise((r) => setTimeout(r, 10));
     render(<App />);
     await screen.findByText("default v2");
-    expect(lasso.gets("/api/pipelines/default/versions/2")).toBe(1);
+    expect(laisso.gets("/api/pipelines/default/versions/2")).toBe(1);
     expect(navOn()).toEqual(["Pipelines"]);
   });
 
   it("keeps the Ledger until a Ticket arrives, then shows it with the Ledger as a sidebar, and goes back on ← all Tickets", async () => {
-    const lasso = fakeLasso();
+    const laisso = fakeLaisso();
     render(<App />);
     await screen.findByText("Ticket A");
     let release!: () => void;
-    lasso.state.held = new Promise((r) => (release = r));
+    laisso.state.held = new Promise((r) => (release = r));
     go("#A");
     expect(navOn()).toEqual(["Tickets"]);
     expect(shownViews()).toEqual(["ledger"]);
@@ -536,7 +536,7 @@ describe("the page's views", () => {
     expect(section("layout").className).toBe("dwrap open");
     expect(section("side").hidden).toBe(false);
     expect([...section("side").querySelectorAll<HTMLElement>(".qitem")].map((q) => q.dataset.id)).toEqual(["A", "B"]);
-    lasso.state.held = null;
+    laisso.state.held = null;
 
     await userEvent.setup().click(within(section("side")).getByRole("link", { name: "← all Tickets" }));
     await waitFor(() => expect(shownViews()).toEqual(["ledger"]));
@@ -545,23 +545,23 @@ describe("the page's views", () => {
     expect(section("side").childElementCount).toBe(0);
   });
 
-  it("goes back to the Ledger from the LASSO heading", async () => {
-    fakeLasso();
+  it("goes back to the Ledger from the LAISSO heading", async () => {
+    fakeLaisso();
     render(<App />);
     await screen.findByText("Ticket A");
     go("#pipelines");
     await waitFor(() => expect(shownViews()).toEqual(["pipelines"]));
-    await userEvent.setup().click(screen.getByRole("link", { name: "LASSO" }));
+    await userEvent.setup().click(screen.getByRole("link", { name: "LAISSO" }));
     await waitFor(() => expect(shownViews()).toEqual(["ledger"]));
     expect(location.hash).toBe("");
   });
 
   it("lists done and Abandoned Tickets when Show done and Abandoned is ticked", async () => {
-    const lasso = fakeLasso();
+    const laisso = fakeLaisso();
     render(<App />);
     await screen.findByText("Ticket A");
     await userEvent.setup().click(screen.getByRole("checkbox", { name: "Show done and Abandoned" }));
-    await waitFor(() => expect(lasso.gets("/api/tickets?all=1")).toBe(1));
+    await waitFor(() => expect(laisso.gets("/api/tickets?all=1")).toBe(1));
   });
 });
 
@@ -580,7 +580,7 @@ describe("the theme button", () => {
   });
 
   it("follows the system at first, then steps through Light, Dark and back, keeping the choice in this browser", async () => {
-    fakeLasso();
+    fakeLaisso();
     render(<App />);
     const button = () => within(section("nav")).getByRole("button", { name: /^Theme/ });
     expect(button().textContent).toBe("Theme: System");
@@ -589,19 +589,19 @@ describe("the theme button", () => {
     await user.click(button());
     expect(button().textContent).toBe("Theme: Light");
     expect(document.documentElement.dataset.theme).toBe("light");
-    expect(localStorage.getItem("lasso.theme")).toBe("light");
+    expect(localStorage.getItem("laisso.theme")).toBe("light");
     await user.click(button());
     expect(button().getAttribute("title")).toBe("Theme: Dark (click for System)");
     expect(document.documentElement.dataset.theme).toBe("dark");
     await user.click(button());
     expect(button().textContent).toBe("Theme: System");
     expect(document.documentElement.dataset.theme).toBeUndefined();
-    expect(localStorage.getItem("lasso.theme")).toBeNull();
+    expect(localStorage.getItem("laisso.theme")).toBeNull();
   });
 
   it("starts from the theme this browser kept", async () => {
-    localStorage.setItem("lasso.theme", "dark");
-    fakeLasso();
+    localStorage.setItem("laisso.theme", "dark");
+    fakeLaisso();
     render(<App />);
     expect(within(section("nav")).getByRole("button", { name: /^Theme/ }).textContent).toBe("Theme: Dark");
   });
@@ -609,7 +609,7 @@ describe("the theme button", () => {
 
 describe("the Pull Requests page", () => {
   it("shows each PR List with N of total, links the rest on GitHub when cut short, and each PR's repo and number", async () => {
-    fakeLasso();
+    fakeLaisso();
     location.hash = "#prs";
     await new Promise((r) => setTimeout(r, 10));
     render(<App />);
@@ -622,8 +622,8 @@ describe("the Pull Requests page", () => {
     expect([all.getAttribute("href"), all.getAttribute("target")]).toEqual(["https://github.com/pulls?q=mine", "_blank"]);
     const row = section("pr-row");
     expect(within(row).getByText("Tick grace when the laptop sleeps")).toBeTruthy();
-    const pr = within(row).getByRole("link", { name: /^lasso #101/ });
-    expect([pr.getAttribute("href"), pr.getAttribute("target")]).toEqual(["https://github.com/rbitco/lasso/pull/101", "_blank"]);
+    const pr = within(row).getByRole("link", { name: /^laisso #101/ });
+    expect([pr.getAttribute("href"), pr.getAttribute("target")]).toEqual(["https://github.com/rbitco/laisso/pull/101", "_blank"]);
     expect(within(row).getByText(/^matt/).textContent).toBe("matt · 45m ago");
     // The verdict leads the row, its reason sits under the title, and the checks cell says what is failing.
     const pill = row.querySelector<HTMLElement>('[data-role="pr-verdict"]')!;
@@ -634,9 +634,9 @@ describe("the Pull Requests page", () => {
   });
 
   it("holds placeholder rows before a list's first fetch, shows its age and a spinner, and re-reads on each change and Tick", async () => {
-    const lasso = fakeLasso();
+    const laisso = fakeLaisso();
     const [mine, review] = PR_LISTS.lists;
-    lasso.state.prLists = { lists: [{ ...mine!, limit: 25, rows: [], total: 0, fetchedAt: null, fetching: true }, { ...review!, fetchedAt: ago(5 * 60) }], layout: "stacked", pausedUntil: null, ghProblem: null, example: null };
+    laisso.state.prLists = { lists: [{ ...mine!, limit: 25, rows: [], total: 0, fetchedAt: null, fetching: true }, { ...review!, fetchedAt: ago(5 * 60) }], layout: "stacked", pausedUntil: null, ghProblem: null, example: null };
     location.hash = "#prs";
     await new Promise((r) => setTimeout(r, 10));
     render(<App />);
@@ -647,21 +647,21 @@ describe("the Pull Requests page", () => {
     expect([first!.querySelector('[data-role="pr-age"] .spin') !== null, first!.querySelector('[data-role="pr-age"]')!.textContent]).toEqual([true, ""]);
     expect([second!.querySelector('[data-role="pr-age"]')!.textContent, second!.querySelector(".spin")]).toEqual(["updated 5m ago", null]);
     // The fetch finishes: a "prlists" event re-reads, and the rows and age take the placeholders' place.
-    lasso.state.prLists = { lists: [{ ...mine!, fetchedAt: ago(10) }, { ...review!, fetchedAt: ago(5 * 60) }], layout: "stacked", pausedUntil: null, ghProblem: null, example: null };
+    laisso.state.prLists = { lists: [{ ...mine!, fetchedAt: ago(10) }, { ...review!, fetchedAt: ago(5 * 60) }], layout: "stacked", pausedUntil: null, ghProblem: null, example: null };
     send("prlists");
     await screen.findByText("1 of 4");
     expect(document.querySelector('[data-role="pr-placeholders"]')).toBeNull();
     expect(section("pr-list").querySelector('[data-role="pr-age"]')!.textContent).toBe("updated just now");
-    // Each Tick re-reads too, which is what keeps Lasso refreshing the lists while the page is open.
-    const before = lasso.gets("/api/pr-lists");
+    // Each Tick re-reads too, which is what keeps Laisso refreshing the lists while the page is open.
+    const before = laisso.gets("/api/pr-lists");
     send("tick", freshTick());
-    await waitFor(() => expect(lasso.gets("/api/pr-lists")).toBe(before + 1));
+    await waitFor(() => expect(laisso.gets("/api/pr-lists")).toBe(before + 1));
   });
 
   it("says a rate-limit pause in each heading, in local time, and keeps the rows", async () => {
-    const lasso = fakeLasso();
+    const laisso = fakeLaisso();
     const until = new Date(2026, 9, 15, 15, 40).toISOString();
-    lasso.state.prLists = { ...PR_LISTS, pausedUntil: until };
+    laisso.state.prLists = { ...PR_LISTS, pausedUntil: until };
     location.hash = "#prs";
     await new Promise((r) => setTimeout(r, 10));
     render(<App />);
@@ -671,7 +671,7 @@ describe("the Pull Requests page", () => {
   });
 
   it("shows reviewer avatars with badges, rings and a hover list, and keeps their clicks from the row", async () => {
-    fakeLasso();
+    fakeLaisso();
     location.hash = "#prs";
     await new Promise((r) => setTimeout(r, 10));
     render(<App />);
@@ -706,11 +706,11 @@ describe("the Pull Requests page", () => {
   });
 
   it("shows a PR's Ticket and Stage and links the row to it, and links a row with no Ticket to GitHub", async () => {
-    const lasso = fakeLasso();
+    const laisso = fakeLaisso();
     const [mine] = PR_LISTS.lists;
     const plain = mine!.rows[0]!;
-    const linked = { ...plain, title: "Sleep-proof Tick", number: 102, url: "https://github.com/rbitco/lasso/pull/102", ticket: { id: "A", ref: "APP-A", stage: "review", flag: null } };
-    lasso.state.prLists = { lists: [{ ...mine!, total: 2, rows: [linked, plain] }], layout: "stacked", pausedUntil: null, ghProblem: null, example: null };
+    const linked = { ...plain, title: "Sleep-proof Tick", number: 102, url: "https://github.com/rbitco/laisso/pull/102", ticket: { id: "A", ref: "APP-A", stage: "review", flag: null } };
+    laisso.state.prLists = { lists: [{ ...mine!, total: 2, rows: [linked, plain] }], layout: "stacked", pausedUntil: null, ghProblem: null, example: null };
     location.hash = "#prs";
     await new Promise((r) => setTimeout(r, 10));
     render(<App />);
@@ -723,22 +723,22 @@ describe("the Pull Requests page", () => {
     // The row's link is its title: to the Ticket page in this tab, else to the PR on GitHub in a new tab.
     const open = (row: HTMLElement) => row.querySelector<HTMLAnchorElement>('[data-role="pr-open"]')!;
     expect([open(withTicket!).textContent, open(withTicket!).getAttribute("href"), open(withTicket!).getAttribute("target")]).toEqual(["Sleep-proof Tick", "#A", null]);
-    expect([open(without!).getAttribute("href"), open(without!).getAttribute("target")]).toEqual(["https://github.com/rbitco/lasso/pull/101", "_blank"]);
+    expect([open(without!).getAttribute("href"), open(without!).getAttribute("target")]).toEqual(["https://github.com/rbitco/laisso/pull/101", "_blank"]);
     // "repo #n" always goes to GitHub, even on a row with a Ticket.
-    const pr = within(withTicket!).getByRole("link", { name: /^lasso #102/ });
-    expect([pr.getAttribute("href"), pr.getAttribute("target")]).toEqual(["https://github.com/rbitco/lasso/pull/102", "_blank"]);
+    const pr = within(withTicket!).getByRole("link", { name: /^laisso #102/ });
+    expect([pr.getAttribute("href"), pr.getAttribute("target")]).toEqual(["https://github.com/rbitco/laisso/pull/102", "_blank"]);
     await userEvent.setup().click(open(withTicket!));
     expect(location.hash).toBe("#A");
   });
 
   it("follows a PR's Ticket with a ref: chip for each Ticket that references it, each linking to its Ticket", async () => {
-    const lasso = fakeLasso();
+    const laisso = fakeLaisso();
     const [mine] = PR_LISTS.lists;
     const plain = mine!.rows[0]!;
     const refs = [{ id: "B", ref: "APP-B", stage: "implement", flag: null }, { id: "C", ref: "APP-C", stage: "done", flag: null }];
-    const owned = { ...plain, number: 102, url: "https://github.com/rbitco/lasso/pull/102", ticket: { id: "A", ref: "APP-A", stage: "review", flag: null }, refs };
+    const owned = { ...plain, number: 102, url: "https://github.com/rbitco/laisso/pull/102", ticket: { id: "A", ref: "APP-A", stage: "review", flag: null }, refs };
     const onlyRefs = { ...plain, refs: refs.slice(0, 1) };
-    lasso.state.prLists = { lists: [{ ...mine!, total: 2, rows: [owned, onlyRefs] }], layout: "stacked", pausedUntil: null, ghProblem: null, example: null };
+    laisso.state.prLists = { lists: [{ ...mine!, total: 2, rows: [owned, onlyRefs] }], layout: "stacked", pausedUntil: null, ghProblem: null, example: null };
     location.hash = "#prs";
     await new Promise((r) => setTimeout(r, 10));
     render(<App />);
@@ -757,25 +757,25 @@ describe("the Pull Requests page", () => {
 
   /** Renders the Pull Requests page over `view` and waits for its first read. */
   async function prsPage(view: PrListsView) {
-    const lasso = fakeLasso();
-    lasso.state.prLists = view;
+    const laisso = fakeLaisso();
+    laisso.state.prLists = view;
     location.hash = "#prs";
     await new Promise((r) => setTimeout(r, 10));
     render(<App />);
-    await waitFor(() => expect(lasso.gets("/api/pr-lists")).toBeGreaterThan(0));
+    await waitFor(() => expect(laisso.gets("/api/pr-lists")).toBeGreaterThan(0));
     await waitFor(() => expect(section("prs").textContent).not.toContain("Reading PR Lists"));
-    return lasso;
+    return laisso;
   }
 
   it("shows one notice in place of the lists while gh is not logged in, or not installed", async () => {
     await prsPage({ ...PR_LISTS, ghProblem: { kind: "not-logged-in", message: "gh is not logged in" } });
     const notice = section("pr-gh-problem");
-    expect(notice.textContent).toBe("gh is not logged in, so Lasso cannot search GitHub.Run gh auth login, then Check now");
+    expect(notice.textContent).toBe("gh is not logged in, so Laisso cannot search GitHub.Run gh auth login, then Check now");
     expect(notice.querySelector("code")!.textContent).toBe("gh auth login");
     expect(document.querySelectorAll('[data-role="pr-list"]')).toHaveLength(0);
     cleanup();
     await prsPage({ ...PR_LISTS, ghProblem: { kind: "gh-missing", message: "gh is not installed" } });
-    expect(section("pr-gh-problem").textContent).toBe("gh is not installed, so Lasso cannot search GitHub.Install gh from cli.github.com, then restart Lasso");
+    expect(section("pr-gh-problem").textContent).toBe("gh is not installed, so Laisso cannot search GitHub.Install gh from cli.github.com, then restart Laisso");
   });
 
   it("fails only the list whose query GitHub rejected, with GitHub's message, the search as sent and where to fix it", async () => {
@@ -788,7 +788,7 @@ describe("the Pull Requests page", () => {
     expect([error.className, error.querySelector("b")!.textContent, error.querySelector("pre")!.textContent, error.querySelector(".why")!.textContent]).toEqual([
       "card problem pr-problem",
       "GitHub rejected this query: The listed users cannot be searched",
-      "is:pr is:open review-requested:@me repo:rbitco/lasso sort:updated-desc",
+      "is:pr is:open review-requested:@me repo:rbitco/laisso sort:updated-desc",
       "Fix it under pr_lists in config.yaml",
     ]);
     expect(bad!.querySelector('[data-role="pr-count"]')).toBeNull();
@@ -858,13 +858,13 @@ describe("the Pull Requests page's layout", () => {
 
   /** Renders the Pull Requests page over `view` and waits for its lists. */
   async function prsPage(view: PrListsView) {
-    const lasso = fakeLasso();
-    lasso.state.prLists = view;
+    const laisso = fakeLaisso();
+    laisso.state.prLists = view;
     location.hash = "#prs";
     await new Promise((r) => setTimeout(r, 10));
     render(<App />);
     await waitFor(() => expect(document.querySelector('[data-role="pr-lists"]')).not.toBeNull());
-    return lasso;
+    return laisso;
   }
   const shown = () => section("pr-lists").dataset.layout;
   const option = (name: string) => within(section("pr-layout")).getByRole("radio", { name });
@@ -883,12 +883,12 @@ describe("the Pull Requests page's layout", () => {
     await prsPage(PR_LISTS);
     const user = userEvent.setup();
     await user.click(option("Side by side"));
-    expect([shown(), checked(), kept.get("lasso.prLayout")]).toEqual(["side-by-side", "Side by side", "side-by-side"]);
+    expect([shown(), checked(), kept.get("laisso.prLayout")]).toEqual(["side-by-side", "Side by side", "side-by-side"]);
     cleanup();
     await prsPage(PR_LISTS);
     expect(shown()).toBe("side-by-side");
     await user.click(option("Stacked"));
-    expect(kept.get("lasso.prLayout")).toBe("stacked");
+    expect(kept.get("laisso.prLayout")).toBe("stacked");
     cleanup();
     await prsPage({ ...PR_LISTS, layout: "side-by-side" });
     expect(shown()).toBe("stacked");

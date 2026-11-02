@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { closeSync, existsSync, mkdirSync, openSync, writeSync } from "node:fs";
 import path from "node:path";
 import { actionsFor, currentConfig, type ActionConfig, type Config } from "../server/config.ts";
-import type { LassoHome } from "../server/home.ts";
+import type { LaissoHome } from "../server/home.ts";
 import { actionEnv, lastLine, missingParams, runCommand } from "./command.ts";
 import type { Logger } from "../server/log.ts";
 import type { TickChange } from "../server/tick.ts";
@@ -18,10 +18,10 @@ import { decide } from "../route/route.ts";
 
 export interface ActionsDeps {
   config: Config;
-  home: LassoHome;
+  home: LaissoHome;
   tickets: Tickets;
   sessions: Sessions;
-  /** Where the Action's `lasso route` pick is kept, on the current Visit. */
+  /** Where the Action's `laisso route` pick is kept, on the current Visit. */
   visits: Visits;
   links: PrLinks;
   log: Logger;
@@ -41,11 +41,11 @@ interface Live {
 }
 
 /**
- * Action Stages: Lasso performs them itself, records a Session row with a
- * Lasso-minted id and mode action, and auto-advances. The Action config
+ * Action Stages: Laisso performs them itself, records a Session row with a
+ * Laisso-minted id and mode action, and auto-advances. The Action config
  * defines (ADR 0010) runs as a shell command in the background, judged by
  * its exit code. A failed action is a failed Session, so the Ticket is
- * Flagged like any other Outcome. An Action that ran `lasso route` and
+ * Flagged like any other Outcome. An Action that ran `laisso route` and
  * exits 0 sends the Ticket along that Route instead of walking forward.
  */
 export class Actions {

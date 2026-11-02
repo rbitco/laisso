@@ -7,7 +7,7 @@ import { DEFAULT_CONFIG, DEFAULT_CONFIG_YAML, loadConfig, ConfigError, actionsFo
 import { resolveHome } from "../src/server/home.ts";
 
 const homeWith = (yaml: string) => {
-  const home = resolveHome({ LASSO_HOME: mkdtempSync(path.join(tmpdir(), "lasso-config-")) });
+  const home = resolveHome({ LAISSO_HOME: mkdtempSync(path.join(tmpdir(), "laisso-config-")) });
   writeFileSync(home.configFile, yaml);
   return home;
 };

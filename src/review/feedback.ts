@@ -93,11 +93,11 @@ export interface PrFacts {
 export type OwnMark = (body: string) => boolean;
 
 export function marker(ticketId: string, stage: string, round: number): string {
-  return `<!-- lasso:${ticketId}:${stage}:round-${round} -->`;
+  return `<!-- laisso:${ticketId}:${stage}:round-${round} -->`;
 }
 
 export function ownMark(ticketId: string, stage: string): OwnMark {
-  const prefix = `<!-- lasso:${ticketId}:${stage}:`;
+  const prefix = `<!-- laisso:${ticketId}:${stage}:`;
   return (body) => body.includes(prefix);
 }
 
@@ -113,7 +113,7 @@ export function ignoring(logins: string[]): IgnoredAuthor {
 /**
  * The facts with ignored authors' comments taken out, so they are never
  * Feedback: a top-level comment by one goes, and so does a thread whose
- * comments, Lasso's own aside, are all by them. A thread anyone else has
+ * comments, Laisso's own aside, are all by them. A thread anyone else has
  * joined stays whole, so its Round still reads the ignored comments. Marked
  * comments stay whoever posted them: they pair replies with what they answer.
  * Checks and the verdict are untouched.
@@ -162,7 +162,7 @@ export function outstanding(facts: PrFacts, own: OwnMark): FeedbackItem[] {
 }
 
 /**
- * Which of Lasso's own marked comments answers which top-level comment: in
+ * Which of Laisso's own marked comments answers which top-level comment: in
  * time order, each marked comment answers the oldest comment before it that
  * has no answer yet. One reply answers one comment; a reply to a later
  * comment never stands in for an earlier one.

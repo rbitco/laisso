@@ -3,7 +3,7 @@ import { PACKAGE_NAME } from "../package-root.ts";
 import { DEV_VERSION, versionNotice, type VersionNotice } from "../version-notice.ts";
 import type { Logger } from "./log.ts";
 
-/** How often Lasso asks the registry again after the check at start. */
+/** How often Laisso asks the registry again after the check at start. */
 export const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 /** Off the LAN npm can retry for minutes; past this the latest version is simply unknown. */
 const NPM_TIMEOUT_MS = 30_000;
@@ -29,7 +29,7 @@ export interface VersionCheckDeps {
 }
 
 /**
- * The version notice, held in memory: checked at start and every 24 hours. It only ever tells; Lasso never restarts
+ * The version notice, held in memory: checked at start and every 24 hours. It only ever tells; Laisso never restarts
  * itself and posts no OS notification. A dev checkout never checks at all.
  */
 export class VersionCheck {

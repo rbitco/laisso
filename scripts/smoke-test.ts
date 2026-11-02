@@ -1,6 +1,6 @@
-// Smoke test for a packed Lasso: installs the tarball globally into a temporary prefix, starts the installed
-// `lasso` against a temporary Lasso home on a free port, checks it serves its API and dashboard, then that
-// `lasso skill install` finds the skill it ships. The
+// Smoke test for a packed Laisso: installs the tarball globally into a temporary prefix, starts the installed
+// `laisso` against a temporary Laisso home on a free port, checks it serves its API and dashboard, then that
+// `laisso skill install` finds the skill it ships. The
 // release workflow runs it on the tarball it is about to publish; test/package.test.ts runs it on a fresh pack.
 //
 //   node scripts/smoke-test.ts <tarball> <expected version>
@@ -19,17 +19,17 @@ export interface SmokeOptions {
   log?: (line: string) => void;
 }
 
-/** Resolves when the installed Lasso answered as expected and has stopped; throws naming what went wrong. */
+/** Resolves when the installed Laisso answered as expected and has stopped; throws naming what went wrong. */
 export async function smokeTest({ tarball, version, log = () => {} }: SmokeOptions): Promise<void> {
-  const root = await mkdtemp(path.join(tmpdir(), "lasso-smoke-"));
+  const root = await mkdtemp(path.join(tmpdir(), "laisso-smoke-"));
   const prefix = path.join(root, "prefix");
   const home = path.join(root, "home");
   try {
     log(`installing ${tarball} into ${prefix}`);
     await promisify(execFile)("npm", ["install", "--global", "--prefix", prefix, "--no-audit", "--no-fund", path.resolve(tarball)]);
     const port = await freePort();
-    log(`starting lasso on port ${port} with LASSO_HOME=${home}`);
-    const child = spawn(path.join(prefix, "bin", "lasso"), ["--port", String(port)], { env: { ...process.env, LASSO_HOME: home }, stdio: ["ignore", "pipe", "pipe"] });
+    log(`starting laisso on port ${port} with LAISSO_HOME=${home}`);
+    const child = spawn(path.join(prefix, "bin", "laisso"), ["--port", String(port)], { env: { ...process.env, LAISSO_HOME: home }, stdio: ["ignore", "pipe", "pipe"] });
     let output = "";
     child.stdout.on("data", (chunk: Buffer) => (output += chunk.toString()));
     child.stderr.on("data", (chunk: Buffer) => (output += chunk.toString()));
@@ -50,10 +50,10 @@ export async function smokeTest({ tarball, version, log = () => {} }: SmokeOptio
     log("stopped");
     // The skill is found from the installed bundle and installs under a stand-in HOME.
     const userHome = path.join(root, "user");
-    await promisify(execFile)(path.join(prefix, "bin", "lasso"), ["skill", "install"], { env: { ...process.env, HOME: userHome } });
-    const stamp = (await readFile(path.join(userHome, ".claude", "skills", "lasso", ".lasso-version"), "utf8")).trim();
-    if (stamp !== version) throw new Error(`lasso skill install stamped ${stamp}, expected ${version}`);
-    log("lasso skill install ok");
+    await promisify(execFile)(path.join(prefix, "bin", "laisso"), ["skill", "install"], { env: { ...process.env, HOME: userHome } });
+    const stamp = (await readFile(path.join(userHome, ".claude", "skills", "laisso", ".laisso-version"), "utf8")).trim();
+    if (stamp !== version) throw new Error(`laisso skill install stamped ${stamp}, expected ${version}`);
+    log("laisso skill install ok");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -64,7 +64,7 @@ async function waitForHealth(url: string, exited: Promise<number | null>, output
   void exited.then(() => (gone = true));
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (gone) throw new Error(`lasso exited before serving:\n${output()}`);
+    if (gone) throw new Error(`laisso exited before serving:\n${output()}`);
     try {
       const res = await fetch(url + "/api/health");
       if (res.ok) return (await res.json()) as { version?: unknown };
@@ -73,7 +73,7 @@ async function waitForHealth(url: string, exited: Promise<number | null>, output
     }
     await new Promise((r) => setTimeout(r, 100));
   }
-  throw new Error(`lasso did not answer /api/health within ${timeoutMs} ms:\n${output()}`);
+  throw new Error(`laisso did not answer /api/health within ${timeoutMs} ms:\n${output()}`);
 }
 
 function freePort(): Promise<number> {

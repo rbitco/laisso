@@ -1,4 +1,4 @@
-# A Lasso home's config.yaml for one JIRA-tracked repo. Pair it with
+# A Laisso home's config.yaml for one JIRA-tracked repo. Pair it with
 # pipelines/jira.yaml beside it. Every key not shown keeps its default.
 
 repos:
@@ -10,20 +10,20 @@ repos:
 
 actions:
   # Moves the JIRA issue; jira.yaml's action Stages run it. This is the one
-  # Lasso writes on start when config.yaml has no global tracker.transition.
+  # Laisso writes on start when config.yaml has no global tracker.transition.
   tracker.transition:
     params: [status]
     run: |
-      [ -n "$LASSO_REFERENCE" ] || { echo "$LASSO_STAGE: the Ticket has no tracker issue yet" >&2; exit 1; }
-      acli jira workitem transition --key "$LASSO_REFERENCE" --status "$LASSO_STATUS" --yes >&2 || exit $?
-      echo "moved $LASSO_REFERENCE to $LASSO_STATUS"
+      [ -n "$LAISSO_REFERENCE" ] || { echo "$LAISSO_STAGE: the Ticket has no tracker issue yet" >&2; exit 1; }
+      acli jira workitem transition --key "$LAISSO_REFERENCE" --status "$LAISSO_STATUS" --yes >&2 || exit $?
+      echo "moved $LAISSO_REFERENCE to $LAISSO_STATUS"
   # An Action of the user's own: comment on the issue when the PR is up.
   jira.comment:
     params: [message]
     timeout: 2m
     run: |
-      acli jira workitem comment create --key "$LASSO_REFERENCE" --body "$LASSO_MESSAGE $LASSO_PR" >&2 || exit $?
-      echo "commented on $LASSO_REFERENCE"
+      acli jira workitem comment create --key "$LAISSO_REFERENCE" --body "$LAISSO_MESSAGE $LAISSO_PR" >&2 || exit $?
+      echo "commented on $LAISSO_REFERENCE"
 
 profiles:
   claude-fable:

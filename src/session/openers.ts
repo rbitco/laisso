@@ -8,7 +8,7 @@ const run = promisify(execFile);
 
 export class TerminalError extends Error {}
 
-/** A terminal Lasso can open a window in. */
+/** A terminal Laisso can open a window in. */
 export type TerminalKind = Exclude<TerminalSetting, "auto">;
 
 /** Puts a launcher script in a new terminal window, tab or pane, in `cwd`, named `name`. */
@@ -16,7 +16,7 @@ export interface WindowOpener {
   open(launcher: string, name: string, cwd: string): Promise<void>;
 }
 
-/** The terminal a human Stage opens in, and why; `auto` when config left it to Lasso, which may then fall back. */
+/** The terminal a human Stage opens in, and why; `auto` when config left it to Laisso, which may then fall back. */
 export interface TerminalChoice {
   kind: TerminalKind;
   auto: boolean;
@@ -24,15 +24,15 @@ export interface TerminalChoice {
 }
 
 /**
- * Where terminal: sends a human Stage. auto reads the environment Lasso was
+ * Where terminal: sends a human Stage. auto reads the environment Laisso was
  * started in: herdr marks its panes HERDR_ENV=1, tmux sets TMUX; herdr wins
  * when both are set, as the one inside the other is the nearer.
  */
 export function chooseTerminal(setting: TerminalSetting, env: NodeJS.ProcessEnv): TerminalChoice {
   if (setting !== "auto") return { kind: setting, auto: false, why: `terminal: ${setting} in config.yaml` };
-  if (env.HERDR_ENV === "1") return { kind: "herdr", auto: true, why: "Lasso runs inside herdr (HERDR_ENV=1)" };
-  if (env.TMUX) return { kind: "tmux", auto: true, why: "Lasso runs inside tmux (TMUX is set)" };
-  return { kind: "terminal-app", auto: true, why: "Lasso runs outside herdr and tmux" };
+  if (env.HERDR_ENV === "1") return { kind: "herdr", auto: true, why: "Laisso runs inside herdr (HERDR_ENV=1)" };
+  if (env.TMUX) return { kind: "tmux", auto: true, why: "Laisso runs inside tmux (TMUX is set)" };
+  return { kind: "terminal-app", auto: true, why: "Laisso runs outside herdr and tmux" };
 }
 
 export function openerFor(kind: TerminalKind, env: NodeJS.ProcessEnv): WindowOpener {
@@ -53,7 +53,7 @@ export function macosTerminal(): WindowOpener {
 }
 
 /**
- * tmux: a new window in the session holding Lasso's own pane, which becomes
+ * tmux: a new window in the session holding Laisso's own pane, which becomes
  * that session's current window. new-window takes no pane as its target, so
  * the pane's session is looked up first; outside tmux, tmux picks the session.
  */
@@ -64,7 +64,7 @@ export function tmuxWindow(env: NodeJS.ProcessEnv): WindowOpener {
       if (env.TMUX_PANE) {
         // A pane that has gone answers nothing rather than failing.
         const session = (await tool("tmux", ["display-message", "-p", "-t", env.TMUX_PANE, "#{session_id}"], env)).trim();
-        if (!session) throw new TerminalError(`tmux: Lasso's pane ${env.TMUX_PANE} is gone`);
+        if (!session) throw new TerminalError(`tmux: Laisso's pane ${env.TMUX_PANE} is gone`);
         target = ["-t", `${session}:`];
       }
       // tmux runs the window's command through sh: the path is quoted for it.
@@ -74,7 +74,7 @@ export function tmuxWindow(env: NodeJS.ProcessEnv): WindowOpener {
 }
 
 /**
- * herdr: a new tab in Lasso's workspace, focused, then the launcher typed
+ * herdr: a new tab in Laisso's workspace, focused, then the launcher typed
  * into its shell. pane run returns once the line is queued, not when it runs.
  */
 export function herdrTab(env: NodeJS.ProcessEnv): WindowOpener {

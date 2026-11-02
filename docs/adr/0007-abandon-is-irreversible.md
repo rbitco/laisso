@@ -2,13 +2,13 @@
 status: accepted
 ---
 
-# Abandon is irreversible; a Ticket's end of life tears down what only Lasso needs
+# Abandon is irreversible; a Ticket's end of life tears down what only Laisso needs
 
 When a Ticket finishes (its last Stage completes) or a human Abandons it,
-Lasso has to decide what to keep. We could have made Abandon a pause with
+Laisso has to decide what to keep. We could have made Abandon a pause with
 a Reopen action, restoring the worktree and Budget counters. We decided
-instead that both ends of life are final: Lasso removes the worktree and
-every `lasso:*` label, leaves the tracker's status where the Pipeline
+instead that both ends of life are final: Laisso removes the worktree and
+every `laisso:*` label, leaves the tracker's status where the Pipeline
 left it, and treats the Ticket row as history. Done also deletes the
 local branch, since the PR is merged. Abandon keeps the branch as the
 salvage point, first committing any uncommitted work with a marked WIP
@@ -22,7 +22,7 @@ attempt usually wants anyway.
 
 ## Consequences
 
-- The per-Ticket directory (`~/.lasso/tickets/<id>/`) outlives the
+- The per-Ticket directory (`~/.laisso/tickets/<id>/`) outlives the
   worktree so Sessions' stdout stays readable; a global `retention`
   setting (default 30 days) sweeps it after end of life. Store rows are
   never swept, so Budget history and the finished list survive with a

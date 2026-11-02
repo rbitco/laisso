@@ -4,7 +4,7 @@ let source: EventSource | null = null;
 
 /**
  * The page's one connection to /api/events, opened by the first component that listens and shared by all of them.
- * Each event names what changed, never the data; a "hello" after the first means Lasso came back and anything may
+ * Each event names what changed, never the data; a "hello" after the first means Laisso came back and anything may
  * have changed. EventSource reconnects on its own after a restart.
  */
 export function events(): EventSource {

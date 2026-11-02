@@ -1,13 +1,14 @@
 import { cpSync, existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { legacySkillDir } from "../legacy.ts";
 
 /**
- * The Lasso skill: docs for coding agents that ship in the package, so the
- * copy an agent reads always matches the Lasso that installed it.
+ * The Laisso skill: docs for coding agents that ship in the package, so the
+ * copy an agent reads always matches the Laisso that installed it.
  */
 
-/** The file in an installed copy naming the Lasso version that wrote it; SKILL.md's frontmatter stays as shipped. */
-export const VERSION_FILE = ".lasso-version";
+/** The file in an installed copy naming the Laisso version that wrote it; SKILL.md's frontmatter stays as shipped. */
+export const VERSION_FILE = ".laisso-version";
 
 /** Where one agent looks for the skill. */
 export interface SkillTarget {
@@ -20,8 +21,8 @@ export interface SkillTarget {
  * Codex's only on a machine that has Codex (a ~/.codex directory).
  */
 export function skillTargets(userHome: string): SkillTarget[] {
-  const targets: SkillTarget[] = [{ agent: "claude", dir: path.join(userHome, ".claude", "skills", "lasso") }];
-  if (existsSync(path.join(userHome, ".codex"))) targets.push({ agent: "codex", dir: path.join(userHome, ".codex", "skills", "lasso") });
+  const targets: SkillTarget[] = [{ agent: "claude", dir: path.join(userHome, ".claude", "skills", "laisso") }];
+  if (existsSync(path.join(userHome, ".codex"))) targets.push({ agent: "codex", dir: path.join(userHome, ".codex", "skills", "laisso") });
   return targets;
 }
 
@@ -33,14 +34,14 @@ export interface SkillInstall extends SkillTarget {
 
 export class SkillMissing extends Error {
   constructor(source: string) {
-    super(`the Lasso skill is missing from this install (${source})`);
+    super(`the Laisso skill is missing from this install (${source})`);
   }
 }
 
 /**
  * Copy the skill from `source` into each target, replacing any copy already
  * there whole so a file the new version dropped does not linger, and stamp
- * it with `version`. With `dryRun` nothing is written; the plan is the same.
+ * it with `version`; a copy Lasso installed beside it goes. With `dryRun` nothing is written; the plan is the same.
  */
 export function installSkill(source: string, targets: SkillTarget[], version: string, opts: { dryRun?: boolean } = {}): SkillInstall[] {
   if (!existsSync(path.join(source, "SKILL.md"))) throw new SkillMissing(source);
@@ -49,6 +50,8 @@ export function installSkill(source: string, targets: SkillTarget[], version: st
     const replaces = existsSync(target.dir);
     if (!opts.dryRun) {
       rmSync(target.dir, { recursive: true, force: true });
+      const legacy = legacySkillDir(target.dir);
+      if (existsSync(path.join(legacy.dir, legacy.stamp))) rmSync(legacy.dir, { recursive: true, force: true });
       cpSync(source, target.dir, { recursive: true });
       writeFileSync(path.join(target.dir, VERSION_FILE), version + "\n");
     }
@@ -63,7 +66,7 @@ function listFiles(dir: string): string[] {
     .map((entry) => path.relative(dir, path.join(entry.parentPath, entry.name)).split(path.sep).join("/"));
 }
 
-/** One agent's copy of the skill as doctor reports it: absent, written by this Lasso, or by another (null when unstamped). */
+/** One agent's copy of the skill as doctor reports it: absent, written by this Laisso, or by another (null when unstamped). */
 export interface SkillStatus extends SkillTarget {
   state: "missing" | "current" | "other";
   installed: string | null;

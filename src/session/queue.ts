@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { loadConfig } from "../server/config.ts";
-import type { LassoHome } from "../server/home.ts";
+import type { LaissoHome } from "../server/home.ts";
 import type { Logger } from "../server/log.ts";
 import type { Tickets, TicketRow } from "../store/tickets.ts";
 import type { Sessions } from "../store/sessions.ts";
@@ -14,7 +14,7 @@ export interface Runnable {
 }
 
 export interface QueueDeps {
-  home: LassoHome;
+  home: LaissoHome;
   tickets: Tickets;
   sessions: Sessions;
   progress: Progress;

@@ -16,7 +16,7 @@ export interface DashboardFile {
   type: string;
 }
 
-/** The built dashboard is missing: Lasso refuses to start rather than serve a blank page. A checkout has yet to
+/** The built dashboard is missing: Laisso refuses to start rather than serve a blank page. A checkout has yet to
  * build it; an installed package ships it, so there it means the install is broken. */
 export class DashboardMissing extends Error {
   constructor(dir: string, checkout: boolean) {
@@ -24,7 +24,7 @@ export class DashboardMissing extends Error {
     super(
       checkout
         ? `the dashboard is not built (no ${page}); run pnpm build, or pnpm start, which builds first`
-        : `the dashboard is missing (no ${page}); the install is broken; reinstall with npm i -g @rbitco/lasso`,
+        : `the dashboard is missing (no ${page}); the install is broken; reinstall with npm i -g @rbitco/laisso`,
     );
   }
 }

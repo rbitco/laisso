@@ -11,13 +11,13 @@ export interface SkillOptions {
 }
 
 /**
- * `lasso skill install`: copy the Lasso skill this package ships into
- * ~/.claude/skills/lasso, and ~/.codex/skills/lasso when Codex is there,
- * stamped with this Lasso's version. Needs no running Lasso.
+ * `laisso skill install`: copy the Laisso skill this package ships into
+ * ~/.claude/skills/laisso, and ~/.codex/skills/laisso when Codex is there,
+ * stamped with this Laisso's version. Needs no running Laisso.
  */
 export async function skill(opts: SkillOptions): Promise<number> {
   if (opts.action !== "install") {
-    console.error("usage: lasso skill install [--dry-run] [--json]");
+    console.error("usage: laisso skill install [--dry-run] [--json]");
     return 1;
   }
   const pkg = findPackageRoot();
@@ -44,8 +44,8 @@ export function renderInstall(installs: SkillInstall[], version: string, dryRun:
   return installs
     .map((i) => {
       const head = dryRun
-        ? `would ${i.replaces ? "replace" : "write"} ${i.dir} (${i.agent}) with the skill from Lasso ${version}:`
-        : `${i.replaces ? "replaced" : "wrote"} ${i.dir} (${i.agent}) with the skill from Lasso ${version}:`;
+        ? `would ${i.replaces ? "replace" : "write"} ${i.dir} (${i.agent}) with the skill from Laisso ${version}:`
+        : `${i.replaces ? "replaced" : "wrote"} ${i.dir} (${i.agent}) with the skill from Laisso ${version}:`;
       return [head, ...i.files.map((f) => `  ${f}`)].join("\n");
     })
     .join("\n\n");

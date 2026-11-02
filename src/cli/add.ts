@@ -14,12 +14,12 @@ export interface AddOptions {
   prs?: string[];
 }
 
-/** `lasso add`: server-side detection, one confirmation, then the new Ticket's id, name, and URL. */
+/** `laisso add`: server-side detection, one confirmation, then the new Ticket's id, name, and URL. */
 export async function add(opts: AddOptions): Promise<number> {
   const client = createClient(opts.portFlag);
   try {
     const input = opts.input.trim();
-    if (!input) throw new Error("usage: lasso add <reference | prompt>");
+    if (!input) throw new Error("usage: laisso add <reference | prompt>");
     const detection = await client.post<Detection>("/api/intake/detect", { input, repo: opts.repo, prs: opts.prs });
     const say = opts.json ? console.error : console.log;
     say(`${detection.kind}${detection.reference ? ` ${detection.reference}` : ""}: ${detection.title ?? input}`);

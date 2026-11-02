@@ -93,7 +93,7 @@ function pick<T>(ticket: T | null, pipeline: T | undefined, global: T): Resolved
 
 /**
  * The Sessions that count as tries at a Stage: a run cut off by shutdown is not one, nor a terminal handed back to
- * Lasso, the only terminal Session that ends with reason stop (spec: Budget).
+ * Laisso, the only terminal Session that ends with reason stop (spec: Budget).
  */
 function triesOf(rows: SessionRow[], stage: string): SessionRow[] {
   return rows.filter((r) => r.stage === stage && r.mode !== "action" && r.ended_reason !== "shutdown" && !(r.mode === "terminal" && r.ended_reason === "stop"));
@@ -164,7 +164,7 @@ export interface GaugeView {
   used: number;
   limit: number;
   source: BudgetLayer;
-  /** Set on a human Stage for what its terminal Session never adds to: wall time and spend (Lasso reads no terminal output). */
+  /** Set on a human Stage for what its terminal Session never adds to: wall time and spend (Laisso reads no terminal output). */
   untracked?: true;
 }
 

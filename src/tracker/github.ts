@@ -54,7 +54,7 @@ export class GithubTracker implements Tracker {
     const missing = add.filter((label) => first.stderr.includes(`'${label}' not found`));
     if (!missing.length) throw trackerFailure("gh", reference, first);
     for (const label of missing) {
-      const created = await runTool("gh", ["label", "create", label, "--repo", repo, "--color", LABEL_COLOR, "--description", "Set by Lasso", "--force"]);
+      const created = await runTool("gh", ["label", "create", label, "--repo", repo, "--color", LABEL_COLOR, "--description", "Set by Laisso", "--force"]);
       if (created.code !== 0) throw trackerFailure("gh", reference, created);
     }
     const again = await runTool("gh", args);

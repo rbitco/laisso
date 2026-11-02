@@ -1,6 +1,6 @@
 name: Release
 
-# Pushing a vX.Y.Z tag publishes @rbitco/lasso to the homelab Verdaccio
+# Pushing a vX.Y.Z tag publishes @rbitco/laisso to the homelab Verdaccio
 # (ADR 0013). The version lives only in the tag: package.json stays
 # 0.0.0-dev in git, since main only takes squash-merged PRs, and is set
 # from the tag here before packing.
@@ -9,7 +9,7 @@ name: Release
 # cannot reach it.
 #
 # A prerelease tag (vX.Y.Z-next.N) publishes under the npm dist-tag
-# `next`, so `npm i -g @rbitco/lasso@next` installs it while `latest`
+# `next`, so `npm i -g @rbitco/laisso@next` installs it while `latest`
 # and the upgrade notice stay on the last release.
 #
 # Run by hand (workflow_dispatch) it is a dry run: everything up to the
@@ -44,8 +44,8 @@ jobs:
 
       # Some tests commit in temporary repos.
       - run: |
-          git config --global user.name "lasso release"
-          git config --global user.email "release@lasso.invalid"
+          git config --global user.name "laisso release"
+          git config --global user.email "release@laisso.invalid"
 
       # The suite drives real processes against timing; on this shared
       # 4-core runner fewer workers, a longer per-test timeout and a retry
@@ -66,7 +66,7 @@ jobs:
 
       # Stops the release before anything is published if the tarball
       # does not install and serve as $VERSION.
-      - run: node scripts/smoke-test.ts "rbitco-lasso-$VERSION.tgz" "$VERSION"
+      - run: node scripts/smoke-test.ts "rbitco-laisso-$VERSION.tgz" "$VERSION"
 
       - name: Publish to npm.matty.rocks
         if: github.ref_type == 'tag'
@@ -75,7 +75,7 @@ jobs:
         run: |
           npmrc="$RUNNER_TEMP/.npmrc"
           echo "//npm.matty.rocks/:_authToken=${NPM_TOKEN}" > "$npmrc"
-          npm publish "rbitco-lasso-$VERSION.tgz" --tag "$DIST_TAG" --userconfig "$npmrc"
+          npm publish "rbitco-laisso-$VERSION.tgz" --tag "$DIST_TAG" --userconfig "$npmrc"
           rm -f "$npmrc"
 
       - name: GitHub Release
@@ -85,4 +85,4 @@ jobs:
         run: |
           prerelease=""
           if [ "$DIST_TAG" = next ]; then prerelease=--prerelease; fi
-          gh release create "$GITHUB_REF_NAME" "rbitco-lasso-$VERSION.tgz" --generate-notes $prerelease
+          gh release create "$GITHUB_REF_NAME" "rbitco-laisso-$VERSION.tgz" --generate-notes $prerelease

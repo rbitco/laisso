@@ -1,10 +1,10 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { startLassoWithRepos, runCli, type Lasso, type TrackerReply } from "./harness.ts";
+import { startLaissoWithRepos, runCli, type Laisso, type TrackerReply } from "./harness.ts";
 import type { IntakeResult, TicketDetail } from "../src/api/views.ts";
 import { checkArtifact, type OwnedPr } from "../src/artifact/check.ts";
 
 // The pr-* Artifacts judge every Owned PR, and Referenced PRs never count (LASSO-166).
-const running: Lasso[] = [];
+const running: Laisso[] = [];
 afterEach(async () => {
   while (running.length) await running.pop()!.destroy();
 });
@@ -51,7 +51,7 @@ const PIPELINE = `stages:
 
 const url = (n: number) => `https://github.com/owner/app/pull/${n}`;
 
-/** gh's answer to the lookup `lasso pr link` makes. */
+/** gh's answer to the lookup `laisso pr link` makes. */
 const lookup = (n: number): TrackerReply => ({
   tool: "gh",
   match: ["pr view", url(n), "--json"],
@@ -69,69 +69,69 @@ const read = (n: number, state: OwnedPr["state"], reviewed = false): TrackerRepl
 
 /** A Ticket with these PRs linked: Owned unless listed in `referenced`. */
 async function ticketWith(owned: number[], referenced: number[]) {
-  const started = await startLassoWithRepos({ app: { pipeline: "prs" } }, {}, { prs: PIPELINE });
-  running.push(started.lasso);
-  const { lasso } = started;
-  const ticket = await lasso.api<IntakeResult>("/api/tickets", { method: "POST", body: JSON.stringify({ input: "Add dark mode", repo: "app", pipeline: "prs" }) });
+  const started = await startLaissoWithRepos({ app: { pipeline: "prs" } }, {}, { prs: PIPELINE });
+  running.push(started.laisso);
+  const { laisso } = started;
+  const ticket = await laisso.api<IntakeResult>("/api/tickets", { method: "POST", body: JSON.stringify({ input: "Add dark mode", repo: "app", pipeline: "prs" }) });
   // After intake, which needs the real origin: bare PR numbers resolve against this one.
   started.repos.app!.git(["remote", "set-url", "origin", "https://github.com/owner/app.git"]);
-  for (const n of [...owned, ...referenced]) await lasso.tracker.reply(lookup(n));
-  for (const n of owned) expect((await runCli(["pr", "link", String(n), ticket.id], lasso)).code).toBe(0);
-  for (const n of referenced) expect((await runCli(["pr", "link", String(n), ticket.id, "--referenced"], lasso)).code).toBe(0);
+  for (const n of [...owned, ...referenced]) await laisso.tracker.reply(lookup(n));
+  for (const n of owned) expect((await runCli(["pr", "link", String(n), ticket.id], laisso)).code).toBe(0);
+  for (const n of referenced) expect((await runCli(["pr", "link", String(n), ticket.id, "--referenced"], laisso)).code).toBe(0);
   // Every Referenced PR is open and unreviewed: it would block both Artifacts if it counted.
-  for (const n of referenced) await lasso.tracker.reply(read(n, "OPEN"));
-  return { lasso, ticket };
+  for (const n of referenced) await laisso.tracker.reply(read(n, "OPEN"));
+  return { laisso, ticket };
 }
 
 /** Mark done without override: the Stage it reached, or the warning's detail. */
-async function markDone(lasso: Lasso, id: string): Promise<{ stage: string } | { detail: string }> {
-  const res = await lasso.api<Response>(`/api/tickets/${id}/done`, { method: "POST", raw: true, body: "{}" });
+async function markDone(laisso: Laisso, id: string): Promise<{ stage: string } | { detail: string }> {
+  const res = await laisso.api<Response>(`/api/tickets/${id}/done`, { method: "POST", raw: true, body: "{}" });
   if (res.status === 409) return { detail: ((await res.json()) as { detail: string }).detail };
   return { stage: ((await res.json()) as TicketDetail).stage.name };
 }
 
-const readsOf = async (lasso: Lasso, n: number) => (await lasso.tracker.calls()).filter((c) => c.args.includes("graphql") && c.args.includes(`n=${n}`)).length;
+const readsOf = async (laisso: Laisso, n: number) => (await laisso.tracker.calls()).filter((c) => c.args.includes("graphql") && c.args.includes(`n=${n}`)).length;
 
 describe("a Ticket's pr-* artifacts", () => {
   it("are missing with only a Referenced PR, and never read it", async () => {
-    const { lasso, ticket } = await ticketWith([], [30]);
-    expect(await markDone(lasso, ticket.id)).toEqual({ detail: "no Owned PR for the Ticket" });
-    expect(await readsOf(lasso, 30)).toBe(0);
+    const { laisso, ticket } = await ticketWith([], [30]);
+    expect(await markDone(laisso, ticket.id)).toEqual({ detail: "no Owned PR for the Ticket" });
+    expect(await readsOf(laisso, 30)).toBe(0);
   });
 
   it("judge one Owned PR beside an open, unreviewed Referenced PR", async () => {
-    const { lasso, ticket } = await ticketWith([12], [30]);
-    await lasso.tracker.reply(read(12, "OPEN"));
-    expect(await markDone(lasso, ticket.id)).toEqual({ detail: "nobody has reviewed PR #12" });
+    const { laisso, ticket } = await ticketWith([12], [30]);
+    await laisso.tracker.reply(read(12, "OPEN"));
+    expect(await markDone(laisso, ticket.id)).toEqual({ detail: "nobody has reviewed PR #12" });
 
-    await lasso.tracker.reply(read(12, "OPEN", true), true);
-    expect(await markDone(lasso, ticket.id)).toEqual({ stage: "merge" });
-    expect(await markDone(lasso, ticket.id)).toEqual({ detail: "PR #12 not merged" });
+    await laisso.tracker.reply(read(12, "OPEN", true), true);
+    expect(await markDone(laisso, ticket.id)).toEqual({ stage: "merge" });
+    expect(await markDone(laisso, ticket.id)).toEqual({ detail: "PR #12 not merged" });
 
-    await lasso.tracker.reply(read(12, "MERGED", true), true);
-    expect(await markDone(lasso, ticket.id)).toEqual({ stage: "ship" });
-    expect(await readsOf(lasso, 30)).toBe(0);
+    await laisso.tracker.reply(read(12, "MERGED", true), true);
+    expect(await markDone(laisso, ticket.id)).toEqual({ stage: "ship" });
+    expect(await readsOf(laisso, 30)).toBe(0);
   });
 
   it("judge several Owned PRs, naming every one that falls short", async () => {
-    const { lasso, ticket } = await ticketWith([12, 13, 15], [30]);
-    await lasso.tracker.reply(read(12, "OPEN"));
-    await lasso.tracker.reply(read(13, "MERGED"));
-    await lasso.tracker.reply(read(15, "OPEN"));
-    expect(await markDone(lasso, ticket.id)).toEqual({ detail: "nobody has reviewed PR #12, #15" });
+    const { laisso, ticket } = await ticketWith([12, 13, 15], [30]);
+    await laisso.tracker.reply(read(12, "OPEN"));
+    await laisso.tracker.reply(read(13, "MERGED"));
+    await laisso.tracker.reply(read(15, "OPEN"));
+    expect(await markDone(laisso, ticket.id)).toEqual({ detail: "nobody has reviewed PR #12, #15" });
 
-    await lasso.tracker.reply(read(15, "OPEN", true), true);
-    expect(await markDone(lasso, ticket.id)).toEqual({ detail: "nobody has reviewed PR #12" });
+    await laisso.tracker.reply(read(15, "OPEN", true), true);
+    expect(await markDone(laisso, ticket.id)).toEqual({ detail: "nobody has reviewed PR #12" });
 
-    await lasso.tracker.reply(read(12, "OPEN", true), true);
-    expect(await markDone(lasso, ticket.id)).toEqual({ stage: "merge" });
-    expect(await markDone(lasso, ticket.id)).toEqual({ detail: "PR #12, #15 not merged" });
+    await laisso.tracker.reply(read(12, "OPEN", true), true);
+    expect(await markDone(laisso, ticket.id)).toEqual({ stage: "merge" });
+    expect(await markDone(laisso, ticket.id)).toEqual({ detail: "PR #12, #15 not merged" });
 
-    await lasso.tracker.reply(read(12, "MERGED", true), true);
-    expect(await markDone(lasso, ticket.id)).toEqual({ detail: "PR #15 not merged" });
+    await laisso.tracker.reply(read(12, "MERGED", true), true);
+    expect(await markDone(laisso, ticket.id)).toEqual({ detail: "PR #15 not merged" });
 
-    await lasso.tracker.reply(read(15, "MERGED", true), true);
-    expect(await markDone(lasso, ticket.id)).toEqual({ stage: "ship" });
-    expect(await readsOf(lasso, 30)).toBe(0);
+    await laisso.tracker.reply(read(15, "MERGED", true), true);
+    expect(await markDone(laisso, ticket.id)).toEqual({ stage: "ship" });
+    expect(await readsOf(laisso, 30)).toBe(0);
   });
 });

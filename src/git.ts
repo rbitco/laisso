@@ -8,7 +8,7 @@ export const GIT_TIMEOUT_MS = 120_000;
 
 export class GitError extends Error {}
 
-/** Thin, promise-based git over a checkout. Lasso owns worktrees; Runners never touch them (ADR 0003). */
+/** Thin, promise-based git over a checkout. Laisso owns worktrees; Runners never touch them (ADR 0003). */
 export class Git {
   cwd: string;
   timeoutMs: number;
@@ -73,7 +73,7 @@ export class Git {
    * Make a worktree for `branch` at `dir`: an existing local or remote branch
    * is checked out; otherwise the branch is created from the head of origin's
    * PR `fromPr` when given, else from origin's default. A branch started at a
-   * PR tracks nothing, so a push names Lasso's branch on origin and nothing else.
+   * PR tracks nothing, so a push names Laisso's branch on origin and nothing else.
    * Returns whether the branch already existed.
    */
   async addWorktree(dir: string, branch: string, fromPr?: number): Promise<{ existed: boolean }> {
@@ -116,11 +116,11 @@ export class Git {
     return this.refExists(`refs/remotes/origin/${branch}`);
   }
 
-  /** Commit everything in a worktree under `message`; false when there was nothing to commit. Falls back to Lasso's own identity where git has none. */
+  /** Commit everything in a worktree under `message`; false when there was nothing to commit. Falls back to Laisso's own identity where git has none. */
   async commitAll(dir: string, message: string): Promise<boolean> {
     if (!(await this.exec(["status", "--porcelain"], dir))) return false;
     await this.exec(["add", "-A"], dir);
-    const identity = (await this.exec(["config", "--get", "user.email"], dir).catch(() => "")) ? [] : ["-c", "user.name=Lasso", "-c", "user.email=lasso@localhost"];
+    const identity = (await this.exec(["config", "--get", "user.email"], dir).catch(() => "")) ? [] : ["-c", "user.name=Laisso", "-c", "user.email=laisso@localhost"];
     // A salvage commit is not the repo's hooks to refuse.
     await this.exec([...identity, "commit", "--quiet", "--no-verify", "-m", message], dir);
     return true;

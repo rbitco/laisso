@@ -54,13 +54,13 @@ export interface PrRow {
   checks: CheckCounts;
   /** Worst state first. */
   reviewers: Reviewer[];
-  /** The Lasso Ticket for this PR, or null when Lasso has none. */
+  /** The Laisso Ticket for this PR, or null when Laisso has none. */
   ticket: PrTicket | null;
   /** The active and done Tickets that reference this PR, other than its own Ticket; Abandoned ones never show. */
   refs: PrTicket[];
 }
 
-/** The Lasso Ticket a PR row links to, read as the Ledger reads it. */
+/** The Laisso Ticket a PR row links to, read as the Ledger reads it. */
 export interface PrTicket {
   id: string;
   /** The Ticket's label: its name, else its reference, else its short id. */

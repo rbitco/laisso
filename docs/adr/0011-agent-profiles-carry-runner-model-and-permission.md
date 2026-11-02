@@ -7,7 +7,7 @@ status: accepted
 A Stage could only name a Runner and pass opaque `runnerOptions.args`, so
 choosing a model per Stage or running human Sessions in Claude's auto
 mode meant hand-writing CLI flags, and ADR 0003 kept permissions out of
-Lasso's model. We decided that a Stage runs under a named Agent Profile
+Laisso's model. We decided that a Stage runs under a named Agent Profile
 defined in `config.yaml`: a Runner plus typed `model`, `effort`, and
 `permission`, with `args` kept as an escape hatch. Each adapter maps the
 typed fields to its Runner's own flags. Raw args alone were not enough:
@@ -15,7 +15,7 @@ Codex rejects a repeated `-m`, `-s`, or `-a` and its adapter already
 passes `-s`, so a profile could not override the baseline by appending,
 and effort is a flag on Claude and Pi but a config key on Codex
 (research on `research/runner-cli-flags`). This amends ADR 0003's
-"Lasso does not model permissions" and ADR 0006's Pipeline `runner`.
+"Laisso does not model permissions" and ADR 0006's Pipeline `runner`.
 
 ## Considered Options
 
@@ -51,7 +51,7 @@ and effort is a flag on Claude and Pi but a config key on Codex
   resolved runner, model, effort, permission, and args it ran with.
 - Pipeline save and Intake check that each named profile exists for the
   repo; config load checks the runner, effort, and permission values.
-  Lasso keeps no model capability table; the dashboard warns on a short
+  Laisso keeps no model capability table; the dashboard warns on a short
   list of known bad pairs, such as Claude's Haiku with `auto`, which
   Claude silently runs in Manual.
 - Pipeline `runner:` and Stage `runner:` and `runnerOptions` are

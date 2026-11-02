@@ -2,7 +2,7 @@ import { accessSync, constants, statSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { profilesFor, type Config, type ProfileConfig } from "../server/config.ts";
-import { SHIPPED_PIPELINES, type LassoHome } from "../server/home.ts";
+import { SHIPPED_PIPELINES, type LaissoHome } from "../server/home.ts";
 import { listPipelines, loadPipeline, parsePipeline, type Pipeline, type RunnerName } from "../pipeline/load.ts";
 import { runTool, type ToolResult } from "../tracker/exec.ts";
 import { overridesOf, ticketLabel, type TicketRow } from "../store/tickets.ts";
@@ -14,14 +14,14 @@ export interface TicketUse {
   overrides: Record<string, string>;
 }
 
-/** What the tool check derives the needed tools from: config, the Pipelines in the Lasso home, and the active Tickets' profile overrides. */
+/** What the tool check derives the needed tools from: config, the Pipelines in the Laisso home, and the active Tickets' profile overrides. */
 export interface ToolUse {
   config: Config;
   pipelines: Pipeline[];
   tickets: TicketUse[];
 }
 
-/** One external tool Lasso runs, with why. An optional tool only improves something and is reported as info. */
+/** One external tool Laisso runs, with why. An optional tool only improves something and is reported as info. */
 export interface NeededTool {
   name: string;
   optional: boolean;
@@ -57,7 +57,7 @@ const LOGIN_CHECKS: Record<string, { args: string[]; loggedIn: (r: ToolResult) =
   claude: { args: ["auth", "status"], loggedIn: claudeLoggedIn },
 };
 
-/** Artifacts Lasso checks by reading the PR through gh. */
+/** Artifacts Laisso checks by reading the PR through gh. */
 const PR_ARTIFACTS = new Set(["pr-exists", "pr-review", "pr-merged"]);
 
 /**
@@ -117,7 +117,7 @@ export function neededTools(use: ToolUse): NeededTool[] {
   for (const [repo, r] of Object.entries(config.repos)) actionNeeds(r.actions, `repo ${repo}'s `);
   if (Object.keys(config.pr_lists).length) need("gh", "PR Lists (pr_lists)");
 
-  // auto opens herdr or tmux only when Lasso already runs inside it, so only a terminal config names outright is needed.
+  // auto opens herdr or tmux only when Laisso already runs inside it, so only a terminal config names outright is needed.
   if (config.terminal === "herdr" || config.terminal === "tmux") need(config.terminal, `terminal: ${config.terminal}`);
   if (config.notifications.enabled) need("terminal-notifier", "notifications that open the Ticket on click (osascript otherwise)", true);
 
@@ -161,9 +161,9 @@ function claudeLoggedIn(r: ToolResult): boolean {
   return r.code === 0;
 }
 
-/** What Lasso says when a tool something needs is not on PATH: the tool, what wanted it, and the fix. */
+/** What Laisso says when a tool something needs is not on PATH: the tool, what wanted it, and the fix. */
 export function notOnPath(tool: string, neededBy: string): string {
-  return `${tool} not found on PATH (${neededBy}); run lasso doctor`;
+  return `${tool} not found on PATH (${neededBy}); run laisso doctor`;
 }
 
 /**
@@ -196,10 +196,10 @@ export function findOnPath(env: NodeJS.ProcessEnv = process.env): Lookup {
 export const runCommand: RunCommand = (command, args) => runTool(command, args);
 
 /**
- * The Pipelines in the Lasso home that load; a home with none yet gets the
- * shipped Pipelines, as Lasso writes them on first start.
+ * The Pipelines in the Laisso home that load; a home with none yet gets the
+ * shipped Pipelines, as Laisso writes them on first start.
  */
-export function homePipelines(home: LassoHome): Pipeline[] {
+export function homePipelines(home: LaissoHome): Pipeline[] {
   const names = listPipelines(home.pipelinesDir);
   if (names.length === 0) return Object.entries(SHIPPED_PIPELINES).map(([name, yaml]) => parsePipeline(name, yaml));
   const pipelines: Pipeline[] = [];
@@ -207,7 +207,7 @@ export function homePipelines(home: LassoHome): Pipeline[] {
     try {
       pipelines.push(loadPipeline(home.pipelinesDir, name));
     } catch {
-      // a broken Pipeline names nothing Lasso can run
+      // a broken Pipeline names nothing Laisso can run
     }
   }
   return pipelines;
@@ -220,10 +220,10 @@ export function ticketUse(row: Pick<TicketRow, "id" | "reference" | "name" | "re
 
 /**
  * Active Tickets' overrides read straight from the store, for doctor, which
- * runs without the Lasso process (ADR 0008: it never writes the store). A
+ * runs without the Laisso process (ADR 0008: it never writes the store). A
  * store that is missing or not readable yet means no Tickets.
  */
-export function storeTickets(home: LassoHome): TicketUse[] {
+export function storeTickets(home: LaissoHome): TicketUse[] {
   let db: DatabaseSync | null = null;
   try {
     db = new DatabaseSync(home.dbFile, { readOnly: true });

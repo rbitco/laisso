@@ -24,7 +24,7 @@ export interface TickStatus {
 export type Trigger = "timer" | "check-now" | "startup" | "start" | "session-end" | "pr-link" | "late-work";
 
 /**
- * The global tick: the one clock Lasso runs on. Every poll of a PR, every
+ * The global tick: the one clock Laisso runs on. Every poll of a PR, every
  * pending mirror retry, every queued Session start happens inside a tick.
  * Check now runs one immediately; the timer runs one every `tickSeconds`.
  */

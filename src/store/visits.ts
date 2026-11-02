@@ -16,7 +16,7 @@ export interface ArtifactCheck {
   /** The last line of its output, or why it could not run. */
   line: string | null;
   /**
-   * The Route this run picked with `lasso route`, and its `--note` (LASSO-192). Kept only when the run was met; a
+   * The Route this run picked with `laisso route`, and its `--note` (LASSO-192). Kept only when the run was met; a
    * not-met or broken run's pick is discarded. The run's id is the Visit's check_run.
    */
   route?: string;
@@ -52,7 +52,7 @@ export interface VisitRow {
   picked_route: string | null;
   picked_note: string | null;
   picked_by: ChosenBy | null;
-  /** The latest check Action run here, as JSON (ADR 0014), and the id of that run (its LASSO_SESSION). */
+  /** The latest check Action run here, as JSON (ADR 0014), and the id of that run (its LAISSO_SESSION). */
   check_result: string | null;
   check_run: string | null;
   /** When a human skipped the Stage on this Visit (LASSO-159). */

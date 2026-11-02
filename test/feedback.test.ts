@@ -18,7 +18,7 @@ const comment = (id: number, author: string, body: string, m: number) => ({ id: 
 const check = (id: number, conclusion: string | null, status = "completed") => ({ id: String(id), name: "test", status, conclusion, url: `c/${id}`, at: at(1) });
 
 describe("outstanding", () => {
-  it("lists failed checks, unresolved threads, unanswered comments, and a changes-requested verdict; skips Lasso's own marked comments", () => {
+  it("lists failed checks, unresolved threads, unanswered comments, and a changes-requested verdict; skips Laisso's own marked comments", () => {
     const items = outstanding(facts({
       reviewDecision: "CHANGES_REQUESTED",
       reviews: [{ id: "5", state: "CHANGES_REQUESTED", author: "alice", body: "No.", url: "r/5", submittedAt: at(2) }],
@@ -92,7 +92,7 @@ describe("addressedEvidence", () => {
   it("is null while nothing changed", () => {
     const same = facts({ threads: [thread(false, [comment(1, "alice", "Fix", 1)])], comments: [comment(10, "bob", "Add docs", 1)], reviewDecision: "CHANGES_REQUESTED" });
     expect(base.map((i) => addressedEvidence(i, same, own, false))).toEqual([null, null, null, null]);
-    // An unmarked reply from someone else is not Lasso addressing the comment.
+    // An unmarked reply from someone else is not Laisso addressing the comment.
     expect(addressedEvidence(commentItem!, facts({ comments: [comment(10, "bob", "Add docs", 1), comment(11, "carol", "+1", 4)] }), own, false)).toBeNull();
   });
 });
@@ -169,7 +169,7 @@ describe("withoutIgnored", () => {
 
   it("drops comments by ignored authors, so they are never Feedback, but keeps marked replies to pair with what they answer", () => {
     const items = outstanding(withoutIgnored(facts({
-      // bob asked, then me noted something, then Lasso (posting as me) answered bob.
+      // bob asked, then me noted something, then Laisso (posting as me) answered bob.
       comments: [comment(10, "bob", "Add docs", 1), comment(11, "me", "Note to self", 2), comment(12, "me", `Done\n${mark}`, 3), comment(13, "octocat", "FYI", 4)],
     }), own, ignored), own);
     expect(items).toEqual([]);

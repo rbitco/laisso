@@ -7,22 +7,22 @@ export interface PrOptions {
   action?: string;
   /** The PR, for link and unlink. */
   pr?: string;
-  /** The Ticket as `lasso status` takes it; $LASSO_TICKET when not given. */
+  /** The Ticket as `laisso status` takes it; $LAISSO_TICKET when not given. */
   ticket?: string;
   referenced: boolean;
   json: boolean;
 }
 
-const USAGE = "usage: lasso pr link <pr> [ticket] [--referenced] | lasso pr unlink <pr> [ticket] | lasso pr list [ticket] [--json]";
+const USAGE = "usage: laisso pr link <pr> [ticket] [--referenced] | laisso pr unlink <pr> [ticket] | laisso pr list [ticket] [--json]";
 
-/** `lasso pr link | unlink | list`: a Ticket's PR links, by the Ticket named or the Session's own. */
+/** `laisso pr link | unlink | list`: a Ticket's PR links, by the Ticket named or the Session's own. */
 export async function pr(opts: PrOptions): Promise<number> {
   const client = createClient(opts.portFlag);
   try {
     if (opts.action !== "link" && opts.action !== "unlink" && opts.action !== "list") throw new Error(USAGE);
     if (opts.action !== "list" && !opts.pr) throw new Error(USAGE);
-    const ticket = opts.ticket ?? process.env.LASSO_TICKET;
-    if (!ticket) throw new Error("no Ticket: name one, or run inside a Session, where $LASSO_TICKET names it");
+    const ticket = opts.ticket ?? process.env.LAISSO_TICKET;
+    if (!ticket) throw new Error("no Ticket: name one, or run inside a Session, where $LAISSO_TICKET names it");
     const route = `/api/tickets/${encodeURIComponent(ticket)}/prs`;
     if (opts.action === "list") {
       const prs = await client.get<PrView[]>(route);

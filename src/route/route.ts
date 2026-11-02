@@ -94,7 +94,7 @@ export type Exit = { kind: "walk" } | TakeRoute | Conflict | RouteFlag | { kind:
 /**
  * An Action's pick is taken only when it exits 0; a failed run Flags as it
  * always has, with the pick shown but not taken. No pick walks forward. A
- * pick the Stage does not declare cannot be recorded (`lasso route` checks
+ * pick the Stage does not declare cannot be recorded (`laisso route` checks
  * the name), so one met here is ignored.
  *
  * When the Stage's own run and its check both pick: one pick, or the same

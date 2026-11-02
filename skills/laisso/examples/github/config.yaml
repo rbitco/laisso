@@ -1,4 +1,4 @@
-# A Lasso home's config.yaml for one GitHub-tracked repo. Pair it with
+# A Laisso home's config.yaml for one GitHub-tracked repo. Pair it with
 # pipelines/github.yaml beside it. Every key not shown keeps its default.
 
 repos:
@@ -18,26 +18,26 @@ repos:
         permission: auto
 
 actions:
-  # A GitHub issue is only open or closed. Kept global, so Lasso adds no
+  # A GitHub issue is only open or closed. Kept global, so Laisso adds no
   # acli version on start and acli is not needed on a GitHub-only machine.
   tracker.transition:
     params: [status]
     run: |
-      [ -n "$LASSO_REFERENCE" ] || { echo "$LASSO_STAGE: the Ticket has no tracker issue yet" >&2; exit 1; }
-      case "$(printf %s "$LASSO_STATUS" | tr '[:upper:]' '[:lower:]')" in
+      [ -n "$LAISSO_REFERENCE" ] || { echo "$LAISSO_STAGE: the Ticket has no tracker issue yet" >&2; exit 1; }
+      case "$(printf %s "$LAISSO_STATUS" | tr '[:upper:]' '[:lower:]')" in
         closed) verb=close ;;
         open) verb=reopen ;;
-        *) echo "GitHub accepts only open and closed, not $LASSO_STATUS" >&2; exit 1 ;;
+        *) echo "GitHub accepts only open and closed, not $LAISSO_STATUS" >&2; exit 1 ;;
       esac
-      gh issue "$verb" "${LASSO_REFERENCE##*#}" --repo "${LASSO_REFERENCE%#*}" >&2 || exit $?
-      echo "moved $LASSO_REFERENCE to $LASSO_STATUS"
+      gh issue "$verb" "${LAISSO_REFERENCE##*#}" --repo "${LAISSO_REFERENCE%#*}" >&2 || exit $?
+      echo "moved $LAISSO_REFERENCE to $LAISSO_STATUS"
   # An Action of the user's own: label the issue as the Ticket moves.
   gh.label:
     params: [label]
     timeout: 1m
     run: |
-      gh issue edit "${LASSO_REFERENCE##*#}" --repo "${LASSO_REFERENCE%#*}" --add-label "$LASSO_LABEL" >&2 || exit $?
-      echo "labelled $LASSO_REFERENCE $LASSO_LABEL"
+      gh issue edit "${LAISSO_REFERENCE##*#}" --repo "${LAISSO_REFERENCE%#*}" --add-label "$LAISSO_LABEL" >&2 || exit $?
+      echo "labelled $LAISSO_REFERENCE $LAISSO_LABEL"
 
 profiles:
   claude-fable:

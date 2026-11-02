@@ -4,8 +4,8 @@ import { api } from "../api.ts";
 import { useEvents } from "../events.ts";
 
 /**
- * The header's version notice: a newer Lasso published, or one installed and waiting on a restart. Read on load,
- * when Lasso comes back, and when the notice changes; hidden while there is nothing to say or Lasso cannot be asked.
+ * The header's version notice: a newer Laisso published, or one installed and waiting on a restart. Read on load,
+ * when Laisso comes back, and when the notice changes; hidden while there is nothing to say or Laisso cannot be asked.
  */
 export function VersionNotice() {
   const [text, setText] = useState<string | null>(null);

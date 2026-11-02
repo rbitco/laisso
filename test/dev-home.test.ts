@@ -5,74 +5,74 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { parse } from "yaml";
-import { devEnv, lassoArgs } from "../scripts/dev-env.ts";
+import { devEnv, laissoArgs } from "../scripts/dev-env.ts";
 import { ConfigError, DEFAULT_CONFIG, DEFAULT_CONFIG_YAML } from "../src/server/config.ts";
 import { ensureHome, resolveHome } from "../src/server/home.ts";
-import { freePort, startLasso, runCli, type Lasso } from "./harness.ts";
+import { freePort, startLaisso, runCli, type Laisso } from "./harness.ts";
 import type { Health } from "../src/api/views.ts";
 
-// A dev clone's `pnpm start` and `pnpm dev` run in their own Lasso home and port, so the installed Lasso and a dev
-// clone run side by side; `lasso status` says which one answered.
+// A dev clone's `pnpm start` and `pnpm dev` run in their own Laisso home and port, so the installed Laisso and a dev
+// clone run side by side; `laisso status` says which one answered.
 
 const START = path.resolve(import.meta.dirname, "..", "scripts", "start.ts");
 
 describe("the dev clone's defaults", () => {
-  it("are ~/.lasso-dev and port 7434 when LASSO_HOME and LASSO_PORT are unset or empty", () => {
-    expect(devEnv({}, "/Users/me")).toEqual({ LASSO_HOME: "/Users/me/.lasso-dev", LASSO_PORT: "7434" });
-    expect(devEnv({ LASSO_HOME: "", LASSO_PORT: "" }, "/Users/me")).toEqual({ LASSO_HOME: "/Users/me/.lasso-dev", LASSO_PORT: "7434" });
+  it("are ~/.laisso-dev and port 7434 when LAISSO_HOME and LAISSO_PORT are unset or empty", () => {
+    expect(devEnv({}, "/Users/me")).toEqual({ LAISSO_HOME: "/Users/me/.laisso-dev", LAISSO_PORT: "7434" });
+    expect(devEnv({ LAISSO_HOME: "", LAISSO_PORT: "" }, "/Users/me")).toEqual({ LAISSO_HOME: "/Users/me/.laisso-dev", LAISSO_PORT: "7434" });
   });
 
-  it("give way to an explicit LASSO_HOME or LASSO_PORT, each on its own", () => {
-    expect(devEnv({ LASSO_HOME: "/Users/me/.lasso" }, "/Users/me")).toEqual({ LASSO_HOME: "/Users/me/.lasso", LASSO_PORT: "7434" });
-    expect(devEnv({ LASSO_PORT: "7500" }, "/Users/me")).toEqual({ LASSO_HOME: "/Users/me/.lasso-dev", LASSO_PORT: "7500" });
+  it("give way to an explicit LAISSO_HOME or LAISSO_PORT, each on its own", () => {
+    expect(devEnv({ LAISSO_HOME: "/Users/me/.laisso" }, "/Users/me")).toEqual({ LAISSO_HOME: "/Users/me/.laisso", LAISSO_PORT: "7434" });
+    expect(devEnv({ LAISSO_PORT: "7500" }, "/Users/me")).toEqual({ LAISSO_HOME: "/Users/me/.laisso-dev", LAISSO_PORT: "7500" });
   });
 
-  it("pass Lasso's arguments through, without the -- pnpm keeps", () => {
-    expect(lassoArgs(["--", "--port", "7500"])).toEqual(["--port", "7500"]);
-    expect(lassoArgs(["--", "status"])).toEqual(["status"]);
-    expect(lassoArgs(["status", "--json"])).toEqual(["status", "--json"]);
-    expect(lassoArgs([])).toEqual([]);
+  it("pass Laisso's arguments through, without the -- pnpm keeps", () => {
+    expect(laissoArgs(["--", "--port", "7500"])).toEqual(["--port", "7500"]);
+    expect(laissoArgs(["--", "status"])).toEqual(["status"]);
+    expect(laissoArgs(["status", "--json"])).toEqual(["status", "--json"]);
+    expect(laissoArgs([])).toEqual([]);
   });
 });
 
 describe("a new home's config.yaml", () => {
-  const newHome = () => resolveHome({ LASSO_HOME: mkdtempSync(path.join(tmpdir(), "lasso-devhome-")) });
+  const newHome = () => resolveHome({ LAISSO_HOME: mkdtempSync(path.join(tmpdir(), "laisso-devhome-")) });
 
-  it("takes its port from LASSO_PORT and is otherwise the default", () => {
+  it("takes its port from LAISSO_PORT and is otherwise the default", () => {
     const home = newHome();
-    expect(ensureHome(home, { LASSO_PORT: "7434" }).wroteConfig).toBe(true);
+    expect(ensureHome(home, { LAISSO_PORT: "7434" }).wroteConfig).toBe(true);
     const text = readFileSync(home.configFile, "utf8");
     expect(text).toContain("port: 7434         # dashboard and API port");
     expect(parse(text)).toEqual({ ...DEFAULT_CONFIG, port: 7434 });
   });
 
-  it("is the default without LASSO_PORT", () => {
+  it("is the default without LAISSO_PORT", () => {
     const home = newHome();
     ensureHome(home, {});
     expect(readFileSync(home.configFile, "utf8")).toBe(DEFAULT_CONFIG_YAML);
   });
 
-  it("is never rewritten for LASSO_PORT once it exists", () => {
+  it("is never rewritten for LAISSO_PORT once it exists", () => {
     const home = newHome();
     ensureHome(home, {});
     writeFileSync(home.configFile, "port: 9000\n");
-    expect(ensureHome(home, { LASSO_PORT: "7434" }).wroteConfig).toBe(false);
+    expect(ensureHome(home, { LAISSO_PORT: "7434" }).wroteConfig).toBe(false);
     expect(readFileSync(home.configFile, "utf8")).toBe("port: 9000\n");
   });
 
-  it("refuses a LASSO_PORT that is not a port number, and writes nothing", () => {
+  it("refuses a LAISSO_PORT that is not a port number, and writes nothing", () => {
     for (const bad of ["abc", "0", "70000", "74.5"]) {
       const home = newHome();
-      expect(() => ensureHome(home, { LASSO_PORT: bad })).toThrow(new ConfigError(`LASSO_PORT must be a port number, not ${bad}`));
+      expect(() => ensureHome(home, { LAISSO_PORT: bad })).toThrow(new ConfigError(`LAISSO_PORT must be a port number, not ${bad}`));
       expect(existsSync(home.configFile)).toBe(false);
     }
   });
 });
 
-/** The environment `pnpm start` sees in a clone: a home directory of its own, no LASSO_HOME, and the given LASSO_PORT. */
+/** The environment `pnpm start` sees in a clone: a home directory of its own, no LAISSO_HOME, and the given LAISSO_PORT. */
 function cloneEnv(homedir: string, port: number): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env, HOME: homedir, LASSO_PORT: String(port) };
-  delete env.LASSO_HOME;
+  const env: NodeJS.ProcessEnv = { ...process.env, HOME: homedir, LAISSO_PORT: String(port) };
+  delete env.LAISSO_HOME;
   return env;
 }
 
@@ -91,11 +91,11 @@ describe("pnpm start in a dev clone", () => {
     while (cleanups.length) await cleanups.pop()!();
   });
 
-  it("runs in ~/.lasso-dev on LASSO_PORT beside an installed Lasso, and status says which answered", async () => {
-    const installed: Lasso = await startLasso();
+  it("runs in ~/.laisso-dev on LAISSO_PORT beside an installed Laisso, and status says which answered", async () => {
+    const installed: Laisso = await startLaisso();
     cleanups.push(() => installed.destroy());
 
-    const homedir = await mkdtemp(path.join(tmpdir(), "lasso-clone-"));
+    const homedir = await mkdtemp(path.join(tmpdir(), "laisso-clone-"));
     cleanups.push(() => rm(homedir, { recursive: true, force: true }));
     const port = await freePort();
     const env = cloneEnv(homedir, port);
@@ -109,7 +109,7 @@ describe("pnpm start in a dev clone", () => {
       await exited;
     });
 
-    const devHome = path.join(homedir, ".lasso-dev");
+    const devHome = path.join(homedir, ".laisso-dev");
     const health = await waitForHealth(`http://localhost:${port}`, () => out);
     expect(health).toMatchObject({ ok: true, version: "0.0.0-dev", home: devHome });
     expect(parse(readFileSync(path.join(devHome, "config.yaml"), "utf8")).port).toBe(port);
@@ -119,13 +119,13 @@ describe("pnpm start in a dev clone", () => {
 
     const dev = await runStart(["--", "status"], env);
     expect(dev.code).toBe(0);
-    expect(dev.stdout.split("\n")[0]).toBe(`lasso 0.0.0-dev  home ${devHome}`);
+    expect(dev.stdout.split("\n")[0]).toBe(`laisso 0.0.0-dev  home ${devHome}`);
     const other = await runCli(["status"], installed);
-    expect(other.stdout.split("\n")[0]).toBe(`lasso 0.0.0-dev  home ${installed.home}`);
+    expect(other.stdout.split("\n")[0]).toBe(`laisso 0.0.0-dev  home ${installed.home}`);
   });
 
-  it("takes Lasso's options after the -- pnpm passes through", async () => {
-    const homedir = await mkdtemp(path.join(tmpdir(), "lasso-clone-"));
+  it("takes Laisso's options after the -- pnpm passes through", async () => {
+    const homedir = await mkdtemp(path.join(tmpdir(), "laisso-clone-"));
     cleanups.push(() => rm(homedir, { recursive: true, force: true }));
     const env = cloneEnv(homedir, await freePort());
     const help = await runStart(["--", "--help"], env);
@@ -133,7 +133,7 @@ describe("pnpm start in a dev clone", () => {
     expect(help.stdout).toContain("usage:");
     // Nothing listens on the port: the client got past argument parsing to the request.
     const status = await runStart(["--", "--port", String(await freePort()), "status"], env);
-    expect(status.stderr.trim()).toBe("lasso is not running");
+    expect(status.stderr.trim()).toBe("laisso is not running");
   });
 });
 
@@ -148,5 +148,5 @@ async function waitForHealth(url: string, out: () => string): Promise<Health> {
     }
     await new Promise((r) => setTimeout(r, 50));
   }
-  throw new Error(`the dev Lasso did not become healthy in time:\n${out()}`);
+  throw new Error(`the dev Laisso did not become healthy in time:\n${out()}`);
 }

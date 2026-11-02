@@ -12,14 +12,14 @@ import { PrLinks } from "../src/store/links.ts";
 
 const PR = "https://github.com/owner/app/pull/7";
 
-// The store across upgrades and downgrades (LASSO-95): refuse one a newer Lasso migrated, back one up before migrating it.
+// The store across upgrades and downgrades (LASSO-95): refuse one a newer Laisso migrated, back one up before migrating it.
 const dirs: string[] = [];
 afterEach(async () => {
   while (dirs.length) await rm(dirs.pop()!, { recursive: true, force: true });
 });
 
 async function tempDir(): Promise<string> {
-  const dir = await mkdtemp(path.join(tmpdir(), "lasso-store-"));
+  const dir = await mkdtemp(path.join(tmpdir(), "laisso-store-"));
   dirs.push(dir);
   return dir;
 }
@@ -104,10 +104,10 @@ function storeBeforeLinks(file: string): DatabaseSync {
 
 const backupsIn = (dir: string): string[] => (existsSync(dir) ? readdirSync(dir).sort() : []);
 
-describe("a store a newer Lasso migrated", () => {
+describe("a store a newer Laisso migrated", () => {
   it("is refused with the schema it was left at, and left unmodified", async () => {
     const dir = await tempDir();
-    const file = path.join(dir, "lasso.db");
+    const file = path.join(dir, "laisso.db");
     storeAt(file, SCHEMA_VERSION + 1);
     const before = hashOf(file);
     let refused: unknown;
@@ -117,29 +117,29 @@ describe("a store a newer Lasso migrated", () => {
       refused = error;
     }
     expect(refused).toBeInstanceOf(StoreTooNew);
-    expect((refused as Error).message).toBe(`this Lasso home was last used by a newer Lasso (schema ${SCHEMA_VERSION + 1}); install that version or newer`);
+    expect((refused as Error).message).toBe(`this Laisso home was last used by a newer Laisso (schema ${SCHEMA_VERSION + 1}); install that version or newer`);
     expect(hashOf(file)).toBe(before);
     expect(schemaOf(file)).toBe(SCHEMA_VERSION + 1);
     expect(backupsIn(path.join(dir, "backups"))).toEqual([]);
   });
 
-  it("stops lasso at startup with that message", async () => {
+  it("stops laisso at startup with that message", async () => {
     const { home, pathDir } = await makeHome();
     dirs.push(path.dirname(home));
-    storeAt(path.join(home, "lasso.db"), SCHEMA_VERSION + 3);
+    storeAt(path.join(home, "laisso.db"), SCHEMA_VERSION + 3);
     const result = await runCli([], { home, pathDir, port: await freePort() });
     expect(result.code).toBe(1);
-    expect(result.stderr).toContain(`this Lasso home was last used by a newer Lasso (schema ${SCHEMA_VERSION + 3}); install that version or newer`);
-    expect(schemaOf(path.join(home, "lasso.db"))).toBe(SCHEMA_VERSION + 3);
+    expect(result.stderr).toContain(`this Laisso home was last used by a newer Laisso (schema ${SCHEMA_VERSION + 3}); install that version or newer`);
+    expect(schemaOf(path.join(home, "laisso.db"))).toBe(SCHEMA_VERSION + 3);
   });
 });
 
 describe("the store backup before migrating", () => {
   it("writes exactly one copy, with uncheckpointed WAL writes, named with the old schema and date", async () => {
     const dir = await tempDir();
-    const file = path.join(dir, "lasso.db");
+    const file = path.join(dir, "laisso.db");
     const backups = path.join(dir, "backups");
-    // An open connection keeps this write in the WAL, not yet in lasso.db.
+    // An open connection keeps this write in the WAL, not yet in laisso.db.
     const old = storeOneBehind(file);
     old.exec(`INSERT INTO pipeline_versions (pipeline, version, definition, created_at) VALUES ('work', 1, '{}', '2026-10-13')`);
     try {
@@ -147,7 +147,7 @@ describe("the store backup before migrating", () => {
     } finally {
       old.close();
     }
-    expect(backupsIn(backups)).toEqual([`lasso-2026-10-13T09-30-00Z-schema${SCHEMA_VERSION - 1}.db`]);
+    expect(backupsIn(backups)).toEqual([`laisso-2026-10-13T09-30-00Z-schema${SCHEMA_VERSION - 1}.db`]);
     const copy = path.join(backups, backupsIn(backups)[0]!);
     expect(schemaOf(copy)).toBe(SCHEMA_VERSION - 1);
     const db = new DatabaseSync(copy);
@@ -162,7 +162,7 @@ describe("the store backup before migrating", () => {
 
   it("moves each Ticket's PR into an Owned link from its branch, with its status, watermark and pending Round, and drops the old columns", async () => {
     const dir = await tempDir();
-    const file = path.join(dir, "lasso.db");
+    const file = path.join(dir, "laisso.db");
     const old = storeBeforeLinks(file);
     const status = JSON.stringify({ number: 7, url: PR, state: "OPEN", checks: "green", fresh: 1, outstanding: 1, at: "2026-10-13T10:00:00Z" });
     const due = JSON.stringify({ pr: { number: 7, url: PR }, headSha: "aaaaaaa1", items: [], watermark: "2026-10-13T10:00:00Z" });
@@ -187,7 +187,7 @@ describe("the store backup before migrating", () => {
 
   it("names the PR each Feedback item was on: its Ticket's one PR", async () => {
     const dir = await tempDir();
-    const file = path.join(dir, "lasso.db");
+    const file = path.join(dir, "laisso.db");
     const old = storeBeforeLinks(file);
     old.exec(`INSERT INTO tickets (id, repo, origin, title, pipeline, stage, state, branch, worktree, pr, created_at, updated_at)
               VALUES ('01T', 'r', 'prompt', 't', 'work', 'review', 'active', 'b', 'w', '${PR}', '2026-10-13', '2026-10-13');
@@ -204,7 +204,7 @@ describe("the store backup before migrating", () => {
 
   it("backfills a Visit per Stage each Ticket reached, links its Sessions, and moves checks and Skips onto them (LASSO-189)", async () => {
     const dir = await tempDir();
-    const file = path.join(dir, "lasso.db");
+    const file = path.join(dir, "laisso.db");
     const old = storeBeforeVisits(file);
     const definition = JSON.stringify({ name: "work", stages: ["grill", "implement", "review", "ship"].map((name) => ({ name })) });
     old.prepare(`INSERT INTO pipeline_versions (pipeline, version, definition, created_at) VALUES ('work', 1, ?, 'T0')`).run(definition);
@@ -258,7 +258,7 @@ describe("the store backup before migrating", () => {
 
   it("is not taken when nothing migrates, or for a brand-new store", async () => {
     const dir = await tempDir();
-    const file = path.join(dir, "lasso.db");
+    const file = path.join(dir, "laisso.db");
     const backups = path.join(dir, "backups");
     new Store(file, { backupsDir: backups }).close();
     new Store(file, { backupsDir: backups }).close();
@@ -267,24 +267,24 @@ describe("the store backup before migrating", () => {
 
   it("keeps only the newest five", async () => {
     const dir = await tempDir();
-    const file = path.join(dir, "lasso.db");
+    const file = path.join(dir, "laisso.db");
     const backups = path.join(dir, "backups");
     await mkdir(backups);
-    // Something else in backups/ is not Lasso's to prune.
+    // Something else in backups/ is not Laisso's to prune.
     await writeFile(path.join(backups, "notes.txt"), "mine");
     for (let day = 1; day <= KEEP_BACKUPS + 2; day++) {
       storeOneBehind(file).close();
       new Store(file, { backupsDir: backups, now: () => new Date(`2026-10-0${day}T12:00:00Z`) }).close();
     }
     const old = SCHEMA_VERSION - 1;
-    expect(backupsIn(backups)).toEqual([...[3, 4, 5, 6, 7].map((day) => `lasso-2026-10-0${day}T12-00-00Z-schema${old}.db`), "notes.txt"]);
+    expect(backupsIn(backups)).toEqual([...[3, 4, 5, 6, 7].map((day) => `laisso-2026-10-0${day}T12-00-00Z-schema${old}.db`), "notes.txt"]);
   });
 });
 
 describe("a Ticket's PR links", () => {
   async function linked(githubOf?: (repo: string) => { owner: string; name: string } | null) {
     const dir = await tempDir();
-    const store = new Store(path.join(dir, "lasso.db"));
+    const store = new Store(path.join(dir, "laisso.db"));
     const tickets = new Tickets(store.db);
     const links = new PrLinks(store.db, undefined, githubOf);
     const ticket = (id: string, reference: string): TicketRow =>

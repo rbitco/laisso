@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { actionsFor, currentConfig, type Config } from "../server/config.ts";
-import type { LassoHome } from "../server/home.ts";
+import type { LaissoHome } from "../server/home.ts";
 import type { Logger } from "../server/log.ts";
 import type { TicketRow } from "../store/tickets.ts";
 import type { PrLinks } from "../store/links.ts";
@@ -11,14 +11,14 @@ import type { ActionProbe, ArtifactVerdict } from "./check.ts";
 
 export interface ActionChecksDeps {
   config: Config;
-  home: LassoHome;
+  home: LaissoHome;
   links: PrLinks;
   visits: Visits;
   log: Logger;
 }
 
 /**
- * A check run under way: its id is the run's LASSO_SESSION, so `lasso route`
+ * A check run under way: its id is the run's LAISSO_SESSION, so `laisso route`
  * inside it can pick a Route (LASSO-192). The pick lives here until the run
  * ends, and is kept on the Visit's check result only when the run is met.
  */
@@ -43,7 +43,7 @@ export class ActionChecks {
   private live = new Set<RunningCommand>();
   /** Tickets with a check running now: a poll leaves them alone rather than run a second. */
   private busy = new Set<string>();
-  /** The check runs under way, by id; a run's id stops naming one once it ends, so a late `lasso route` from it is refused. */
+  /** The check runs under way, by id; a run's id stops naming one once it ends, so a late `laisso route` from it is refused. */
   private runs = new Map<string, CheckRun>();
 
   constructor(deps: ActionChecksDeps) {
@@ -60,7 +60,7 @@ export class ActionChecks {
     return this.busy.has(ticket);
   }
 
-  /** The check run under way with this id, whose pick `lasso route` sets; null once it has ended or for any other id. */
+  /** The check run under way with this id, whose pick `laisso route` sets; null once it has ended or for any other id. */
   liveRun(id: string): CheckRun | null {
     return this.runs.get(id) ?? null;
   }

@@ -24,13 +24,13 @@ function filesUnder(dir: string): string[] {
 const markdown = filesUnder(SKILL).filter((f) => f.endsWith(".md"));
 
 /**
- * The skill's examples are checked with Lasso's own parsers, so docs that drift from the formats fail here.
+ * The skill's examples are checked with Laisso's own parsers, so docs that drift from the formats fail here.
  *
- * - `examples/<name>/` is a Lasso home: `config.yaml` and `pipelines/*.yaml`. Each is parsed, and each
+ * - `examples/<name>/` is a Laisso home: `config.yaml` and `pipelines/*.yaml`. Each is parsed, and each
  *   Pipeline is checked as saving it would be (its Actions and profiles exist in some repo) and as
  *   Intake would for every repo that names it as its default.
- * - In the markdown, every ```yaml block is marked: ```yaml lasso-config is parsed as config.yaml (a
- *   partial one is fine, as every key is optional); ```yaml lasso-pipeline is parsed as a Pipeline and
+ * - In the markdown, every ```yaml block is marked: ```yaml laisso-config is parsed as config.yaml (a
+ *   partial one is fine, as every key is optional); ```yaml laisso-pipeline is parsed as a Pipeline and
  *   its profiles checked against the shipped ones. An unmarked yaml block fails, so none goes unchecked.
  */
 describe("the skill's examples", () => {
@@ -76,9 +76,9 @@ describe("the skill's examples", () => {
       for (const [, info, body] of text.matchAll(/^```([^\n]*)\n([\s\S]*?)^```/gm)) {
         const [lang, marker] = info!.trim().split(/\s+/);
         if (lang !== "yaml" && lang !== "yml") continue;
-        if (marker === "lasso-config") parseConfig(body!, `${file} block`);
-        else if (marker === "lasso-pipeline") checkProfiles(parsePipeline("example", body!), DEFAULT_CONFIG.profiles);
-        else throw new Error(`${file}: a yaml block is marked "${marker ?? ""}", not lasso-config or lasso-pipeline:\n${body}`);
+        if (marker === "laisso-config") parseConfig(body!, `${file} block`);
+        else if (marker === "laisso-pipeline") checkProfiles(parsePipeline("example", body!), DEFAULT_CONFIG.profiles);
+        else throw new Error(`${file}: a yaml block is marked "${marker ?? ""}", not laisso-config or laisso-pipeline:\n${body}`);
       }
     });
   }
@@ -96,10 +96,10 @@ describe("the skill's examples", () => {
   it("has frontmatter naming the skill and saying when to use it", () => {
     const front = /^---\n([\s\S]*?)\n---\n/.exec(readFileSync(path.join(SKILL, "SKILL.md"), "utf8"));
     const meta = parse(front![1]!) as { name?: unknown; description?: unknown };
-    expect(meta.name).toBe("lasso");
+    expect(meta.name).toBe("laisso");
     expect(meta.description).toMatch(/config\.yaml/);
     expect(meta.description).toMatch(/Flagged/);
-    expect(meta.description).toMatch(/lasso pr/);
+    expect(meta.description).toMatch(/laisso pr/);
   });
 });
 
@@ -110,18 +110,18 @@ describe("the skill on a Ticket's PRs", () => {
   const defined = (term: string) => /\*\*[^*]+\*\*:\n([\s\S]*?)\n_Avoid_/.exec(context.slice(context.indexOf(`**${term}**:`)))![1]!.replace(/\s+/g, " ");
   const flat = prs.replace(/\s+/g, " ");
 
-  it("covers lasso pr link, unlink and list with their arguments", () => {
-    expect(prs).toContain("lasso pr link <pr> [ticket] [--referenced]");
-    expect(prs).toContain("lasso pr unlink <pr> [ticket]");
-    expect(prs).toContain("lasso pr list [ticket] [--json]");
-    for (const form of ["URL", "`owner/repo#N`", "`#N`", "`N`", "lasso pr link '#7'", "`$LASSO_TICKET`"]) expect(prs).toContain(form);
+  it("covers laisso pr link, unlink and list with their arguments", () => {
+    expect(prs).toContain("laisso pr link <pr> [ticket] [--referenced]");
+    expect(prs).toContain("laisso pr unlink <pr> [ticket]");
+    expect(prs).toContain("laisso pr list [ticket] [--json]");
+    for (const form of ["URL", "`owner/repo#N`", "`#N`", "`N`", "laisso pr link '#7'", "`$LAISSO_TICKET`"]) expect(prs).toContain(form);
   });
 
   it("defines Owned and Referenced in CONTEXT.md's words, and says when an agent links", () => {
     expect(flat).toContain(defined("Owned PR"));
     expect(flat).toContain(defined("Referenced PR"));
     expect(flat).toContain("Opened a PR on a branch other than the Ticket's own");
-    expect(flat).toContain("lasso pr link <url> --referenced");
+    expect(flat).toContain("laisso pr link <url> --referenced");
   });
 
   it("is reached from SKILL.md", () => {
@@ -130,7 +130,7 @@ describe("the skill on a Ticket's PRs", () => {
 });
 
 function tempHome(): string {
-  return mkdtempSync(path.join(tmpdir(), "lasso-skill-home-"));
+  return mkdtempSync(path.join(tmpdir(), "laisso-skill-home-"));
 }
 
 function capture(): { out: () => string; restore: () => void } {
@@ -141,17 +141,17 @@ function capture(): { out: () => string; restore: () => void } {
 
 afterEach(() => vi.restoreAllMocks());
 
-describe("lasso skill install", () => {
-  it("copies the skill into ~/.claude/skills/lasso, stamped with the version", async () => {
+describe("laisso skill install", () => {
+  it("copies the skill into ~/.claude/skills/laisso, stamped with the version", async () => {
     const home = tempHome();
     const out = capture();
     expect(await skill({ action: "install", dryRun: false, json: false, userHome: home })).toBe(0);
     out.restore();
-    const dir = path.join(home, ".claude", "skills", "lasso");
+    const dir = path.join(home, ".claude", "skills", "laisso");
     expect(filesUnder(dir)).toEqual([...filesUnder(SKILL), VERSION_FILE].sort());
     expect(readFileSync(path.join(dir, "SKILL.md"), "utf8")).toBe(readFileSync(path.join(SKILL, "SKILL.md"), "utf8"));
     expect(readFileSync(path.join(dir, VERSION_FILE), "utf8")).toBe(`${VERSION}\n`);
-    expect(out.out()).toContain(`wrote ${dir} (claude) with the skill from Lasso ${VERSION}:`);
+    expect(out.out()).toContain(`wrote ${dir} (claude) with the skill from Laisso ${VERSION}:`);
     expect(existsSync(path.join(home, ".codex"))).toBe(false);
   });
 
@@ -159,7 +159,7 @@ describe("lasso skill install", () => {
     const home = tempHome();
     const [target] = skillTargets(home);
     installSkill(SKILL, [target!], "0.1.0");
-    writeFileSync(path.join(target!.dir, "stale.md"), "from an older Lasso");
+    writeFileSync(path.join(target!.dir, "stale.md"), "from an older Laisso");
     const [again] = installSkill(SKILL, [target!], VERSION);
     expect(again!.replaces).toBe(true);
     expect(existsSync(path.join(target!.dir, "stale.md"))).toBe(false);
@@ -176,11 +176,11 @@ describe("lasso skill install", () => {
     const report = JSON.parse(out.out()) as { version: string; dryRun: boolean; targets: Array<{ agent: string; dir: string; replaces: boolean; files: string[] }> };
     expect(report.version).toBe(VERSION);
     expect(report.targets.map((t) => [t.agent, t.dir])).toEqual([
-      ["claude", path.join(home, ".claude", "skills", "lasso")],
-      ["codex", path.join(home, ".codex", "skills", "lasso")],
+      ["claude", path.join(home, ".claude", "skills", "laisso")],
+      ["codex", path.join(home, ".codex", "skills", "laisso")],
     ]);
     expect(report.targets[1]!.files).toContain("SKILL.md");
-    expect(readFileSync(path.join(home, ".codex", "skills", "lasso", VERSION_FILE), "utf8")).toBe(`${VERSION}\n`);
+    expect(readFileSync(path.join(home, ".codex", "skills", "laisso", VERSION_FILE), "utf8")).toBe(`${VERSION}\n`);
   });
 
   it("writes nothing with --dry-run, and says what it would write", async () => {
@@ -191,19 +191,19 @@ describe("lasso skill install", () => {
     out.restore();
     expect(existsSync(path.join(home, ".claude"))).toBe(false);
     expect(readdirSync(path.join(home, ".codex"))).toEqual([]);
-    expect(out.out()).toContain(`would write ${path.join(home, ".claude", "skills", "lasso")} (claude)`);
-    expect(out.out()).toContain(`would write ${path.join(home, ".codex", "skills", "lasso")} (codex)`);
+    expect(out.out()).toContain(`would write ${path.join(home, ".claude", "skills", "laisso")} (claude)`);
+    expect(out.out()).toContain(`would write ${path.join(home, ".codex", "skills", "laisso")} (codex)`);
     expect(out.out()).toContain(`  ${VERSION_FILE}`);
   });
 
   it("refuses anything but install", async () => {
     const err = vi.spyOn(console, "error").mockImplementation(() => undefined);
     expect(await skill({ action: undefined, dryRun: false, json: false, userHome: tempHome() })).toBe(1);
-    expect(err).toHaveBeenCalledWith("usage: lasso skill install [--dry-run] [--json]");
+    expect(err).toHaveBeenCalledWith("usage: laisso skill install [--dry-run] [--json]");
   });
 });
 
-describe("the skill in lasso doctor", () => {
+describe("the skill in laisso doctor", () => {
   it("is missing, current, or from another version, per agent", () => {
     const home = tempHome();
     mkdirSync(path.join(home, ".codex"));
@@ -217,21 +217,21 @@ describe("the skill in lasso doctor", () => {
       ["codex", "other", "0.1.0"],
     ]);
     const text = renderDoctor("/h", [], [], status, VERSION);
-    expect(text).toContain(`lasso skill for claude (${claude!.dir}): current, Lasso ${VERSION}`);
-    expect(text).toContain(`lasso skill for codex (${codex!.dir}): from Lasso 0.1.0, this is Lasso ${VERSION}; run lasso skill install`);
+    expect(text).toContain(`laisso skill for claude (${claude!.dir}): current, Laisso ${VERSION}`);
+    expect(text).toContain(`laisso skill for codex (${codex!.dir}): from Laisso 0.1.0, this is Laisso ${VERSION}; run laisso skill install`);
   });
 
   it("reports the skill in --json and never changes the exit code", async () => {
-    const lassoHome = mkdtempSync(path.join(tmpdir(), "lasso-doctor-"));
+    const laissoHome = mkdtempSync(path.join(tmpdir(), "laisso-doctor-"));
     // A config that needs only git, and a PATH whose git is a stand-in, so the tools are all found.
-    writeFileSync(path.join(lassoHome, "config.yaml"), "profiles: {}\ndefault_profile: null\nnotifications: { enabled: false }\npr_lists: {}\n");
-    mkdirSync(path.join(lassoHome, "pipelines"));
-    writeFileSync(path.join(lassoHome, "pipelines", "only.yaml"), "stages:\n  - name: work\n    prompt: Work.\n");
-    const bin = mkdtempSync(path.join(tmpdir(), "lasso-doctor-bin-"));
+    writeFileSync(path.join(laissoHome, "config.yaml"), "profiles: {}\ndefault_profile: null\nnotifications: { enabled: false }\npr_lists: {}\n");
+    mkdirSync(path.join(laissoHome, "pipelines"));
+    writeFileSync(path.join(laissoHome, "pipelines", "only.yaml"), "stages:\n  - name: work\n    prompt: Work.\n");
+    const bin = mkdtempSync(path.join(tmpdir(), "laisso-doctor-bin-"));
     writeFileSync(path.join(bin, "git"), "#!/bin/sh\n");
     chmodSync(path.join(bin, "git"), 0o755);
     const home = tempHome();
-    const env = { LASSO_HOME: lassoHome, PATH: bin, HOME: home };
+    const env = { LAISSO_HOME: laissoHome, PATH: bin, HOME: home };
 
     let out = capture();
     expect(await doctor({ json: true, env })).toBe(0);
@@ -243,6 +243,6 @@ describe("the skill in lasso doctor", () => {
     out = capture();
     expect(await doctor({ json: false, env })).toBe(0);
     out.restore();
-    expect(out.out()).toContain(`from Lasso 0.1.0, this is Lasso ${VERSION}; run lasso skill install`);
+    expect(out.out()).toContain(`from Laisso 0.1.0, this is Laisso ${VERSION}; run laisso skill install`);
   });
 });

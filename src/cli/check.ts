@@ -8,7 +8,7 @@ export interface CheckOptions {
   ticket?: string;
 }
 
-/** `lasso check [ticket]`: run a tick now and print one line per Ticket it changed, or "nothing new". */
+/** `laisso check [ticket]`: run a tick now and print one line per Ticket it changed, or "nothing new". */
 export async function check(opts: CheckOptions): Promise<number> {
   const client = createClient(opts.portFlag);
   try {

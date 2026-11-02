@@ -24,7 +24,7 @@ export interface Issue {
   body: string | null;
 }
 
-/** What Lasso asks of a tracker: reading an issue at intake and mirroring labels; moving it is a config Action's (ADR 0010). The adapters are thin translators over gh and acli. */
+/** What Laisso asks of a tracker: reading an issue at intake and mirroring labels; moving it is a config Action's (ADR 0010). The adapters are thin translators over gh and acli. */
 export interface Tracker {
   /** The JIRA project key or the GitHub owner/repo; empty when the tracker was chosen from a reference alone. */
   project: string;
@@ -42,8 +42,8 @@ export interface LabelChange {
   remove: string[];
 }
 
-/** Lasso's labels on a tracker issue: `lasso:<stage>` for the current Stage, `lasso:flagged` while Flagged (ADR 0005). */
-export const LABEL_PREFIX = "lasso:";
+/** Laisso's labels on a tracker issue: `laisso:<stage>` for the current Stage, `laisso:flagged` while Flagged (ADR 0005). */
+export const LABEL_PREFIX = "laisso:";
 export const FLAGGED_LABEL = `${LABEL_PREFIX}flagged`;
 export const mirrorLabel = (stage: string): string => `${LABEL_PREFIX}${stage}`;
 

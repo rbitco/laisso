@@ -12,7 +12,7 @@ import { events } from "../src/dashboard/app/events.ts";
 import { usePlace } from "../src/dashboard/app/route.ts";
 import { Notice, showNotice } from "../src/dashboard/app/notice.tsx";
 
-// A Ticket's page as a person uses it (ADR 0012): what it shows, what each lever sends, and how it keeps up with Lasso.
+// A Ticket's page as a person uses it (ADR 0012): what it shows, what each lever sends, and how it keeps up with Laisso.
 
 class FakeEventSource extends EventTarget {
   close(): void {}
@@ -72,7 +72,7 @@ function ticket(id: string, over: Partial<TicketDetail> = {}): TicketDetail {
       { name: "plan", kind: "runner", label: "plan", human: false, skippedAt: null },
       { name: "implement", kind: "runner", label: "implement", human: false, skippedAt: null },
     ],
-    mirrorPending: false, createdAt: T0, updatedAt: T0, url: `http://lasso/#${id}`,
+    mirrorPending: false, createdAt: T0, updatedAt: T0, url: `http://laisso/#${id}`,
     session: s, sessions: [session({ ticket: id, id: "S2", stage: "implement", outcome: "failed" }), s], pipelineDrift: "same",
     profiles: [profile("plan", "claude-opus"), profile("implement", "claude-opus")], send: { unavailable: null, routes: [] }, markDone: null, visit: null, visits: [], arcs: [], upgrades: [],
     ...over,
@@ -84,10 +84,10 @@ const CONFIG: Config = { ...DEFAULT_CONFIG, profiles: { "claude-opus": { runner:
 type Sent = { method: string; route: string; body: unknown };
 
 /**
- * A stand-in for Lasso's /api: the Tickets as they stand, each Session's output so far, replies held back to answer
+ * A stand-in for Laisso's /api: the Tickets as they stand, each Session's output so far, replies held back to answer
  * late, replies a lever is refused with, and every write it was sent.
  */
-function fakeLasso(tickets: TicketDetail[]) {
+function fakeLaisso(tickets: TicketDetail[]) {
   const sent: Sent[] = [];
   const reads: string[] = [];
   const state = {
@@ -158,7 +158,7 @@ async function showRouted(hash: string) {
 const title = () => screen.queryByRole("heading", { level: 2 })?.textContent ?? null;
 const notice = () => document.querySelector('[data-role="notice"]')!;
 const triggers = () => document.querySelector<HTMLElement>('[data-role="triggers"]')!;
-const detailReads = (lasso: { reads: string[] }, id: string) => lasso.reads.filter((r) => r === `GET /api/tickets/${id}`).length;
+const detailReads = (laisso: { reads: string[] }, id: string) => laisso.reads.filter((r) => r === `GET /api/tickets/${id}`).length;
 
 async function showPage(id: string) {
   const view = render(page(id));
@@ -198,7 +198,7 @@ afterEach(() => {
 
 describe("a Ticket's page", () => {
   it("shows the title bar, the flow, the latest Session, the Pipeline Version, the gauges, the timeline and the sidebar", async () => {
-    fakeLasso([ticket("A", { prs: [pr(7)], pipelineDrift: "changed" }), ticket("B")]);
+    fakeLaisso([ticket("A", { prs: [pr(7)], pipelineDrift: "changed" }), ticket("B")]);
     await showPage("A");
     const bar = document.querySelector<HTMLElement>('[data-role="titlebar"]')!;
     expect(bar.querySelector(".eyebrow")!.textContent).toBe("APP-A · app · app-A · 1 Owned PR · 0 Referenced · Name");
@@ -225,7 +225,7 @@ describe("a Ticket's page", () => {
 
   it("shows how the Stage's check Action last came out, and nothing when it has not run", async () => {
     const at = new Date(Date.now() - 120_000).toISOString();
-    fakeLasso([ticket("A", { check: { action: "ci-green", result: "not_met", at, code: 1, line: "3 checks pending" } }), ticket("B")]);
+    fakeLaisso([ticket("A", { check: { action: "ci-green", result: "not_met", at, code: 1, line: "3 checks pending" } }), ticket("B")]);
     const a = await showPage("A");
     const check = document.querySelector<HTMLElement>('[data-role="check"]')!;
     expect(check.className).toBe("check not_met");
@@ -236,7 +236,7 @@ describe("a Ticket's page", () => {
   });
 
   it("narrows the timeline to a station clicked in the flow, and widens it again with All Stages", async () => {
-    fakeLasso([ticket("A")]);
+    fakeLaisso([ticket("A")]);
     await showRouted("#A");
     const user = userEvent.setup();
     const timeline = () => document.querySelector<HTMLElement>('[data-role="timeline"]')!;
@@ -262,7 +262,7 @@ describe("choosing the Session shown", () => {
   const rows = () => [...document.querySelectorAll<HTMLElement>('[data-role="timeline"] li')];
 
   it("shows a Stage's newest Session when its station is clicked, read-only under a banner, and goes back to the live one", async () => {
-    fakeLasso([three()]);
+    fakeLaisso([three()]);
     await showRouted("#A");
     expect(viewing()).toBeNull();
     expect(within(pane()).getByRole("button", { name: "Stop" })).toBeTruthy();
@@ -283,7 +283,7 @@ describe("choosing the Session shown", () => {
   });
 
   it("shows a Session clicked in the timeline, marks its row, and keeps it in the hash", async () => {
-    fakeLasso([three()]);
+    fakeLaisso([three()]);
     await showRouted("#A");
     expect(rows().map((li) => li.getAttribute("aria-current"))).toEqual(["true", null, null]);
     await userEvent.setup().click(rows()[2]!);
@@ -295,7 +295,7 @@ describe("choosing the Session shown", () => {
   });
 
   it("opens on a linked Session or Stage, and on the live Session for one the Ticket lacks", async () => {
-    fakeLasso([three()]);
+    fakeLaisso([three()]);
     const view = await showRouted("#A/sessions/S1");
     expect(within(pane()).getByText("plan #1")).toBeTruthy();
     view.unmount();
@@ -312,7 +312,7 @@ describe("choosing the Session shown", () => {
 
   it("says a Stage with no Sessions has none, in place of the pane, with the way back", async () => {
     const stages = [...three().stages, { name: "review", kind: "runner" as const, label: "review", human: false, skippedAt: null }];
-    fakeLasso([ticket("A", { session: live, sessions: [live, plan2, plan1], stages })]);
+    fakeLaisso([ticket("A", { session: live, sessions: [live, plan2, plan1], stages })]);
     await showRouted("#A");
     await userEvent.setup().click(document.querySelector('[data-role="flow"] [data-stage="review"]')!);
     const empty = await waitFor(() => document.querySelector<HTMLElement>('[data-role="empty-stage"]')!);
@@ -329,7 +329,7 @@ describe("choosing the Session shown", () => {
       { name: "plan", kind: "runner" as const, label: "plan", human: false, skippedAt: at },
       { name: "implement", kind: "runner" as const, label: "implement", human: false, skippedAt: null },
     ];
-    fakeLasso([ticket("A", { session: live, sessions: [live, plan2, plan1], stages, stage: { ...three().stage, index: 2, total: 3 } })]);
+    fakeLaisso([ticket("A", { session: live, sessions: [live, plan2, plan1], stages, stage: { ...three().stage, index: 2, total: 3 } })]);
     await showRouted("#A/stages/grill");
     const station = (name: string) => document.querySelector<SVGGElement>(`[data-role="flow"] [data-stage="${name}"]`)!;
     expect(station("grill").getAttribute("class")).toBe("node done skipped focus");
@@ -343,12 +343,12 @@ describe("choosing the Session shown", () => {
   });
 
   it("stays on a past Session when a new one starts, naming it in a blue banner, until Back to current", async () => {
-    const lasso = fakeLasso([three()]);
+    const laisso = fakeLaisso([three()]);
     await showRouted("#A/stages/plan");
     expect(within(pane()).getByText("plan #2")).toBeTruthy();
     const ended = { ...live, running: false, outcome: "failed" as const, finalMessage: "Tests fail." };
     const retry = session({ ticket: "A", id: "S4", stage: "implement", ordinal: 2, running: true, outcome: null, finalMessage: null });
-    lasso.state.tickets.A = { ...lasso.state.tickets.A!, session: retry, sessions: [retry, ended, plan2, plan1] };
+    laisso.state.tickets.A = { ...laisso.state.tickets.A!, session: retry, sessions: [retry, ended, plan2, plan1] };
     act(() => void events().dispatchEvent(new MessageEvent("ticket", { data: JSON.stringify({ ticket: "A" }) })));
     await waitFor(() => expect(viewing()!.className).toBe("viewing newer"));
     expect(viewing()!.textContent).toBe("Viewing plan #2 · implement #2 has started" + "Back to current");
@@ -361,7 +361,7 @@ describe("choosing the Session shown", () => {
 
   it("names no running Session in the banner when the live one has ended", async () => {
     const ended = { ...live, running: false, outcome: "succeeded" as const, finalMessage: "Done." };
-    fakeLasso([ticket("A", { session: ended, sessions: [ended, plan2, plan1] })]);
+    fakeLaisso([ticket("A", { session: ended, sessions: [ended, plan2, plan1] })]);
     await showRouted("#A/stages/plan");
     expect(viewing()!.textContent).toBe("Viewing plan #2" + "Back to current");
   });
@@ -369,7 +369,7 @@ describe("choosing the Session shown", () => {
 
 describe("naming a Ticket", () => {
   it("names it from the title bar, keeps the reference beside the name, and clears it with an empty name", async () => {
-    const lasso = fakeLasso([ticket("A")]);
+    const laisso = fakeLaisso([ticket("A")]);
     await showPage("A");
     const user = userEvent.setup();
     const bar = () => document.querySelector<HTMLElement>('[data-role="titlebar"]')!;
@@ -388,7 +388,7 @@ describe("naming a Ticket", () => {
     await user.clear(within(bar()).getByRole("textbox", { name: "Ticket name" }));
     await user.click(within(bar()).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(bar().querySelector('[data-role="name"]')).toBeNull());
-    expect(lasso.sent).toEqual([
+    expect(laisso.sent).toEqual([
       { method: "PUT", route: "/api/tickets/A/name", body: { name: "Dark mode" } },
       { method: "PUT", route: "/api/tickets/A/name", body: { name: null } },
     ]);
@@ -397,9 +397,9 @@ describe("naming a Ticket", () => {
 
 describe("switching Tickets", () => {
   it("never draws a slow answer for an earlier Ticket over a later one", async () => {
-    const lasso = fakeLasso([ticket("A"), ticket("B")]);
+    const laisso = fakeLaisso([ticket("A"), ticket("B")]);
     const slow = held();
-    lasso.state.held.set("A", slow.promise);
+    laisso.state.held.set("A", slow.promise);
     const view = render(page("A"));
     view.rerender(page("B"));
     await screen.findByRole("heading", { level: 2, name: "Ticket B" });
@@ -410,10 +410,10 @@ describe("switching Tickets", () => {
   });
 
   it("keeps the Ticket shown until the next one arrives, then changes the page and sidebar at once", async () => {
-    const lasso = fakeLasso([ticket("A"), ticket("B")]);
+    const laisso = fakeLaisso([ticket("A"), ticket("B")]);
     const view = await showPage("A");
     const slow = held();
-    lasso.state.held.set("B", slow.promise);
+    laisso.state.held.set("B", slow.promise);
     view.rerender(page("B"));
     expect(title()).toBe("Ticket A");
     await act(async () => slow.release());
@@ -422,7 +422,7 @@ describe("switching Tickets", () => {
   });
 
   it("goes back to the Ledger, saying why, when the Ticket is not found", async () => {
-    fakeLasso([]);
+    fakeLaisso([]);
     location.hash = "#gone";
     render(page("gone"));
     await waitFor(() => expect(notice().textContent).toBe("no Ticket matches gone"));
@@ -430,31 +430,31 @@ describe("switching Tickets", () => {
   });
 });
 
-describe("keeping up with Lasso", () => {
+describe("keeping up with Laisso", () => {
   it("re-reads the Ticket when the server says it changed, and only the sidebar for another Ticket", async () => {
-    const lasso = fakeLasso([ticket("A"), ticket("B")]);
+    const laisso = fakeLaisso([ticket("A"), ticket("B")]);
     await showPage("A");
     const ticketEvent = (id: string) => act(() => void events().dispatchEvent(new MessageEvent("ticket", { data: JSON.stringify({ ticket: id }) })));
-    lasso.state.tickets.B = { ...lasso.state.tickets.B!, title: "Ticket B renamed" };
+    laisso.state.tickets.B = { ...laisso.state.tickets.B!, title: "Ticket B renamed" };
     ticketEvent("B");
     await within(side).findByText("Ticket B renamed");
-    expect(detailReads(lasso, "A")).toBe(1);
-    lasso.state.tickets.A = { ...lasso.state.tickets.A!, title: "Ticket A renamed" };
+    expect(detailReads(laisso, "A")).toBe(1);
+    laisso.state.tickets.A = { ...laisso.state.tickets.A!, title: "Ticket A renamed" };
     ticketEvent("A");
     ticketEvent("A");
     await screen.findByRole("heading", { level: 2, name: "Ticket A renamed" });
     // A burst is read once.
-    expect(detailReads(lasso, "A")).toBe(2);
+    expect(detailReads(laisso, "A")).toBe(2);
   });
 
   it("keeps stdout out of the pane, behind a button that opens it in a modal", async () => {
-    const lasso = fakeLasso([ticket("A")]);
-    lasso.state.stdout.S1 = "planning\n";
+    const laisso = fakeLaisso([ticket("A")]);
+    laisso.state.stdout.S1 = "planning\n";
     await showPage("A");
     const pane = document.querySelector<HTMLElement>('[data-role="session"]')!;
     expect(pane.querySelector("pre")).toBeNull();
     expect(within(pane).queryByRole("button", { name: "stdout" })).toBeNull();
-    expect(lasso.reads.filter((r) => r.includes("/stdout"))).toEqual([]);
+    expect(laisso.reads.filter((r) => r.includes("/stdout"))).toEqual([]);
     const user = userEvent.setup();
     await user.click(within(pane).getByRole("button", { name: "View stdout" }));
     const modal = document.querySelector<HTMLDialogElement>('[data-role="stdout"]')!;
@@ -472,20 +472,20 @@ describe("keeping up with Lasso", () => {
 
   it("shows a running Session's Latest Message, live, with a placeholder before the first", async () => {
     const running = session({ ticket: "A", id: "S9", stage: "implement", running: true, outcome: null, finalMessage: null });
-    const lasso = fakeLasso([ticket("A", { session: running, sessions: [running] })]);
+    const laisso = fakeLaisso([ticket("A", { session: running, sessions: [running] })]);
     await showPage("A");
     const words = document.querySelector<HTMLElement>('[data-role="words"]')!;
     expect(words.textContent).toBe("Latest Message" + "Waiting for the agent's first message…");
     expect(words.querySelector(".live-dot")).toBeTruthy();
     const said = { ...running, latestMessage: "Adding the toggle." };
-    lasso.state.tickets.A = { ...lasso.state.tickets.A!, session: said, sessions: [said] };
+    laisso.state.tickets.A = { ...laisso.state.tickets.A!, session: said, sessions: [said] };
     act(() => void events().dispatchEvent(new MessageEvent("ticket", { data: JSON.stringify({ ticket: "A" }) })));
     await waitFor(() => expect(document.querySelector('[data-role="latest"]')!.textContent).toBe("Adding the toggle."));
   });
 
   it("shows an ended Session's final message, with the agent's last words only when they differ", async () => {
     const same = session({ finalMessage: "Planned.", latestMessage: "Planned." });
-    fakeLasso([ticket("A", { session: same, sessions: [same] })]);
+    fakeLaisso([ticket("A", { session: same, sessions: [same] })]);
     await showPage("A");
     expect(document.querySelector('[data-role="final"]')!.textContent).toBe("Planned.");
     expect(document.querySelector('[data-role="final"]')!.className).toBe("words-text ok");
@@ -493,7 +493,7 @@ describe("keeping up with Lasso", () => {
     cleanup();
 
     const killed = session({ outcome: "interrupted", finalMessage: "killed: stop", latestMessage: "Adding the toggle." });
-    fakeLasso([ticket("A", { session: killed, sessions: [killed] })]);
+    fakeLaisso([ticket("A", { session: killed, sessions: [killed] })]);
     await showPage("A");
     expect(document.querySelector('[data-role="final"]')!.className).toBe("words-text");
     expect(document.querySelector('[data-role="words"]')!.textContent).toBe("Final message" + "killed: stop" + "Agent's last words" + "Adding the toggle.");
@@ -501,47 +501,47 @@ describe("keeping up with Lasso", () => {
 
   it("shows a running config Action's last line, waiting on its first line of output before that", async () => {
     const action = session({ ticket: "A", id: "S4", stage: "notify", mode: "action", runner: null, profile: null, running: true, outcome: null, finalMessage: null });
-    const lasso = fakeLasso([ticket("A", { session: action, sessions: [action] })]);
+    const laisso = fakeLaisso([ticket("A", { session: action, sessions: [action] })]);
     await showPage("A");
     expect(document.querySelector('[data-role="latest"]')!.textContent).toBe("Waiting for the first line of output…");
     const said = { ...action, latestMessage: "deploying to staging" };
-    lasso.state.tickets.A = { ...lasso.state.tickets.A!, session: said, sessions: [said] };
+    laisso.state.tickets.A = { ...laisso.state.tickets.A!, session: said, sessions: [said] };
     act(() => void events().dispatchEvent(new MessageEvent("ticket", { data: JSON.stringify({ ticket: "A" }) })));
     await waitFor(() => expect(document.querySelector('[data-role="latest"]')!.textContent).toBe("deploying to staging"));
   });
 
   it("offers no stdout for a built-in action Session", async () => {
     const action = session({ ticket: "A", id: "S3", stage: "transition-done", mode: "action", stdoutPath: null, runner: null, profile: null, finalMessage: "moved to Done" });
-    fakeLasso([ticket("A", { session: action, sessions: [action] })]);
+    fakeLaisso([ticket("A", { session: action, sessions: [action] })]);
     await showPage("A");
     const pane = document.querySelector<HTMLElement>('[data-role="session"]')!;
-    expect(within(pane).getByText("Lasso performed this Stage itself; there is no Runner output.")).toBeTruthy();
+    expect(within(pane).getByText("Laisso performed this Stage itself; there is no Runner output.")).toBeTruthy();
     expect(within(pane).queryByRole("button", { name: /View stdout/ })).toBeNull();
   });
 
   it("tails a running Session's stdout in the modal from where it stopped, on each stdout event for it, and Stops it", async () => {
     const running = session({ ticket: "A", id: "S9", stage: "implement", running: true, outcome: null, finalMessage: null });
-    const lasso = fakeLasso([ticket("A", { session: running, sessions: [running] })]);
-    lasso.state.stdout.S9 = "reading the code\n";
+    const laisso = fakeLaisso([ticket("A", { session: running, sessions: [running] })]);
+    laisso.state.stdout.S9 = "reading the code\n";
     await showPage("A");
     await userEvent.setup().click(screen.getByRole("button", { name: "View stdout (live)" }));
     const out = document.querySelector('[data-role="stdout"] pre')!;
     await waitFor(() => expect(out.textContent).toBe("reading the code\n"));
     const stdoutEvent = (id: string) => act(() => void events().dispatchEvent(new MessageEvent("stdout", { data: JSON.stringify({ ticket: "A", session: id }) })));
-    lasso.state.stdout.S9 += "writing a test\n";
+    laisso.state.stdout.S9 += "writing a test\n";
     stdoutEvent("S9");
     await waitFor(() => expect(out.textContent).toBe("reading the code\nwriting a test\n"));
-    expect(lasso.reads.filter((r) => r.includes("/stdout"))).toEqual(["GET /api/tickets/A/sessions/S9/stdout?offset=0", "GET /api/tickets/A/sessions/S9/stdout?offset=17"]);
+    expect(laisso.reads.filter((r) => r.includes("/stdout"))).toEqual(["GET /api/tickets/A/sessions/S9/stdout?offset=0", "GET /api/tickets/A/sessions/S9/stdout?offset=17"]);
     stdoutEvent("other");
     await new Promise((r) => setTimeout(r, 20));
-    expect(lasso.reads.filter((r) => r.includes("/stdout"))).toHaveLength(2);
+    expect(laisso.reads.filter((r) => r.includes("/stdout"))).toHaveLength(2);
 
     await userEvent.setup().click(screen.getByRole("button", { name: "Stop" }));
-    expect(lasso.sent).toEqual([{ method: "POST", route: "/api/tickets/A/sessions/S9/stop", body: null }]);
+    expect(laisso.sent).toEqual([{ method: "POST", route: "/api/tickets/A/sessions/S9/stop", body: null }]);
     // The Session ending reads the last of its output, and keeps what was shown.
     const ended = { ...running, running: false, outcome: "interrupted" as const, endedReason: "stop" as const };
-    lasso.state.tickets.A = { ...lasso.state.tickets.A!, session: ended, sessions: [ended] };
-    lasso.state.stdout.S9 += "stopped\n";
+    laisso.state.tickets.A = { ...laisso.state.tickets.A!, session: ended, sessions: [ended] };
+    laisso.state.stdout.S9 += "stopped\n";
     act(() => void events().dispatchEvent(new MessageEvent("ticket", { data: JSON.stringify({ ticket: "A" }) })));
     await waitFor(() => expect(out.textContent).toBe("reading the code\nwriting a test\nstopped\n"));
     expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
@@ -559,11 +559,11 @@ describe("the Ticket's exits", () => {
       pr(10, { state: "CLOSED" }),
       pr(11, { role: "referenced", source: "human", url: "https://github.com/them/lib/pull/11" }),
     ];
-    const lasso = fakeLasso([ticket("A", { prs })]);
+    const laisso = fakeLaisso([ticket("A", { prs })]);
     await showPage("A");
     const user = userEvent.setup();
     await user.click(within(triggers()).getByRole("button", { name: "Abandon" }));
-    expect(lasso.sent).toEqual([]);
+    expect(laisso.sent).toEqual([]);
     const pop = abandonPop()!;
     expect(within(pop).getByText("The branch is kept. Ticked PRs are closed with a comment.")).toBeTruthy();
     const boxes = within(pop).getAllByRole("checkbox");
@@ -573,13 +573,13 @@ describe("the Ticket's exits", () => {
 
     await user.click(within(pop).getByRole("checkbox", { name: "Close PR #8 Use the column" }));
     await user.click(within(pop).getByRole("button", { name: "Abandon, close 1" }));
-    await waitFor(() => expect(lasso.sent).toEqual([{ method: "POST", route: "/api/tickets/A/abandon", body: { close: [pr(7).url] } }]));
-    await waitFor(() => expect(detailReads(lasso, "A")).toBe(2));
+    await waitFor(() => expect(laisso.sent).toEqual([{ method: "POST", route: "/api/tickets/A/abandon", body: { close: [pr(7).url] } }]));
+    await waitFor(() => expect(detailReads(laisso, "A")).toBe(2));
     expect(abandonPop()).toBeNull();
   });
 
   it("closes the Abandon popover on Cancel, Escape, or a click outside, without abandoning", async () => {
-    const lasso = fakeLasso([ticket("A", { prs: [pr(7)] })]);
+    const laisso = fakeLaisso([ticket("A", { prs: [pr(7)] })]);
     await showPage("A");
     const user = userEvent.setup();
     const lever = () => within(triggers()).getByRole("button", { name: "Abandon" });
@@ -596,11 +596,11 @@ describe("the Ticket's exits", () => {
     await user.click(lever());
     await user.click(within(abandonPop()!).getByRole("checkbox"));
     expect(within(abandonPop()!).getByRole("button", { name: "Abandon, close 0" })).toBeTruthy();
-    expect(lasso.sent).toEqual([]);
+    expect(laisso.sent).toEqual([]);
   });
 
   it("offers the same popover without PR choices when no Owned PR is open", async () => {
-    const lasso = fakeLasso([ticket("A", { prs: [pr(9, { state: "MERGED" }), pr(11, { role: "referenced" })] })]);
+    const laisso = fakeLaisso([ticket("A", { prs: [pr(9, { state: "MERGED" }), pr(11, { role: "referenced" })] })]);
     await showPage("A");
     const user = userEvent.setup();
     await user.click(within(triggers()).getByRole("button", { name: "Abandon" }));
@@ -608,28 +608,28 @@ describe("the Ticket's exits", () => {
     expect(within(pop).queryAllByRole("checkbox")).toEqual([]);
     expect(within(pop).getAllByRole("button").map((b) => b.textContent)).toEqual(["Cancel", "Abandon"]);
     await user.click(within(pop).getByRole("button", { name: "Abandon" }));
-    await waitFor(() => expect(lasso.sent).toEqual([{ method: "POST", route: "/api/tickets/A/abandon", body: { close: [] } }]));
+    await waitFor(() => expect(laisso.sent).toEqual([{ method: "POST", route: "/api/tickets/A/abandon", body: { close: [] } }]));
   });
 
   it("offers Advance anyway when Mark done finds the artifact missing, and sends it with override", async () => {
-    const lasso = fakeLasso([ticket("A")]);
-    lasso.state.refuse.done = { status: 409, body: { error: "artifact missing", artifact: "file NOTES.md", detail: "no NOTES.md on the branch", override: true } };
+    const laisso = fakeLaisso([ticket("A")]);
+    laisso.state.refuse.done = { status: 409, body: { error: "artifact missing", artifact: "file NOTES.md", detail: "no NOTES.md on the branch", override: true } };
     await showPage("A");
     const user = userEvent.setup();
     await user.click(within(triggers()).getByRole("button", { name: "Mark done" }));
     const override = await screen.findByText("artifact file NOTES.md is missing: no NOTES.md on the branch");
     expect(notice().textContent).toBe("");
-    delete lasso.state.refuse.done;
+    delete laisso.state.refuse.done;
     await user.click(within(override.parentElement!).getByRole("button", { name: "Advance anyway" }));
     await waitFor(() => expect(document.querySelector('[data-role="override"]')).toBeNull());
-    expect(lasso.sent).toEqual([
+    expect(laisso.sent).toEqual([
       { method: "POST", route: "/api/tickets/A/done", body: {} },
       { method: "POST", route: "/api/tickets/A/done", body: { override: true } },
     ]);
   });
 
   it("puts a Flagged Ticket's exits in its Flag box, says why one is unavailable, and shows a refusal", async () => {
-    const lasso = fakeLasso([
+    const laisso = fakeLaisso([
       ticket("A", {
         flag: { at: T0, reason: "Session failed", detail: "exit code 1" },
         display: { state: "flagged", label: "Flagged", why: "Session failed" },
@@ -640,7 +640,7 @@ describe("the Ticket's exits", () => {
         ],
       }),
     ]);
-    lasso.state.refuse.retry = { status: 400, body: { error: "no headless slot free" } };
+    laisso.state.refuse.retry = { status: 400, body: { error: "no headless slot free" } };
     await showPage("A");
     const box = document.querySelector<HTMLElement>('[data-role="flagbox"]')!;
     expect(within(box).getByText("Session failed")).toBeTruthy();
@@ -652,14 +652,14 @@ describe("the Ticket's exits", () => {
     await userEvent.setup().click(within(box).getByRole("button", { name: "Retry" }));
     await waitFor(() => expect(notice().textContent).toBe("no headless slot free"));
     expect((within(box).getByRole("button", { name: "Retry" }) as HTMLButtonElement).disabled).toBe(false);
-    expect(lasso.sent).toEqual([{ method: "POST", route: "/api/tickets/A/retry", body: {} }]);
+    expect(laisso.sent).toEqual([{ method: "POST", route: "/api/tickets/A/retry", body: {} }]);
   });
 
   it("shows Check PR now at a repeating Stage with a PR, which runs a tick", async () => {
-    const lasso = fakeLasso([ticket("A", { prs: [pr(7)], stage: { ...ticket("A").stage, repeat: true } })]);
+    const laisso = fakeLaisso([ticket("A", { prs: [pr(7)], stage: { ...ticket("A").stage, repeat: true } })]);
     await showPage("A");
     await userEvent.setup().click(within(triggers()).getByRole("button", { name: "Check PR now" }));
-    await waitFor(() => expect(lasso.sent).toEqual([{ method: "POST", route: "/api/check-now", body: null }]));
+    await waitFor(() => expect(laisso.sent).toEqual([{ method: "POST", route: "/api/check-now", body: null }]));
   });
 });
 
@@ -669,7 +669,7 @@ describe("sending a Ticket to a Stage (LASSO-197)", () => {
   const sendPop = (stage: string) => screen.queryByRole("dialog", { name: `Send to ${stage}` });
 
   it("offers Send here on a hovered station, and sends the instructions typed in its popover", async () => {
-    const lasso = fakeLasso([ticket("A")]);
+    const laisso = fakeLaisso([ticket("A")]);
     await showPage("A");
     const user = userEvent.setup();
     expect(sendHere()).toBeNull();
@@ -684,14 +684,14 @@ describe("sending a Ticket to a Stage (LASSO-197)", () => {
     expect(within(pop).queryAllByRole("checkbox")).toEqual([]);
     await user.type(within(pop).getByRole("textbox", { name: "Instructions" }), "Plan for the empty list too.");
     await user.click(within(pop).getByRole("button", { name: "Send" }));
-    await waitFor(() => expect(lasso.sent).toEqual([{ method: "POST", route: "/api/tickets/A/send", body: { stage: "plan", instructions: "Plan for the empty list too." } }]));
+    await waitFor(() => expect(laisso.sent).toEqual([{ method: "POST", route: "/api/tickets/A/send", body: { stage: "plan", instructions: "Plan for the empty list too." } }]));
     await waitFor(() => expect(sendPop("plan")).toBeNull());
-    await waitFor(() => expect(detailReads(lasso, "A")).toBe(2));
+    await waitFor(() => expect(detailReads(laisso, "A")).toBe(2));
   });
 
   it("offers Use Route pre-ticked with its text where a declared Route goes, never as one that would Flag, and sends without it when unticked", async () => {
     const send = { unavailable: null, routes: [{ name: "back", to: "plan", text: "Fix what review found.", replaces: false }, { name: "ahead", to: "ship", text: null, replaces: false }] };
-    const lasso = fakeLasso([ticket("A", { send })]);
+    const laisso = fakeLaisso([ticket("A", { send })]);
     await showPage("A");
     const user = userEvent.setup();
     await user.hover(station("plan"));
@@ -702,19 +702,19 @@ describe("sending a Ticket to a Stage (LASSO-197)", () => {
     expect(within(pop).getByText("Adds to the prompt: Fix what review found.")).toBeTruthy();
     expect(pop.textContent).not.toMatch(/Flag/);
     await user.click(within(pop).getByRole("button", { name: "Send" }));
-    await waitFor(() => expect(lasso.sent).toEqual([{ method: "POST", route: "/api/tickets/A/send", body: { stage: "plan", route: "back" } }]));
+    await waitFor(() => expect(laisso.sent).toEqual([{ method: "POST", route: "/api/tickets/A/send", body: { stage: "plan", route: "back" } }]));
 
     await waitFor(() => expect(sendPop("plan")).toBeNull());
     await user.hover(station("plan"));
     await user.click(sendHere()!);
     await user.click(within(sendPop("plan")!).getByRole("checkbox", { name: "Use Route back" }));
     await user.click(within(sendPop("plan")!).getByRole("button", { name: "Send" }));
-    await waitFor(() => expect(lasso.sent.at(-1)).toEqual({ method: "POST", route: "/api/tickets/A/send", body: { stage: "plan" } }));
+    await waitFor(() => expect(laisso.sent.at(-1)).toEqual({ method: "POST", route: "/api/tickets/A/send", body: { stage: "plan" } }));
   });
 
   it("closes the popover on Cancel or Escape without sending, and shows a refusal", async () => {
-    const lasso = fakeLasso([ticket("A")]);
-    lasso.state.refuse.send = { status: 400, body: { error: "Pipeline default has no Stage named plan" } };
+    const laisso = fakeLaisso([ticket("A")]);
+    laisso.state.refuse.send = { status: 400, body: { error: "Pipeline default has no Stage named plan" } };
     await showPage("A");
     const user = userEvent.setup();
     const open = async () => {
@@ -727,13 +727,13 @@ describe("sending a Ticket to a Stage (LASSO-197)", () => {
     await open();
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(lasso.sent).toEqual([]);
+    expect(laisso.sent).toEqual([]);
     await user.click(within(await open()).getByRole("button", { name: "Send" }));
     await waitFor(() => expect(notice().textContent).toBe("Pipeline default has no Stage named plan"));
   });
 
   it("shows Send here disabled, saying why, while a Session runs, and not at all once the Ticket has ended", async () => {
-    fakeLasso([ticket("A", { send: { unavailable: "implement has a Session running; stop it or let it end first", routes: [] } }), ticket("B", { state: "done", send: null })]);
+    fakeLaisso([ticket("A", { send: { unavailable: "implement has a Session running; stop it or let it end first", routes: [] } }), ticket("B", { state: "done", send: null })]);
     const a = await showPage("A");
     const user = userEvent.setup();
     await user.hover(station("plan"));
@@ -757,11 +757,11 @@ describe("the Mark done menu (LASSO-198)", () => {
   };
 
   it("lists Done, walk forward, each declared Route with its text, and Send to Stage, walking forward by default", async () => {
-    const lasso = fakeLasso([human()]);
+    const laisso = fakeLaisso([human()]);
     await showPage("A");
     const user = userEvent.setup();
     const pop = await open(user);
-    expect(lasso.sent).toEqual([]);
+    expect(laisso.sent).toEqual([]);
     const radios = within(pop).getAllByRole("radio") as HTMLInputElement[];
     expect(radios.map((r) => r.closest("label")!.textContent)).toEqual(["Done, walk forward", "Done via fix -> plan", "Done via redo -> plan"]);
     expect(radios.map((r) => r.checked)).toEqual([true, false, false]);
@@ -772,33 +772,33 @@ describe("the Mark done menu (LASSO-198)", () => {
     expect(pop.textContent).not.toMatch(/Flag/);
     expect(within(pop).queryByRole("textbox", { name: "Note" })).toBeNull();
     await user.click(within(pop).getByRole("button", { name: "Done, walk forward" }));
-    await waitFor(() => expect(lasso.sent).toEqual([{ method: "POST", route: "/api/tickets/A/done", body: {} }]));
+    await waitFor(() => expect(laisso.sent).toEqual([{ method: "POST", route: "/api/tickets/A/done", body: {} }]));
     await waitFor(() => expect(menu()).toBeNull());
   });
 
   it("takes a Route with an optional note, and offers Advance anyway only for walking forward", async () => {
-    const lasso = fakeLasso([human()]);
-    lasso.state.refuse.done = { status: 409, body: { error: "artifact missing", artifact: "file NOTES.md", detail: "no NOTES.md on the branch", override: true } };
+    const laisso = fakeLaisso([human()]);
+    laisso.state.refuse.done = { status: 409, body: { error: "artifact missing", artifact: "file NOTES.md", detail: "no NOTES.md on the branch", override: true } };
     await showPage("A");
     const user = userEvent.setup();
     await user.click(within(await open(user)).getByRole("button", { name: "Done, walk forward" }));
     await screen.findByText("artifact file NOTES.md is missing: no NOTES.md on the branch");
-    delete lasso.state.refuse.done;
+    delete laisso.state.refuse.done;
 
     let pop = await open(user);
     await user.click(within(pop).getByRole("radio", { name: "Done via fix -> plan" }));
     await user.type(within(pop).getByRole("textbox", { name: "Note" }), "Handle the empty list.");
     await user.click(within(pop).getByRole("button", { name: "Done via fix" }));
-    await waitFor(() => expect(lasso.sent.at(-1)).toEqual({ method: "POST", route: "/api/tickets/A/done", body: { route: "fix", note: "Handle the empty list." } }));
+    await waitFor(() => expect(laisso.sent.at(-1)).toEqual({ method: "POST", route: "/api/tickets/A/done", body: { route: "fix", note: "Handle the empty list." } }));
 
     pop = await open(user);
     await user.click(within(pop).getByRole("radio", { name: "Done via redo -> plan" }));
     await user.click(within(pop).getByRole("button", { name: "Done via redo" }));
-    await waitFor(() => expect(lasso.sent.at(-1)).toEqual({ method: "POST", route: "/api/tickets/A/done", body: { route: "redo" } }));
+    await waitFor(() => expect(laisso.sent.at(-1)).toEqual({ method: "POST", route: "/api/tickets/A/done", body: { route: "redo" } }));
   });
 
   it("pre-selects the agent's pick with its note, which the human may change or decline", async () => {
-    const lasso = fakeLasso([human({ markDone: { routes, suggested: { route: "redo", note: "The plan was wrong." } } })]);
+    const laisso = fakeLaisso([human({ markDone: { routes, suggested: { route: "redo", note: "The plan was wrong." } } })]);
     await showPage("A");
     const user = userEvent.setup();
     let pop = await open(user);
@@ -806,18 +806,18 @@ describe("the Mark done menu (LASSO-198)", () => {
     expect(within(pop).getByText("the agent's pick").closest('[data-role="done-route"]')!.textContent).toContain("Done via redo -> plan");
     expect((within(pop).getByRole("textbox", { name: "Note" }) as HTMLTextAreaElement).value).toBe("The plan was wrong.");
     await user.click(within(pop).getByRole("button", { name: "Done via redo" }));
-    await waitFor(() => expect(lasso.sent).toEqual([{ method: "POST", route: "/api/tickets/A/done", body: { route: "redo", note: "The plan was wrong." } }]));
+    await waitFor(() => expect(laisso.sent).toEqual([{ method: "POST", route: "/api/tickets/A/done", body: { route: "redo", note: "The plan was wrong." } }]));
 
     pop = await open(user);
     await user.click(within(pop).getByRole("radio", { name: "Done via fix -> plan" }));
     expect((within(pop).getByRole("textbox", { name: "Note" }) as HTMLTextAreaElement).value).toBe("");
     await user.click(within(pop).getByRole("radio", { name: "Done, walk forward" }));
     await user.click(within(pop).getByRole("button", { name: "Done, walk forward" }));
-    await waitFor(() => expect(lasso.sent.at(-1)).toEqual({ method: "POST", route: "/api/tickets/A/done", body: {} }));
+    await waitFor(() => expect(laisso.sent.at(-1)).toEqual({ method: "POST", route: "/api/tickets/A/done", body: {} }));
   });
 
   it("opens the Send popover for the Stage picked under Send to Stage, and closes on Escape without sending", async () => {
-    const lasso = fakeLasso([human({ send: { unavailable: null, routes } })]);
+    const laisso = fakeLaisso([human({ send: { unavailable: null, routes } })]);
     await showPage("A");
     const user = userEvent.setup();
     await open(user);
@@ -829,15 +829,15 @@ describe("the Mark done menu (LASSO-198)", () => {
     expect((within(send).getByRole("checkbox", { name: "Use Route fix" }) as HTMLInputElement).checked).toBe(true);
     await user.type(within(send).getByRole("textbox", { name: "Instructions" }), "Plan again.");
     await user.click(within(send).getByRole("button", { name: "Send" }));
-    await waitFor(() => expect(lasso.sent).toEqual([{ method: "POST", route: "/api/tickets/A/send", body: { stage: "plan", instructions: "Plan again.", route: "fix" } }]));
+    await waitFor(() => expect(laisso.sent).toEqual([{ method: "POST", route: "/api/tickets/A/send", body: { stage: "plan", instructions: "Plan again.", route: "fix" } }]));
   });
 
   it("stays a plain lever where the Ticket offers no menu, as on a Flag", async () => {
-    const lasso = fakeLasso([human({ markDone: null })]);
+    const laisso = fakeLaisso([human({ markDone: null })]);
     await showPage("A");
     await userEvent.setup().click(within(triggers()).getByRole("button", { name: "Mark implement done" }));
     expect(menu()).toBeNull();
-    await waitFor(() => expect(lasso.sent).toEqual([{ method: "POST", route: "/api/tickets/A/done", body: {} }]));
+    await waitFor(() => expect(laisso.sent).toEqual([{ method: "POST", route: "/api/tickets/A/done", body: {} }]));
   });
 });
 
@@ -857,7 +857,7 @@ describe("Route history on the Stage track (LASSO-199)", () => {
   const records = () => document.querySelector<HTMLElement>('[data-role="route-records"]');
 
   it("draws one arc per fired Route with its name and used/limit, red once spent, and a dashed arc without a badge for sends", async () => {
-    fakeLasso([ticket("A", { arcs: [back, ahead, sent] }), ticket("B")]);
+    fakeLaisso([ticket("A", { arcs: [back, ahead, sent] }), ticket("B")]);
     const a = await showPage("A");
     expect([...document.querySelectorAll<SVGGElement>("[data-arc]")].map((g) => g.dataset.arc)).toEqual(["route:implement:back", "route:plan:ahead", "send:implement:plan"]);
     expect(arc(back.key).textContent).toBe("back2/2Route back from implement to plan, taken 2 of 2 (spent)");
@@ -877,7 +877,7 @@ describe("Route history on the Stage track (LASSO-199)", () => {
   });
 
   it("opens an arc's records in the right-hand stack on click, newest first, and closes them on a second click or Close", async () => {
-    fakeLasso([ticket("A", { arcs: [back, sent] })]);
+    fakeLaisso([ticket("A", { arcs: [back, sent] })]);
     await showPage("A");
     const user = userEvent.setup();
     expect(records()).toBeNull();
@@ -912,7 +912,7 @@ describe("upgrading a Ticket's Pipeline Version (LASSO-201)", () => {
   const upgradeButton = () => screen.getByRole("button", { name: "Upgrade" });
 
   it("offers Upgrade only on an active Ticket whose Pipeline file has changed", async () => {
-    fakeLasso([ticket("A"), ticket("B", { pipelineDrift: "changed", state: "done" }), ticket("C", { pipelineDrift: "deleted" })]);
+    fakeLaisso([ticket("A"), ticket("B", { pipelineDrift: "changed", state: "done" }), ticket("C", { pipelineDrift: "deleted" })]);
     for (const id of ["A", "B", "C"]) {
       const view = await showPage(id);
       expect(screen.queryByRole("button", { name: "Upgrade" })).toBeNull();
@@ -921,8 +921,8 @@ describe("upgrading a Ticket's Pipeline Version (LASSO-201)", () => {
   });
 
   it("stays on the Ticket's Stage by default, says where a held pick now goes, and upgrades with an empty body", async () => {
-    const lasso = fakeLasso([ticket("A", { pipelineDrift: "changed" })]);
-    lasso.state.plans.A = plan({ pick: { route: "back", by: "action", note: "lint", from: "plan", to: "review", dropped: null, held: true } });
+    const laisso = fakeLaisso([ticket("A", { pipelineDrift: "changed" })]);
+    laisso.state.plans.A = plan({ pick: { route: "back", by: "action", note: "lint", from: "plan", to: "review", dropped: null, held: true } });
     await showPage("A");
     const user = userEvent.setup();
     await user.click(upgradeButton());
@@ -930,20 +930,20 @@ describe("upgrading a Ticket's Pipeline Version (LASSO-201)", () => {
     expect((within(pop).getByRole("combobox", { name: "Land on" }) as HTMLSelectElement).value).toBe("implement");
     expect(within(pop).getByText("The held pick of Route back now goes to review (was plan).")).toBeTruthy();
     await user.click(within(pop).getByRole("button", { name: "Upgrade" }));
-    await waitFor(() => expect(lasso.sent).toEqual([{ method: "POST", route: "/api/tickets/A/upgrade", body: {} }]));
+    await waitFor(() => expect(laisso.sent).toEqual([{ method: "POST", route: "/api/tickets/A/upgrade", body: {} }]));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
   it("warns that a pick will be dropped and confirms with drop: true; a landing elsewhere sends the Stage instead", async () => {
-    const lasso = fakeLasso([ticket("A", { pipelineDrift: "changed" })]);
-    lasso.state.plans.A = plan({ pick: { route: "back", by: "action", note: "lint", from: "plan", to: null, dropped: "Route back is gone from implement in the new Version", held: true } });
+    const laisso = fakeLaisso([ticket("A", { pipelineDrift: "changed" })]);
+    laisso.state.plans.A = plan({ pick: { route: "back", by: "action", note: "lint", from: "plan", to: null, dropped: "Route back is gone from implement in the new Version", held: true } });
     await showPage("A");
     const user = userEvent.setup();
     await user.click(upgradeButton());
     let pop = await dialog();
     expect(within(pop).getByText('Route back is gone from implement in the new Version: upgrading drops the held pick of it and its note "lint".')).toBeTruthy();
     await user.click(within(pop).getByRole("button", { name: "Upgrade and drop the pick" }));
-    await waitFor(() => expect(lasso.sent).toEqual([{ method: "POST", route: "/api/tickets/A/upgrade", body: { drop: true } }]));
+    await waitFor(() => expect(laisso.sent).toEqual([{ method: "POST", route: "/api/tickets/A/upgrade", body: { drop: true } }]));
 
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     await user.click(upgradeButton());
@@ -951,12 +951,12 @@ describe("upgrading a Ticket's Pipeline Version (LASSO-201)", () => {
     await user.selectOptions(within(pop).getByRole("combobox", { name: "Land on" }), "ship");
     expect(within(pop).queryByText(/drops/)).toBeNull();
     await user.click(within(pop).getByRole("button", { name: "Upgrade" }));
-    await waitFor(() => expect(lasso.sent.at(-1)).toEqual({ method: "POST", route: "/api/tickets/A/upgrade", body: { stage: "ship" } }));
+    await waitFor(() => expect(laisso.sent.at(-1)).toEqual({ method: "POST", route: "/api/tickets/A/upgrade", body: { stage: "ship" } }));
   });
 
   it("asks for a landing when the Stage is gone, and holds the confirm while a Session runs", async () => {
-    const lasso = fakeLasso([ticket("A", { pipelineDrift: "changed" })]);
-    lasso.state.plans.A = plan({ stages: ["plan", "build"], keeps: false, unavailable: "implement has a Session running; upgrade once it ends" });
+    const laisso = fakeLaisso([ticket("A", { pipelineDrift: "changed" })]);
+    laisso.state.plans.A = plan({ stages: ["plan", "build"], keeps: false, unavailable: "implement has a Session running; upgrade once it ends" });
     await showPage("A");
     const user = userEvent.setup();
     await user.click(upgradeButton());
@@ -966,7 +966,7 @@ describe("upgrading a Ticket's Pipeline Version (LASSO-201)", () => {
     expect((within(pop).getByRole("button", { name: "Upgrade" }) as HTMLButtonElement).disabled).toBe(true);
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(lasso.sent).toEqual([]);
+    expect(laisso.sent).toEqual([]);
   });
 
   it("marks each upgrade under its station and opens it, with the pick it dropped and the records it took off the track", async () => {
@@ -976,7 +976,7 @@ describe("upgrading a Ticket's Pipeline Version (LASSO-201)", () => {
       dropped: { route: "back", to: "review", by: "action", note: "lint" },
       earlier: [{ kind: "route", from: "implement", to: "review", version: 1, visit: 3, number: 1, at, chosenBy: "action", route: "fix", text: "Fix it.", replaces: false, note: null, budget: { used: 1, limit: null } }],
     };
-    fakeLasso([ticket("A", { upgrades: [upgrade] })]);
+    fakeLaisso([ticket("A", { upgrades: [upgrade] })]);
     await showPage("A");
     const user = userEvent.setup();
     const marker = document.querySelector<SVGGElement>('[data-role="flow"] [data-arc="upgrade:4"]')!;
@@ -1001,7 +1001,7 @@ describe("a Ticket's PRs", () => {
       pr(7, { title: "Core change", feedback: 3, checks: "failing" }),
       pr(9, { title: "Split migration", source: "agent", head: "app-A-migration", state: "MERGED" }),
     ];
-    fakeLasso([ticket("A", { prs })]);
+    fakeLaisso([ticket("A", { prs })]);
     await showPage("A");
     const count = within(document.querySelector<HTMLElement>('[data-role="titlebar"]')!).getByRole("link", { name: "2 Owned PRs · 1 Referenced" });
     const scrolled = vi.fn();
@@ -1016,14 +1016,14 @@ describe("a Ticket's PRs", () => {
       ["Referenced", "#12 Token refreshalice/token · alice's", "open"],
     ]);
     expect(within(rows[2]!).getByRole("link", { name: "#12" }).getAttribute("href")).toBe("https://github.com/o/app/pull/12");
-    expect(panel()!.textContent).toContain("Link or unlink with lasso pr link / unlink");
+    expect(panel()!.textContent).toContain("Link or unlink with laisso pr link / unlink");
     expect(panel()!.querySelector("button")).toBeNull();
     // The panel sits in the right column, above Budget.
     expect(panel()!.nextElementSibling!.querySelector("h3")!.textContent).toBe("Budget");
   });
 
   it("shows neither the count nor the panel when the Ticket has none", async () => {
-    fakeLasso([ticket("A")]);
+    fakeLaisso([ticket("A")]);
     await showPage("A");
     expect(document.querySelector('[data-role="pr-count"]')).toBeNull();
     expect(panel()).toBeNull();
@@ -1033,7 +1033,7 @@ describe("a Ticket's PRs", () => {
 describe("the Budget gauges on a human Stage", () => {
   it("grey out wall time and spend as not tracked, keeping what earlier Sessions spent", async () => {
     const untracked = (spend: number): BudgetView => ({ ...BUDGET, wallTime: { ...BUDGET.wallTime, untracked: true }, spend: { ...BUDGET.spend, used: spend, untracked: true } });
-    fakeLasso([ticket("A", { budget: untracked(0) }), ticket("B", { budget: untracked(1.25) })]);
+    fakeLaisso([ticket("A", { budget: untracked(0) }), ticket("B", { budget: untracked(1.25) })]);
     await showPage("A");
     const gauge = (k: string) => document.querySelector<HTMLElement>(`[data-gauge="${k}"]`)!;
     expect(gauge("wallTime").textContent).toBe("not trackedwall time");
@@ -1048,7 +1048,7 @@ describe("the Budget gauges on a human Stage", () => {
 
 describe("the Budget editor", () => {
   it("opens from a gauge with the Ticket's own limits, refuses a non-number, and sends Extend with every field", async () => {
-    const lasso = fakeLasso([ticket("A")]);
+    const laisso = fakeLaisso([ticket("A")]);
     await showPage("A");
     const user = userEvent.setup();
     await user.click(document.querySelector('[data-gauge="rounds"]')!);
@@ -1065,27 +1065,27 @@ describe("the Budget editor", () => {
     await user.click(within(editor).getByRole("button", { name: "Save" }));
     expect(notice().textContent).toBe("attempts must be a number");
     expect(document.activeElement).toBe(field("attempts"));
-    expect(lasso.sent).toEqual([]);
+    expect(laisso.sent).toEqual([]);
     await user.clear(field("attempts"));
     await user.click(within(editor).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(document.querySelector('[data-role="budget-editor"]')).toBeNull());
-    expect(lasso.sent).toEqual([{ method: "POST", route: "/api/tickets/A/extend", body: { rounds: 5, attempts: null, wallTime: "1h", spend: null, routes: null } }]);
+    expect(laisso.sent).toEqual([{ method: "POST", route: "/api/tickets/A/extend", body: { rounds: 5, attempts: null, wallTime: "1h", spend: null, routes: null } }]);
   });
 
   it("opens from Extend and closes on Cancel without sending anything", async () => {
-    const lasso = fakeLasso([ticket("A")]);
+    const laisso = fakeLaisso([ticket("A")]);
     await showPage("A");
     const user = userEvent.setup();
     await user.click(within(triggers()).getByRole("button", { name: "Extend" }));
     await user.click(within(document.querySelector<HTMLElement>('[data-role="budget-editor"]')!).getByRole("button", { name: "Cancel" }));
     expect(document.querySelector('[data-role="budget-editor"]')).toBeNull();
-    expect(lasso.sent).toEqual([]);
+    expect(laisso.sent).toEqual([]);
   });
 });
 
 describe("a Stage's profile on the Ticket", () => {
   it("opens the drawer on the Ticket's repo, where Use sets this Ticket's override and Clear override removes it", async () => {
-    const lasso = fakeLasso([ticket("A")]);
+    const laisso = fakeLaisso([ticket("A")]);
     await showPage("A");
     const user = userEvent.setup();
     const button = () => document.querySelector<HTMLElement>('[data-role="ticket-stage-profile"][data-stage="implement"]')!;
@@ -1097,7 +1097,7 @@ describe("a Stage's profile on the Ticket", () => {
     await user.click(await within(drawer.querySelector<HTMLElement>('[data-role="profile-nav"]')!).findByText("codex"));
     await user.click(await within(drawer).findByRole("button", { name: "Use codex for this Ticket's implement" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(lasso.sent).toEqual([{ method: "PUT", route: "/api/tickets/A/stages/implement/profile", body: { profile: "codex" } }]);
+    expect(laisso.sent).toEqual([{ method: "PUT", route: "/api/tickets/A/stages/implement/profile", body: { profile: "codex" } }]);
     await waitFor(() => expect(within(button()).getByText("overridden")).toBeTruthy());
     expect(within(button()).getByText(/^codex/)).toBeTruthy();
 
@@ -1105,11 +1105,11 @@ describe("a Stage's profile on the Ticket", () => {
     drawer = await screen.findByRole("dialog", { name: "Agent Profiles" });
     await user.click(await within(drawer).findByRole("button", { name: "Clear override" }));
     await waitFor(() => expect(within(button()).queryByText("overridden")).toBeNull());
-    expect(lasso.sent[1]).toEqual({ method: "DELETE", route: "/api/tickets/A/stages/implement/profile", body: null });
+    expect(laisso.sent[1]).toEqual({ method: "DELETE", route: "/api/tickets/A/stages/implement/profile", body: null });
   });
 
   it("retries a Flagged Stage under a profile picked in the drawer", async () => {
-    const lasso = fakeLasso([
+    const laisso = fakeLaisso([
       ticket("A", { flag: { at: T0, reason: "Session failed", detail: null }, triggers: [{ action: "retry", label: "Retry" }, { action: "abandon", label: "Abandon" }] }),
     ]);
     await showPage("A");
@@ -1119,7 +1119,7 @@ describe("a Stage's profile on the Ticket", () => {
     expect(await within(drawer).findByText(/^Retry Stage implement of Ticket APP-A under another profile/)).toBeTruthy();
     await user.click(await within(drawer.querySelector<HTMLElement>('[data-role="profile-nav"]')!).findByText("codex"));
     await user.click(await within(drawer).findByRole("button", { name: "Retry implement with codex" }));
-    await waitFor(() => expect(lasso.sent).toEqual([{ method: "POST", route: "/api/tickets/A/retry", body: { profile: "codex" } }]));
-    await waitFor(() => expect(detailReads(lasso, "A")).toBe(2));
+    await waitFor(() => expect(laisso.sent).toEqual([{ method: "POST", route: "/api/tickets/A/retry", body: { profile: "codex" } }]));
+    await waitFor(() => expect(detailReads(laisso, "A")).toBe(2));
   });
 });

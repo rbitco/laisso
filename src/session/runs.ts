@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { closeSync, mkdirSync, openSync, readFileSync, readSync, statSync, writeSync } from "node:fs";
 import path from "node:path";
 import { currentConfig, type Config, type ResolvedProfile } from "../server/config.ts";
-import type { LassoHome } from "../server/home.ts";
+import type { LaissoHome } from "../server/home.ts";
 import type { Logger } from "../server/log.ts";
 import type { TickChange } from "../server/tick.ts";
 import type { Tickets, TicketRow } from "../store/tickets.ts";
@@ -29,7 +29,7 @@ export class RunError extends Error {}
 
 export interface RunsDeps {
   config: Config;
-  home: LassoHome;
+  home: LaissoHome;
   tickets: Tickets;
   /** The Ticket's linked PRs, which every Session's prompt lists. */
   links: PrLinks;
@@ -49,7 +49,7 @@ export interface RunsDeps {
   ended?: () => void;
 }
 
-/** Lasso's verdict on an ended Session: the Stage is done, waits for more Feedback (a Round), or Flags; `retry: false` Flags even with attempts left. */
+/** Laisso's verdict on an ended Session: the Stage is done, waits for more Feedback (a Round), or Flags; `retry: false` Flags even with attempts left. */
 export type Verdict = "advance" | "wait" | { flag: string; detail: string | null; retry?: false };
 
 interface Live {
@@ -64,7 +64,7 @@ interface Live {
   messages: LatestMessageTracker;
   wallTimer: NodeJS.Timeout | null;
   killReason: EndedReason | null;
-  /** A human is taking the Session over in a terminal: however it ends, Lasso reaches no verdict on it. */
+  /** A human is taking the Session over in a terminal: however it ends, Laisso reaches no verdict on it. */
   takenOver: boolean;
   /** Set when the process never started; the Session ends interrupted and the Flag says runner.unavailable. */
   spawnError: string | null;
@@ -79,7 +79,7 @@ interface Live {
 const KILL_GRACE_MS = 5000;
 
 /**
- * Headless Sessions: Lasso spawns the Runner in the Ticket's worktree, tees
+ * Headless Sessions: Laisso spawns the Runner in the Ticket's worktree, tees
  * its stdout into the Ticket directory, enforces wall time, and turns the
  * parsed Outcome plus the declared artifact into advance, another attempt,
  * or Flag (ADR 0003). The Budget is checked before every start; interrupted
@@ -198,7 +198,7 @@ export class Runs {
       profile: sessionProfile(profile.name, profile.profile),
     });
     if (plan) review.opened(ticket, sessionId, plan);
-    if (resumed && adapter.sessionIds === "lasso") sessions.setRunnerSession(sessionId, resumed);
+    if (resumed && adapter.sessionIds === "laisso") sessions.setRunnerSession(sessionId, resumed);
 
     const child = spawn(command.argv[0]!, command.argv.slice(1), {
       cwd: command.cwd,
@@ -219,7 +219,7 @@ export class Runs {
       if (message !== null) sessions.setLatestMessage(sessionId, message);
     });
     child.stderr!.on("data", (chunk: Buffer) => (live.stderr += chunk.toString()));
-    // The pid is recorded at once, so a Lasso killed before the spawn event still leaves a reconcilable row.
+    // The pid is recorded at once, so a Laisso killed before the spawn event still leaves a reconcilable row.
     sessions.setPid(sessionId, child.pid ?? null);
     child.once("error", (error) => {
       log.error("session.spawn_failed", { session: sessionId, error: error.message });
@@ -275,7 +275,7 @@ export class Runs {
   }
 
   /**
-   * On startup, rows still marked running belong to a Lasso that is gone: their processes are
+   * On startup, rows still marked running belong to a Laisso that is gone: their processes are
    * killed and waited out, then the rows close as shutdown, all before anything new starts in
    * the same worktree.
    */
@@ -372,7 +372,7 @@ export class Runs {
     if (reason === "shutdown" || this.closing || live.takenOver) verdict = null;
     else if (live.spawnError) verdict = { flag: "runner.unavailable", detail: live.spawnError, ...(live.notOnPath ? { retry: false as const } : {}) };
     else verdict = await this.judge(live, end);
-    // Lasso began shutting down while the artifact was checked: the check was cut short, so its verdict is not one.
+    // Laisso began shutting down while the artifact was checked: the check was cut short, so its verdict is not one.
     if (this.closing) verdict = null;
     const row = this.deps.sessions.end(sessionId, end);
     this.deps.log.info("session.ended", { session: sessionId, ticket: row.ticket, stage: row.stage, outcome: row.outcome, reason: row.ended_reason, cost: row.cost_usd });
@@ -381,7 +381,7 @@ export class Runs {
     if (verdict) this.deps.ended?.();
   }
 
-  /** Lasso's verdict from the Outcome and the artifact (ADR 0002): advance, or Flag with the reason; a Round asks the PR what it addressed. */
+  /** Laisso's verdict from the Outcome and the artifact (ADR 0002): advance, or Flag with the reason; a Round asks the PR what it addressed. */
   private async judge(live: Live, end: SessionEnd): Promise<Verdict> {
     const { stage } = live;
     if (end.outcome !== "succeeded") {

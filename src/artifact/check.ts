@@ -43,7 +43,7 @@ function judgePrs(artifact: "pr-exists" | "pr-review" | "pr-merged", owned: Owne
 }
 
 /**
- * Is the Stage's declared artifact there? Lasso decides done from this and
+ * Is the Stage's declared artifact there? Laisso decides done from this and
  * the Outcome, never from Stage-specific signals (ADR 0002). The tracker
  * artifacts arrive with the slice that owns that integration.
  */

@@ -16,7 +16,7 @@ class FakeEventSource extends EventTarget {
 }
 vi.stubGlobal("EventSource", FakeEventSource);
 
-const FILE = "/home/me/.lasso/config.yaml";
+const FILE = "/home/me/.laisso/config.yaml";
 
 const OPUS: ProfileConfig = { runner: "claude", model: "opus", effort: "high" };
 const CODEX: ProfileConfig = { runner: "codex", model: "gpt-6-sol" };
@@ -38,8 +38,8 @@ const PIPELINES: PipelineListing[] = [
 
 type Sent = { method: string; route: string; body: unknown };
 
-/** A stand-in for Lasso's /api: config as it stands, every write it was sent, and the profiles a delete must confirm. */
-function fakeLasso(config: Config = configWith()) {
+/** A stand-in for Laisso's /api: config as it stands, every write it was sent, and the profiles a delete must confirm. */
+function fakeLaisso(config: Config = configWith()) {
   const sent: Sent[] = [];
   const state = { config, inUse: new Set<string>() };
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -79,11 +79,11 @@ const shared = () => drawer().querySelector<HTMLElement>('[data-role="profile-fi
 const sharedField = (label: string) => within(shared()).getByLabelText(label) as HTMLInputElement;
 
 async function showDrawer(name: string | null, options: DrawerOptions = {}, config?: Config) {
-  const lasso = fakeLasso(config);
+  const laisso = fakeLaisso(config);
   const onClose = vi.fn();
   render(<ProfileDrawer start={name} options={options} onClose={onClose} />);
   await within(await screen.findByRole("dialog")).findByRole("button", { name: "Save" });
-  return { ...lasso, onClose };
+  return { ...laisso, onClose };
 }
 
 /** What the app draws over every view: the notice line and the profile drawer. */
@@ -129,10 +129,10 @@ describe("the profile drawer's scope tabs", () => {
   });
 
   it("copies the global profile into a repo with Override for repo…, then opens that repo's tab", async () => {
-    const lasso = await showDrawer("claude-opus");
+    const laisso = await showDrawer("claude-opus");
     await userEvent.setup().selectOptions(within(drawer()).getByLabelText("Override for repo"), "web");
     await waitFor(() => expect(tab("web").getAttribute("aria-selected")).toBe("true"));
-    expect(lasso.sent).toEqual([{ method: "PUT", route: "/api/repos/web/profiles/claude-opus", body: { profile: OPUS, create: true } }]);
+    expect(laisso.sent).toEqual([{ method: "PUT", route: "/api/repos/web/profiles/claude-opus", body: { profile: OPUS, create: true } }]);
   });
 
   it("asks before leaving a tab with unsaved edits, and stays when told no", async () => {
@@ -149,7 +149,7 @@ describe("the profile drawer's scope tabs", () => {
 
 describe("the profile drawer's Save", () => {
   it("writes the open tab's profile, leaving blanks and fields its Runner ignores out", async () => {
-    const lasso = await showDrawer("codex");
+    const laisso = await showDrawer("codex");
     const user = userEvent.setup();
     await user.selectOptions(within(shared()).getByLabelText("permission"), "full");
     await user.type(within(shared()).getByLabelText("args"), "--search  --fast");
@@ -158,19 +158,19 @@ describe("the profile drawer's Save", () => {
     // Pi has no permission layer, so the field shows n/a and the save leaves it out.
     expect(within(shared()).getByText("n/a on Pi")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(lasso.sent).toHaveLength(1));
-    expect(lasso.sent[0]).toEqual({ method: "PUT", route: "/api/profiles/codex", body: { profile: { runner: "pi", model: "gpt-6-sol", args: ["--search", "--fast"], human: { model: "gpt-5.5" } } } });
+    await waitFor(() => expect(laisso.sent).toHaveLength(1));
+    expect(laisso.sent[0]).toEqual({ method: "PUT", route: "/api/profiles/codex", body: { profile: { runner: "pi", model: "gpt-6-sol", args: ["--search", "--fast"], human: { model: "gpt-5.5" } } } });
   });
 
   it("saves a repo's tab to that repo, and tells whoever opened the drawer", async () => {
     const onChange = vi.fn();
-    const lasso = await showDrawer("claude-opus", { scope: "app", onChange });
+    const laisso = await showDrawer("claude-opus", { scope: "app", onChange });
     const user = userEvent.setup();
     await user.clear(sharedField("model"));
     await user.type(sharedField("model"), "sonnet");
     await user.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(onChange).toHaveBeenCalledOnce());
-    expect(lasso.sent).toEqual([{ method: "PUT", route: "/api/repos/app/profiles/claude-opus", body: { profile: { runner: "claude", model: "sonnet" } } }]);
+    expect(laisso.sent).toEqual([{ method: "PUT", route: "/api/repos/app/profiles/claude-opus", body: { profile: { runner: "claude", model: "sonnet" } } }]);
     expect(onChange.mock.calls[0][0].repos.app.profiles["claude-opus"]).toEqual({ runner: "claude", model: "sonnet" });
   });
 
@@ -181,28 +181,28 @@ describe("the profile drawer's Save", () => {
   });
 
   it("makes a profile the default, and marks it", async () => {
-    const lasso = await showDrawer("codex");
+    const laisso = await showDrawer("codex");
     await userEvent.setup().click(screen.getByRole("button", { name: "Make default" }));
     await screen.findByText("default profile");
-    expect(lasso.sent).toEqual([{ method: "PATCH", route: "/api/config", body: { default_profile: "codex" } }]);
+    expect(laisso.sent).toEqual([{ method: "PATCH", route: "/api/config", body: { default_profile: "codex" } }]);
     expect(screen.queryByRole("button", { name: "Make default" })).toBeNull();
   });
 });
 
 describe("the profile drawer's Delete", () => {
   it("asks twice, then, refused while the profile is in use, says what names it and deletes on the next press", async () => {
-    const lasso = await showDrawer("codex");
-    lasso.state.inUse.add("codex");
+    const laisso = await showDrawer("codex");
+    laisso.state.inUse.add("codex");
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Delete" }));
-    expect(lasso.sent).toEqual([]);
+    expect(laisso.sent).toEqual([]);
     await user.click(screen.getByRole("button", { name: "Delete for sure" }));
     await screen.findByText("codex is named by default/plan; their next Sessions are Flagged once it is gone");
-    expect(lasso.sent).toEqual([{ method: "DELETE", route: "/api/profiles/codex", body: null }]);
+    expect(laisso.sent).toEqual([{ method: "DELETE", route: "/api/profiles/codex", body: null }]);
     await user.click(screen.getByRole("button", { name: "Delete anyway" }));
     // Gone, the drawer moves to the default profile.
     await waitFor(() => expect(within(drawer()).getByRole("heading", { level: 2 }).textContent).toBe("claude-opus"));
-    expect(lasso.sent[1]).toEqual({ method: "DELETE", route: "/api/profiles/codex?confirm=1", body: null });
+    expect(laisso.sent[1]).toEqual({ method: "DELETE", route: "/api/profiles/codex?confirm=1", body: null });
     expect(within(nav()).queryByText("codex")).toBeNull();
   });
 
@@ -234,7 +234,7 @@ describe("leaving the profile drawer", () => {
 
 describe("the drawer opened from elsewhere", () => {
   it("offers the opener's choices for the open profile, runs one, and closes", async () => {
-    fakeLasso();
+    fakeLaisso();
     const used: string[] = [];
     act(() =>
       openProfileDrawer("claude-opus", {
@@ -258,7 +258,7 @@ describe("the drawer opened from elsewhere", () => {
   });
 
   it("keeps the drawer open and shows why when the opener's choice is refused", async () => {
-    fakeLasso();
+    fakeLaisso();
     act(() =>
       openProfileDrawer("codex", {
         extra: (name) => ({ role: "ticket-profile-choice", choices: [{ role: "profile-use", label: `Use ${name}`, act: () => Promise.reject(new Error("no Stage named plan")) }] }),
@@ -270,7 +270,7 @@ describe("the drawer opened from elsewhere", () => {
   });
 
   it("opens from a Config tile, and the tile shows what a save there wrote", async () => {
-    fakeLasso();
+    fakeLaisso();
     render(<ConfigPage visit={1} />);
     const tile = await screen.findByRole("button", { name: "edit Agent Profile codex" });
     expect(within(tile).getByText("used by default/plan")).toBeTruthy();

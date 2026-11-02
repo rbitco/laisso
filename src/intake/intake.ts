@@ -2,7 +2,7 @@ import { mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { homedir } from "node:os";
 import { actionsFor, currentConfig, resolveProfile, type Config, type RepoConfig } from "../server/config.ts";
-import type { LassoHome } from "../server/home.ts";
+import type { LaissoHome } from "../server/home.ts";
 import { parseName, shortId, type Tickets, type TicketRow, type NewTicket } from "../store/tickets.ts";
 import type { PipelineVersions } from "../store/versions.ts";
 import { checkActions, listPipelines, loadPipeline, PipelineError, type Pipeline } from "../pipeline/load.ts";
@@ -24,7 +24,7 @@ export interface IntakeRequest {
   pipeline?: string;
   /** What to call the Ticket in place of its reference or short id. */
   name?: string | null;
-  /** PRs to link as Referenced, in any form `lasso pr link` takes; without a repo, the first one's names it. */
+  /** PRs to link as Referenced, in any form `laisso pr link` takes; without a repo, the first one's names it. */
   prs?: string[];
 }
 
@@ -36,7 +36,7 @@ export interface Admitted {
 
 export interface IntakeDeps {
   config: Config;
-  home: LassoHome;
+  home: LaissoHome;
   tickets: Tickets;
   versions: PipelineVersions;
   links: PrLinks;

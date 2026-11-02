@@ -22,7 +22,7 @@ const NEEDS_YOU: DisplayState[] = ["needs_you", "flagged"];
 /** How long Ticket changes are gathered before the count reads again, so a burst reads once. */
 const GATHER_MS = 100;
 
-/** How many active Tickets need you: read on load, after a burst of ticket events, and when Lasso comes back. */
+/** How many active Tickets need you: read on load, after a burst of ticket events, and when Laisso comes back. */
 function useNeedsYou(): number {
   const [count, setCount] = useState(0);
   const [reads, setReads] = useState(0);
@@ -42,7 +42,7 @@ function useNeedsYou(): number {
     }, GATHER_MS);
   };
   useEvents(["ticket"], gather);
-  // The first hello is the page connecting; a later one is Lasso back after a restart, and changes may have been missed.
+  // The first hello is the page connecting; a later one is Laisso back after a restart, and changes may have been missed.
   const everOpen = useRef(false);
   useEvents(["hello"], () => {
     if (everOpen.current) gather();
@@ -54,7 +54,7 @@ function useNeedsYou(): number {
 
 /**
  * Whether a PR List needs a look: gh is missing or logged out, or a list's last fetch failed. Read on load, after a
- * burst of prlists or config events, and when Lasso comes back. The status endpoint answers from the cache alone, so
+ * burst of prlists or config events, and when Laisso comes back. The status endpoint answers from the cache alone, so
  * reading it never counts as the Pull Requests page being open.
  */
 function usePrListsFailing(): boolean {
@@ -99,7 +99,7 @@ export function Nav({ on, compact, onChecked }: { on: NavView; compact: boolean;
     <nav className={"pages" + (compact ? " compact" : "")} aria-label="Pages" data-role="nav">
       <h1 className="brand">
         <a href="#" data-role="home">
-          <span className="word">LASSO</span>
+          <span className="word">LAISSO</span>
           <span className="mark" aria-hidden="true">
             L
           </span>

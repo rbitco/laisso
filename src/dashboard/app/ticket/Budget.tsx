@@ -19,7 +19,7 @@ export const GAUGES: Array<[GaugeKey, string, (g: BudgetView[GaugeKey]) => strin
   ["spend", "spend", (g) => (g.untracked ? (g.used > 0 ? "$" + g.used.toFixed(2) + " so far" : "not tracked") : "$" + g.used.toFixed(2) + "/$" + g.limit)],
 ];
 
-const UNTRACKED = "not tracked in a terminal Session: Lasso reads none of its output";
+const UNTRACKED = "not tracked in a terminal Session: Laisso reads none of its output";
 
 /** The share of a gauge used, 1 when it has no limit. */
 const shareOf = (g: GaugeView) => (g.limit > 0 ? g.used / g.limit : 1);

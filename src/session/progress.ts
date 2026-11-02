@@ -1,4 +1,4 @@
-import type { LassoHome } from "../server/home.ts";
+import type { LaissoHome } from "../server/home.ts";
 import type { Logger } from "../server/log.ts";
 import type { Tickets, TicketRow } from "../store/tickets.ts";
 import type { PipelineVersions } from "../store/versions.ts";
@@ -49,7 +49,7 @@ export interface Current {
 }
 
 export interface ProgressDeps {
-  home: LassoHome;
+  home: LaissoHome;
   tickets: Tickets;
   versions: PipelineVersions;
   sessions: Sessions;
@@ -68,7 +68,7 @@ export interface ProgressDeps {
   prProbe: (ticket: TicketRow) => PrProbe;
   /** Runs a check Action artifact for the Ticket at a Stage (ADR 0014). */
   actionProbe: (ticket: TicketRow, stage: string) => ActionProbe;
-  /** The check run under way with this id (its LASSO_SESSION), or null: where a check's `lasso route` pick goes. */
+  /** The check run under way with this id (its LAISSO_SESSION), or null: where a check's `laisso route` pick goes. */
   checkRun: (id: string) => CheckRun | null;
   teardown: Teardown;
 }
@@ -297,7 +297,7 @@ export class Progress {
   }
 
   /**
-   * `lasso route`: a running Session or check run picks the Route its Stage is to leave by, over any it picked
+   * `laisso route`: a running Session or check run picks the Route its Stage is to leave by, over any it picked
    * before, or with null drops its pick. The Route decision takes it when the run ends. An action Stage's Action, a
    * check Action, and the agent of a Runner Stage that says `agentRoutes: true` (LASSO-193), headless or in a
    * terminal, may pick, and only a Route its Stage declares; a spent Route is accepted here and Flags when taken. A
@@ -321,7 +321,7 @@ export class Progress {
     return { ticket: ticket.id, stage, route: picked.picked_route, note: picked.picked_note };
   }
 
-  /** A check run's `lasso route`: the run must be checking the Ticket's current Stage on its current Visit. */
+  /** A check run's `laisso route`: the run must be checking the Ticket's current Stage on its current Visit. */
   private checkPick(run: CheckRun, route: string | null, note: string | null): { ticket: string; stage: Stage; route: string | null; note: string | null } {
     const ticket = this.deps.tickets.get(run.ticket)!;
     const current = this.current(ticket);
@@ -482,7 +482,7 @@ export class Progress {
     return this.deps.tickets.get(ticket.id)!;
   }
 
-  /** Abandon: the Ticket leaves Lasso's attention for good (CONTEXT.md: Abandoned). Exits kills its Sessions and tears the worktree down after this. */
+  /** Abandon: the Ticket leaves Laisso's attention for good (CONTEXT.md: Abandoned). Exits kills its Sessions and tears the worktree down after this. */
   async abandon(ticket: TicketRow): Promise<TicketRow> {
     if (ticket.state !== "active") throw new TriggerError(`Ticket ${ticket.reference ?? ticket.id} is already ${ticket.state}`);
     const now = new Date().toISOString();

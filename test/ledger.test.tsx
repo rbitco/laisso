@@ -9,7 +9,7 @@ import { Notice, showNotice } from "../src/dashboard/app/notice.tsx";
 import { events } from "../src/dashboard/app/events.ts";
 
 // The Ledger as a person uses it (ADR 0012): one row per Ticket in the API's order, its quick action, and how it
-// keeps up with Lasso.
+// keeps up with Laisso.
 
 class FakeEventSource extends EventTarget {
   close(): void {}
@@ -37,7 +37,7 @@ function view(id: string, over: Partial<TicketView> = {}): TicketView {
       { name: "plan", kind: "runner", label: "plan", human: false, skippedAt: null },
       { name: "implement", kind: "runner", label: "implement", human: false, skippedAt: null },
     ],
-    mirrorPending: false, visit: null, createdAt: ago(60), updatedAt: ago(5), url: `http://lasso/#${id}`, ...over,
+    mirrorPending: false, visit: null, createdAt: ago(60), updatedAt: ago(5), url: `http://laisso/#${id}`, ...over,
   };
 }
 
@@ -47,8 +47,8 @@ const done = () => view("C", { state: "done", display: { state: "done", label: "
 
 type Sent = { method: string; route: string };
 
-/** A stand-in for Lasso's /api: the Tickets it lists, in the order given, refusals by route, and every request. */
-function fakeLasso(tickets: TicketView[]) {
+/** A stand-in for Laisso's /api: the Tickets it lists, in the order given, refusals by route, and every request. */
+function fakeLaisso(tickets: TicketView[]) {
   const sent: Sent[] = [];
   const state = { tickets, refuse: {} as Record<string, string> };
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -81,7 +81,7 @@ afterEach(() => {
 
 describe("the Ledger", () => {
   it("shows each Ticket in the API's order: pill, reference over repo, title over why, the track and Stage, rings, last activity, and the quick action", async () => {
-    fakeLasso([flagged(), review()]);
+    fakeLaisso([flagged(), review()]);
     render(<Ledger all={false} visit={1} />);
     await screen.findByText("Ticket A");
     expect(rows().map((r) => r.dataset.id)).toEqual(["A", "B"]);
@@ -107,7 +107,7 @@ describe("the Ledger", () => {
   });
 
   it("counts the Visits to the current Stage past the first, and marks one a Route began with ↩ (LASSO-199)", async () => {
-    fakeLasso([
+    fakeLaisso([
       view("A", { visit: { number: 3, arrivedBy: "route", route: "back", chosenBy: "check" } }),
       view("B", { visit: { number: 2, arrivedBy: "send", route: "back", chosenBy: "human" } }),
       view("C", { visit: { number: 1, arrivedBy: "route", route: "ahead", chosenBy: "agent" } }),
@@ -123,7 +123,7 @@ describe("the Ledger", () => {
   });
 
   it("shows a named Ticket by its name, with the name and reference on hover", async () => {
-    fakeLasso([view("A", { name: "Dark mode", label: "Dark mode" })]);
+    fakeLaisso([view("A", { name: "Dark mode", label: "Dark mode" })]);
     render(<Ledger all={false} visit={1} />);
     await screen.findByText("Ticket A");
     const ref = role(row("A"), "ref");
@@ -133,18 +133,18 @@ describe("the Ledger", () => {
   });
 
   it("lists done and Abandoned Tickets, greyed, only with all, and says so when there are none", async () => {
-    const lasso = fakeLasso([flagged(), done()]);
+    const laisso = fakeLaisso([flagged(), done()]);
     const view = render(<Ledger all={false} visit={1} />);
     await screen.findByText("Ticket A");
     expect(rows().map((r) => r.dataset.id)).toEqual(["A"]);
     view.rerender(<Ledger all={true} visit={1} />);
     await screen.findByText("Ticket C");
-    expect(lasso.sent.at(-1)!.route).toBe("/api/tickets?all=1");
+    expect(laisso.sent.at(-1)!.route).toBe("/api/tickets?all=1");
     expect(rows().map((r) => [r.dataset.id, r.className])).toEqual([
       ["A", "ticket"],
       ["C", "ticket ended"],
     ]);
-    lasso.state.tickets = [];
+    laisso.state.tickets = [];
     view.rerender(<Ledger all={true} visit={2} />);
     await screen.findByText("No Tickets yet. Paste a reference or a prompt above to start one.");
     view.rerender(<Ledger all={false} visit={2} />);
@@ -153,7 +153,7 @@ describe("the Ledger", () => {
 
   it("leads the why line with a chip per Owned PR, its dot toned by the PR's state, and leaves Referenced PRs off", async () => {
     const pr = (number: number, over: Partial<PrView> = {}): PrView => ({ url: `https://github.com/o/app/pull/${number}`, number, title: `PR ${number}`, role: "owned", source: "branch", state: "OPEN", head: `h${number}`, base: "main", author: "me", feedback: 0, checks: "green", ...over });
-    fakeLasso([
+    fakeLaisso([
       view("A", { prs: [pr(1), pr(2, { state: "MERGED" }), pr(3, { role: "referenced", source: "human" })] }),
       view("B", { prs: [pr(4, { state: "CLOSED" }), pr(5, { feedback: 2 }), pr(6, { checks: "failing" }), pr(7, { checks: "running" }), pr(8, { checks: "none" })] }),
       view("C"),
@@ -178,24 +178,24 @@ describe("the Ledger", () => {
   });
 
   it("opens a Ticket on a click of its row", async () => {
-    fakeLasso([flagged()]);
+    fakeLaisso([flagged()]);
     render(<Ledger all={false} visit={1} />);
     await userEvent.setup().click(await screen.findByText("Ticket A"));
     expect(location.hash).toBe("#A");
   });
 
   it("reads again once after a burst of ticket events, and moves last activity each second", async () => {
-    const lasso = fakeLasso([flagged()]);
+    const laisso = fakeLaisso([flagged()]);
     render(<Ledger all={false} visit={1} />);
     await screen.findByText("Ticket A");
-    expect(lasso.reads()).toBe(1);
-    lasso.state.tickets = [view("A", { title: "Renamed" })];
+    expect(laisso.reads()).toBe(1);
+    laisso.state.tickets = [view("A", { title: "Renamed" })];
     act(() => {
       for (let i = 0; i < 3; i++) events().dispatchEvent(new MessageEvent("ticket", { data: JSON.stringify({ ticket: "A" }) }));
     });
     await screen.findByText("Renamed");
     await new Promise((r) => setTimeout(r, 150));
-    expect(lasso.reads()).toBe(2);
+    expect(laisso.reads()).toBe(2);
     expect(role(row("A"), "last").textContent).toBe("5s ago");
     await waitFor(() => expect(role(row("A"), "last").textContent).toBe("6s ago"), { timeout: 2000 });
   });
@@ -203,19 +203,19 @@ describe("the Ledger", () => {
 
 describe("a Ledger row's quick action", () => {
   it("pulls the trigger without opening the Ticket, then reads the Ledger again", async () => {
-    const lasso = fakeLasso([flagged(), review()]);
+    const laisso = fakeLaisso([flagged(), review()]);
     render(<Ledger all={false} visit={1} />);
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "Retry" }));
     await user.click(screen.getByRole("button", { name: "Check PR now" }));
-    await waitFor(() => expect(lasso.reads()).toBe(3));
-    expect(lasso.sent.filter((s) => s.method === "POST").map((s) => s.route)).toEqual(["/api/tickets/A/retry", "/api/check-now"]);
+    await waitFor(() => expect(laisso.reads()).toBe(3));
+    expect(laisso.sent.filter((s) => s.method === "POST").map((s) => s.route)).toEqual(["/api/tickets/A/retry", "/api/check-now"]);
     expect(location.hash).toBe("");
   });
 
   it("shows a refusal and can be pulled again", async () => {
-    const lasso = fakeLasso([flagged()]);
-    lasso.state.refuse["/api/tickets/A/retry"] = "attempts exhausted: extend first";
+    const laisso = fakeLaisso([flagged()]);
+    laisso.state.refuse["/api/tickets/A/retry"] = "attempts exhausted: extend first";
     render(<Ledger all={false} visit={1} />);
     const user = userEvent.setup();
     const retry = await screen.findByRole("button", { name: "Retry" });

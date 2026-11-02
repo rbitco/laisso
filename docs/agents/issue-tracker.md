@@ -26,7 +26,7 @@ Create a JIRA work item in project `LASSO`.
 ## When a skill says "fetch the relevant ticket"
 
 Run `acli jira workitem view <key>` plus `comment list`. If the key isn't given, infer it
-from the git branch name (branches carry the JIRA key, e.g. `lasso-42-add-login`).
+from the git branch name (branches carry the JIRA key, e.g. `laisso-42-add-login`).
 
 ## Wayfinding operations
 

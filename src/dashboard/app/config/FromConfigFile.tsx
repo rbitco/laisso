@@ -28,7 +28,7 @@ export function Actions({ actions }: { actions: ActionListing[] }) {
 export function Repos({ repos }: { repos: Record<string, RepoConfig> }) {
   const rows = Object.entries(repos);
   return (
-    <Setting title="Repos" about="The repos Lasso takes Tickets for, and the Pipeline each starts on." role="config-repos">
+    <Setting title="Repos" about="The repos Laisso takes Tickets for, and the Pipeline each starts on." role="config-repos">
       {rows.length ? (
         <table className="repos">
           <thead>

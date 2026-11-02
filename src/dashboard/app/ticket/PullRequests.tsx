@@ -70,7 +70,7 @@ export function PrPanel({ ticket: t }: { ticket: TicketDetail }) {
           </div>
         ))}
       </div>
-      <div className="why">Link or unlink with lasso pr link / unlink</div>
+      <div className="why">Link or unlink with laisso pr link / unlink</div>
     </div>
   );
 }

@@ -55,7 +55,7 @@ export interface RunnerStage {
   repeat: "feedback" | null;
   budget: StageBudget;
   routes?: Routes;
-  /** Its agent may pick one of its Routes with `lasso route` (LASSO-193); set only when written, and only with Routes. */
+  /** Its agent may pick one of its Routes with `laisso route` (LASSO-193); set only when written, and only with Routes. */
   agentRoutes?: true;
 }
 
@@ -295,7 +295,7 @@ function parseWith(value: unknown, where: string, field: string): Record<string,
 function parseActionStage(s: Record<string, unknown>, where: string): ActionStage {
   // The form before ADR 0010; startup migration rewrites it, so only a hand edit meets this.
   if (s.status !== undefined) throw new PipelineError(`${where}: status is now a param; write with: { status: ${String(s.status)} }`);
-  if (s.agentRoutes !== undefined) throw new PipelineError(`${where}: agentRoutes belongs to a Runner Stage; an action Stage's Action may run lasso route without it`);
+  if (s.agentRoutes !== undefined) throw new PipelineError(`${where}: agentRoutes belongs to a Runner Stage; an action Stage's Action may run laisso route without it`);
   for (const key of Object.keys(s)) if (!ACTION_STAGE_FIELDS.has(key)) throw new PipelineError(`${where}: ${key} is not a field of an action Stage`);
   const action = String(s.action);
   if (!ACTION_NAME.test(action)) throw new PipelineError(`${where}: ${action} is not an Action name`);

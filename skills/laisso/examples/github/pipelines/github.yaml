@@ -39,7 +39,7 @@ stages:
     artifact: pr-review
     prompt: |
       Review this branch against main. Post the findings as one PR review
-      with inline comments, each carrying Lasso's Stage marker, so the
+      with inline comments, each carrying Laisso's Stage marker, so the
       review Stage addresses them as Feedback.
 
   - name: review

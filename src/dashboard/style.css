@@ -100,7 +100,7 @@ nav.pages .theme:hover { color: var(--ink); background: var(--surface2); }
   nav.pages .alert-dot { position: absolute; top: 2px; left: calc(50% + 8px); margin: 0; width: 7px; height: 7px; }
   .shell main { padding-bottom: calc(88px + env(safe-area-inset-bottom)); }
 }
-/* A dev build's mark, so a dev clone's dashboard is never taken for the installed Lasso's. */
+/* A dev build's mark, so a dev clone's dashboard is never taken for the installed Laisso's. */
 .dev-badge { font-size: 10.5px; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; padding: 1px 7px; border-radius: 999px; color: var(--amber); border: 1px solid var(--amber); }
 form[data-role="intake"] { display: flex; gap: 8px; flex: 1 1 320px; }
 form[data-role="intake"] input { flex: 1; padding: 7px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: inherit; font: inherit; }

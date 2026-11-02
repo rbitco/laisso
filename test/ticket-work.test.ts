@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { startLassoWithRepos, waitFor, type Lasso } from "./harness.ts";
+import { startLaissoWithRepos, waitFor, type Laisso } from "./harness.ts";
 import { setScenes, type Scene } from "./scenes.ts";
 import { TicketWork, TICK_PATIENCE_MS } from "../src/server/ticket-work.ts";
 import type { Logger } from "../src/server/log.ts";
@@ -84,7 +84,7 @@ describe("TicketWork", () => {
 });
 
 describe("a hung gh on one Ticket's PR", () => {
-  const running: Lasso[] = [];
+  const running: Laisso[] = [];
   afterEach(async () => {
     while (running.length) await running.pop()!.destroy();
   });
@@ -96,32 +96,32 @@ describe("a hung gh on one Ticket's PR", () => {
     artifact: pr-merged
 `;
   const green = (number: number): Scene => ({ tag: `green-${number}`, number, checks: [{ id: number, name: "test", status: "completed", conclusion: "success", at: "2026-09-27T10:00:00Z" }] });
-  const checkNow = (lasso: Lasso) => lasso.api<{ changes: TickChange[] }>("/api/check-now", { method: "POST" });
+  const checkNow = (laisso: Laisso) => laisso.api<{ changes: TickChange[] }>("/api/check-now", { method: "POST" });
 
   it("holds up neither the other Ticket's poll nor the next tick, and is followed up once it answers", async () => {
-    const { lasso } = await startLassoWithRepos({ app: { pipeline: "loop" } }, {}, { loop: PIPELINE });
-    running.push(lasso);
-    const intake = (input: string) => lasso.api<IntakeResult>("/api/tickets", { method: "POST", body: JSON.stringify({ input, repo: "app", pipeline: "loop" }) });
+    const { laisso } = await startLaissoWithRepos({ app: { pipeline: "loop" } }, {}, { loop: PIPELINE });
+    running.push(laisso);
+    const intake = (input: string) => laisso.api<IntakeResult>("/api/tickets", { method: "POST", body: JSON.stringify({ input, repo: "app", pipeline: "loop" }) });
     const stuck = await intake("Add dark mode");
     const other = await intake("Fix the login form");
-    await setScenes(lasso, [[stuck.branch, green(7)], [other.branch, green(8)]]);
+    await setScenes(laisso, [[stuck.branch, green(7)], [other.branch, green(8)]]);
     // The stuck Ticket's PR lookup answers only after 8 seconds, well inside gh's 30-second timeout.
-    await lasso.tracker.reply({ tool: "gh", match: ["pr view", stuck.branch], stdout: JSON.stringify({ number: 7, url: "https://github.com/owner/app/pull/7", state: "OPEN" }), sleepMs: 8_000, once: true }, true);
+    await laisso.tracker.reply({ tool: "gh", match: ["pr view", stuck.branch], stdout: JSON.stringify({ number: 7, url: "https://github.com/owner/app/pull/7", state: "OPEN" }), sleepMs: 8_000, once: true }, true);
 
     let started = Date.now();
-    expect((await checkNow(lasso)).changes).toEqual([{ ticket: other.id, summary: "PR #8 found" }]);
+    expect((await checkNow(laisso)).changes).toEqual([{ ticket: other.id, summary: "PR #8 found" }]);
     expect(Date.now() - started).toBeLessThan(7_500);
 
     // The next tick runs at once, leaving the stuck Ticket alone.
     started = Date.now();
-    expect((await checkNow(lasso)).changes).toEqual([]);
+    expect((await checkNow(laisso)).changes).toEqual([]);
     expect(Date.now() - started).toBeLessThan(3_000);
-    const log = () => readFileSync(path.join(lasso.home, "lasso.log"), "utf8");
+    const log = () => readFileSync(path.join(laisso.home, "laisso.log"), "utf8");
     expect(log()).toContain(`tick.ticket_busy step=review ticket=${stuck.id}`);
 
     // Once gh answers, the late poll's change is logged and a tick follows it up.
     const detail = await waitFor(async () => {
-      const d = await lasso.api<TicketDetail>(`/api/tickets/${stuck.id}`);
+      const d = await laisso.api<TicketDetail>(`/api/tickets/${stuck.id}`);
       return d.prs.length ? d : null;
     }, "the stuck Ticket's PR to be found", 15_000);
     expect(detail.prs.map((p) => p.url)).toEqual(["https://github.com/owner/app/pull/7"]);

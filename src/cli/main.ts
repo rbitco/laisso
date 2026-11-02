@@ -11,19 +11,19 @@ import { skill } from "./skill.ts";
 export const DEFAULT_PORT = 7433;
 
 const USAGE = `usage:
-  lasso                     start the Lasso process (dashboard, tick, Sessions)
-  lasso add <ref | prompt>  intake a tracker reference or a prompt as a Ticket
-  lasso add <prompt> --pr <pr> --pipeline pr-review
+  laisso                     start the Laisso process (dashboard, tick, Sessions)
+  laisso add <ref | prompt>  intake a tracker reference or a prompt as a Ticket
+  laisso add <prompt> --pr <pr> --pipeline pr-review
                             review a teammate's PR; the findings land in the worktree
-  lasso status [ticket]     print the Ledger, or one Ticket's detail
-  lasso check [ticket]      run a tick now and print what changed
-  lasso pr link <pr> [ticket]    link a PR to a Ticket (URL, owner/repo#N, #N or N)
-  lasso pr unlink <pr> [ticket]  unlink a PR; the Tick won't link it again
-  lasso pr list [ticket]         list a Ticket's PRs; the Ticket defaults to $LASSO_TICKET
-  lasso route <name> [--note "..."]  in an Action: leave the Stage by that Route if it exits 0
-  lasso route --clear            in an Action: drop the Route picked, so the Ticket walks forward
-  lasso doctor              list the tools Lasso needs, whether each is found and logged in
-  lasso skill install       copy the Lasso skill to where Claude Code and Codex look for skills
+  laisso status [ticket]     print the Ledger, or one Ticket's detail
+  laisso check [ticket]      run a tick now and print what changed
+  laisso pr link <pr> [ticket]    link a PR to a Ticket (URL, owner/repo#N, #N or N)
+  laisso pr unlink <pr> [ticket]  unlink a PR; the Tick won't link it again
+  laisso pr list [ticket]         list a Ticket's PRs; the Ticket defaults to $LAISSO_TICKET
+  laisso route <name> [--note "..."]  in an Action: leave the Stage by that Route if it exits 0
+  laisso route --clear            in an Action: drop the Route picked, so the Ticket walks forward
+  laisso doctor              list the tools Laisso needs, whether each is found and logged in
+  laisso skill install       copy the Laisso skill to where Claude Code and Codex look for skills
 options:
   --port <n>       port for the server, or the server to talk to
   --json           machine-readable output for client commands

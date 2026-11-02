@@ -12,7 +12,7 @@ responses by hand, and a save rebuilt a whole panel, losing scroll,
 focus, and open cards. Its tests could only grep the file for
 `data-role` strings. We decided the dashboard becomes a React app in
 TypeScript, bundled by Vite, that imports the API's view types directly.
-This gives Lasso its first build step: until now Node ran every source
+This gives Laisso its first build step: until now Node ran every source
 file as it stands.
 
 ## Considered Options
@@ -32,10 +32,10 @@ file as it stands.
 - `metro.js` stays a pure module tested in Node and becomes TypeScript;
   React components call it rather than reimplementing it.
 - `pnpm build` writes the bundle to `dist/dashboard/`, which is not
-  committed. `pnpm start` builds first. If the bundle is missing, Lasso
+  committed. `pnpm start` builds first. If the bundle is missing, Laisso
   refuses to start and names the command to run, rather than serving a
   blank page. During development, Vite's dev server serves the dashboard
-  and forwards `/api` to a running Lasso.
+  and forwards `/api` to a running Laisso.
 - The JSON API and its Server-Sent Events are unchanged; the dashboard
   stays one client of `/api` alongside the CLI.
 - Dashboard tests render components with Testing Library in Vitest and

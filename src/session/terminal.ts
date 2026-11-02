@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { currentConfig, type Config, type ProfileSettings } from "../server/config.ts";
-import type { LassoHome } from "../server/home.ts";
+import type { LaissoHome } from "../server/home.ts";
 import type { Logger } from "../server/log.ts";
 import { ticketLabel, type TicketRow } from "../store/tickets.ts";
 import type { PrLinks } from "../store/links.ts";
@@ -19,7 +19,7 @@ export { TerminalError };
 
 export interface TerminalDeps {
   config: Config;
-  home: LassoHome;
+  home: LaissoHome;
   sessions: Sessions;
   /** The current Visit, whose Route text and note every Session of it is told. */
   visits: Visits;
@@ -30,7 +30,7 @@ export interface TerminalDeps {
   routeCounts: (ticket: TicketRow, stage: RunnerStage) => Record<string, { used: number; limit: number }>;
   /** Flags the Ticket; a Stage whose profile is gone from config cannot open. */
   flag: (ticket: string, reason: string, detail: string) => Promise<void>;
-  /** The environment Lasso started in, which says whether it runs inside herdr or tmux; defaults to the process's. */
+  /** The environment Laisso started in, which says whether it runs inside herdr or tmux; defaults to the process's. */
   env?: NodeJS.ProcessEnv;
 }
 
@@ -41,10 +41,10 @@ export interface TakeOver {
 }
 
 /**
- * Human Stages: Open terminal launches the Runner interactively on a Lasso-
+ * Human Stages: Open terminal launches the Runner interactively on a Laisso-
  * chosen session id and tracks it by that id only. Opening again relaunches
  * on the held id (Resume); a Runner that names its own session (Codex) is
- * asked for it first. Lasso never checks liveness; the row ends only by a
+ * asked for it first. Laisso never checks liveness; the row ends only by a
  * human's act (spec: human Stages). Take over in terminal does the same for
  * a headless Stage, re-entering its last headless Session instead of a new one.
  */
@@ -93,7 +93,7 @@ export class Terminal {
     if (taking) {
       const ended = await taking.stop();
       // The headless chain's earliest id is the session the Runner re-enters; a Runner naming its own may have none.
-      const chain = adapter.sessionIds === "lasso" ? (ended.runner_session_id ?? ended.id) : ended.runner_session_id;
+      const chain = adapter.sessionIds === "laisso" ? (ended.runner_session_id ?? ended.id) : ended.runner_session_id;
       if (chain) reentered = sessions.setRunnerSession(row.id, chain);
       log.info("session.taken_over", { session: row.id, ticket: ticket.id, stage: stage.name, from: ended.id, runnerSession: chain });
     }
@@ -104,9 +104,9 @@ export class Terminal {
     const lost = launched !== null && adapter.sessionIds === "runner" && runnerSessionId === null;
     if (lost || (taking && !launched)) log.warn("session.resume_lost", { session: sessionId, ticket: ticket.id, stage: stage.name, runner: adapter.name });
     const note = lost
-      ? `Lasso found no ${adapter.name} session for ${stage.name} since the last window opened; starting afresh.`
+      ? `Laisso found no ${adapter.name} session for ${stage.name} since the last window opened; starting afresh.`
       : taking && !launched
-        ? `Lasso found no ${adapter.name} session for ${stage.name} to re-enter; starting afresh.`
+        ? `Laisso found no ${adapter.name} session for ${stage.name} to re-enter; starting afresh.`
         : switched
           ? `${stage.name} now runs ${profile.name} on ${adapter.name}, not ${switched}; starting afresh.`
           : null;
@@ -118,11 +118,11 @@ export class Terminal {
 
   /**
    * Open the draft: a terminal on a finished Stage's last headless Session while the Ticket holds for Start. The
-   * window is the human's: Lasso keeps no row for it, and Start still releases the next Stage.
+   * window is the human's: Laisso keeps no row for it, and Start still releases the next Stage.
    */
   async openDraft(ticket: TicketRow, pipeline: Pipeline, stage: RunnerStage, from: SessionRow): Promise<void> {
     const { config, profile, adapter } = await this.resolve(ticket, pipeline, stage);
-    const chain = adapter.sessionIds === "lasso" ? (from.runner_session_id ?? from.id) : from.runner_session_id;
+    const chain = adapter.sessionIds === "laisso" ? (from.runner_session_id ?? from.id) : from.runner_session_id;
     if (!chain) throw new TerminalError(`${adapter.name} left no session id for ${stage.name} to re-enter`);
     const opened = await this.launch(config, ticket, stage, profile, adapter, { sessionId: from.id, resume: true, runnerSessionId: chain }, `draft-${from.id}`, null);
     this.deps.log.info("session.draft_opened", { session: from.id, ticket: ticket.id, stage: stage.name, launcher: opened.launcher, terminal: opened.terminal });
@@ -150,7 +150,7 @@ export class Terminal {
     file: string,
     note: string | null,
   ): Promise<{ launcher: string; terminal: TerminalKind }> {
-    const request: RunRequest = { ...requestFor(ticket, stage, profile.profile, this.deps.links.links(ticket.id), this.deps.visits.current(ticket.id), this.deps.routeCounts(ticket, stage)), mode: "terminal", ...session, name: `Lasso: ${ticketLabel(ticket)} ${stage.name}`, limits: {} };
+    const request: RunRequest = { ...requestFor(ticket, stage, profile.profile, this.deps.links.links(ticket.id), this.deps.visits.current(ticket.id), this.deps.routeCounts(ticket, stage)), mode: "terminal", ...session, name: `Laisso: ${ticketLabel(ticket)} ${stage.name}`, limits: {} };
     const command = adapter.command(request);
     const dir = path.join(this.deps.home.ticketsDir, ticket.id, "sessions");
     mkdirSync(dir, { recursive: true });
@@ -161,9 +161,9 @@ export class Terminal {
   }
 
   /**
-   * The launcher in the terminal config names, or the one Lasso runs inside.
-   * A terminal Lasso chose itself falls back to Terminal.app when it fails
-   * (a tmux server gone since Lasso started); one config names is reported.
+   * The launcher in the terminal config names, or the one Laisso runs inside.
+   * A terminal Laisso chose itself falls back to Terminal.app when it fails
+   * (a tmux server gone since Laisso started); one config names is reported.
    */
   private async openWindow(setting: Config["terminal"], launcher: string, name: string, cwd: string): Promise<TerminalKind> {
     const choice = chooseTerminal(setting, this.env);
@@ -180,7 +180,7 @@ export class Terminal {
 
   /**
    * The id the Runner re-enters for a launched Session: the taken-over run's, or the one a Runner naming its own
-   * sessions gave it, kept on the row once found so later opens re-enter the same one. Null for a Lasso-chosen id.
+   * sessions gave it, kept on the row once found so later opens re-enter the same one. Null for a Laisso-chosen id.
    */
   private runnerSessionOf(row: SessionRow, worktree: string, adapter: RunnerAdapter): string | null {
     if (row.runner_session_id) return row.runner_session_id;

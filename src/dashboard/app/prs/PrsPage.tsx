@@ -44,7 +44,7 @@ const PLACEHOLDER_ROWS = 3;
 export type PrPageLayout = PrListsView["layout"];
 
 /** Where this browser keeps the layout it picked; absent until the switch is first used. */
-export const LAYOUT_KEY = "lasso.prLayout";
+export const LAYOUT_KEY = "laisso.prLayout";
 
 /** The layout this browser picked, or null when it hasn't (or its storage can't be read). */
 function savedLayout(): PrPageLayout | null {
@@ -70,7 +70,7 @@ const CHIPS_OVER = 2;
 
 /**
  * The Pull Requests page: each PR List from config.yaml, in config order, stacked or side by side. Read on each visit,
- * when config changes, and when a list starts or finishes fetching. It also reads on every Tick: Lasso refreshes the
+ * when config changes, and when a list starts or finishes fetching. It also reads on every Tick: Laisso refreshes the
  * lists only while some tab keeps reading them. The layout is this browser's own pick once it has made one, else
  * pr_page_layout from config.
  */
@@ -179,10 +179,10 @@ function JumpChips({ lists }: { lists: PrListView[] }) {
 function GhNotice({ problem }: { problem: GhProblem }) {
   return (
     <div className="card problem pr-problem" data-role="pr-gh-problem" role="alert">
-      <b>{problem.kind === "gh-missing" ? "gh is not installed, so Lasso cannot search GitHub." : "gh is not logged in, so Lasso cannot search GitHub."}</b>
+      <b>{problem.kind === "gh-missing" ? "gh is not installed, so Laisso cannot search GitHub." : "gh is not logged in, so Laisso cannot search GitHub."}</b>
       <span>
         {problem.kind === "gh-missing" ? (
-          "Install gh from cli.github.com, then restart Lasso"
+          "Install gh from cli.github.com, then restart Laisso"
         ) : (
           <>
             Run <code>gh auth login</code>, then Check now
@@ -283,7 +283,7 @@ function ListProblem({ list, error }: { list: PrListView; error: PrListError }) 
       ) : (
         <>
           <b>Couldn't fetch this list: {error.message}</b>
-          <span className="why">Lasso tries again at the next refresh.</span>
+          <span className="why">Laisso tries again at the next refresh.</span>
         </>
       )}
     </div>
@@ -371,7 +371,7 @@ function Picture({ src, initials }: { src: string; initials: string }) {
 /**
  * One PR: its verdict, its title over the verdict's reason, its reviewers, its checks, where it is on GitHub, who
  * opened it and when it last moved, then its Ticket and Stage, then a "ref:" chip for each Ticket that references it. The title is the row's link, stretched over the whole
- * row: to the Ticket page, or to the PR on GitHub in a new tab when Lasso has no Ticket for it. The reviewers and the
+ * row: to the Ticket page, or to the PR on GitHub in a new tab when Laisso has no Ticket for it. The reviewers and the
  * "repo #n" link sit above it, so their clicks stay theirs.
  */
 function Row({ row }: { row: PrRow }) {
@@ -409,7 +409,7 @@ function Row({ row }: { row: PrRow }) {
       <span className="ticket" data-role="pr-ticket">
         {t && (
           <span className="owner">
-            <b title="Lasso Ticket">{t.ref}</b>
+            <b title="Laisso Ticket">{t.ref}</b>
             <span className="sub">{t.stage}</span>
           </span>
         )}

@@ -41,8 +41,8 @@ const CONFIG: Config = {
 
 type Sent = { method: string; route: string; body: unknown };
 
-/** A stand-in for Lasso's /api: config, its Actions, and every write it was sent; `refuse` makes the next write fail. */
-function fakeLasso() {
+/** A stand-in for Laisso's /api: config, its Actions, and every write it was sent; `refuse` makes the next write fail. */
+function fakeLaisso() {
   const sent: Sent[] = [];
   const state = { refuse: null as string | null };
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -98,7 +98,7 @@ afterEach(() => {
 
 describe("the Stage line", () => {
   it("numbers each Stage, marks its kind, and closes it to one line until opened", async () => {
-    fakeLasso();
+    fakeLaisso();
     const { user } = await showForm();
     expect([...document.querySelectorAll(".rail > .stage .station")].map((s) => s.textContent)).toEqual(["1", "2"]);
     expect(stage("plan").className).toBe("stage k-runner");
@@ -118,7 +118,7 @@ describe("the Stage line", () => {
   });
 
   it("redraws a Stage's line as it is edited: a Human Stage, what it leaves, and how it moves on", async () => {
-    fakeLasso();
+    fakeLaisso();
     const { user } = await showForm();
     await user.click(toggle("plan"));
     const plan = stage("plan");
@@ -136,7 +136,7 @@ describe("the Stage line", () => {
 
 describe("Save", () => {
   it("sends only the changed fields of an edit, a blank clearing its key, with the Pipeline's own settings", async () => {
-    const lasso = fakeLasso();
+    const laisso = fakeLaisso();
     const { user, onSaved } = await showForm();
     await user.selectOptions(screen.getByRole("combobox", { name: "Agent Profile" }), "codex");
     await user.type(screen.getByRole("textbox", { name: "Spend limit per Ticket (USD)" }), "4.5");
@@ -157,14 +157,14 @@ describe("Save", () => {
     await save(user);
 
     await waitFor(() => expect(notice().textContent).toBe("saved default"));
-    expect(lasso.sent).toEqual([{ method: "PATCH", route: "/api/pipelines/default", body: { budget: { spend: 4.5 }, stages: { plan: { prompt: "Plan it.", skills: ["grilling", "to-spec"], budget: { rounds: null, wallTime: "45m" } }, notify: { with: { status: "Done" } } }, profile: "codex" } }]);
+    expect(laisso.sent).toEqual([{ method: "PATCH", route: "/api/pipelines/default", body: { budget: { spend: 4.5 }, stages: { plan: { prompt: "Plan it.", skills: ["grilling", "to-spec"], budget: { rounds: null, wallTime: "45m" } }, notify: { with: { status: "Done" } } }, profile: "codex" } }]);
     // The keys go in the order the old editor sent them, so new keys land in the file in the same order.
-    expect(JSON.stringify(lasso.sent[0]!.body)).toBe('{"budget":{"spend":4.5},"stages":{"plan":{"budget":{"rounds":null,"wallTime":"45m"},"prompt":"Plan it.","skills":["grilling","to-spec"]},"notify":{"with":{"status":"Done"}}},"profile":"codex"}');
+    expect(JSON.stringify(laisso.sent[0]!.body)).toBe('{"budget":{"spend":4.5},"stages":{"plan":{"budget":{"rounds":null,"wallTime":"45m"},"prompt":"Plan it.","skills":["grilling","to-spec"]},"notify":{"with":{"status":"Done"}}},"profile":"codex"}');
     expect(onSaved).toHaveBeenCalledOnce();
   });
 
   it("clears a Stage's fields with blanks, and sends a renamed Stage under its saved name", async () => {
-    const lasso = fakeLasso();
+    const laisso = fakeLaisso();
     const { user } = await showForm();
     await user.click(toggle("plan"));
     const plan = stage("plan");
@@ -174,12 +174,12 @@ describe("Save", () => {
     await user.clear(within(plan).getByRole("textbox", { name: "Skills" }));
     await user.selectOptions(within(plan).getByRole("combobox", { name: "Artifact" }), "none");
     await save(user);
-    await waitFor(() => expect(lasso.sent).toHaveLength(1));
-    expect(lasso.sent[0]!.body).toEqual({ stages: { plan: { name: "think", prompt: null, skills: null, artifact: null } } });
+    await waitFor(() => expect(laisso.sent).toHaveLength(1));
+    expect(laisso.sent[0]!.body).toEqual({ stages: { plan: { name: "think", prompt: null, skills: null, artifact: null } } });
   });
 
   it("adds a Runner Stage after any Stage, opened and focused, sent in the order as its fields", async () => {
-    const lasso = fakeLasso();
+    const laisso = fakeLaisso();
     const { user } = await showForm();
     await user.click(screen.getByRole("button", { name: "add a Stage after plan" }));
     await user.click(screen.getByRole("button", { name: "+ Runner Stage" }));
@@ -192,12 +192,12 @@ describe("Save", () => {
     await user.type(within(fresh).getByRole("textbox", { name: "Prompt" }), "Review it.");
     await user.type(within(fresh).getByRole("textbox", { name: "Feedback rounds" }), "3");
     await save(user);
-    await waitFor(() => expect(lasso.sent).toHaveLength(1));
-    expect(JSON.stringify(lasso.sent[0]!.body)).toBe('{"order":["plan",{"budget":{"rounds":3},"name":"review","prompt":"Review it."},"notify"]}');
+    await waitFor(() => expect(laisso.sent).toHaveLength(1));
+    expect(JSON.stringify(laisso.sent[0]!.body)).toBe('{"order":["plan",{"budget":{"rounds":3},"name":"review","prompt":"Review it."},"notify"]}');
   });
 
   it("adds an Action Stage with one field per param of the Action picked", async () => {
-    const lasso = fakeLasso();
+    const laisso = fakeLaisso();
     const { user } = await showForm();
     await user.click(screen.getByRole("button", { name: "add a Stage after notify" }));
     // Cancel adds nothing.
@@ -215,13 +215,13 @@ describe("Save", () => {
     await user.type(within(fresh).getByRole("textbox", { name: "env" }), "prod");
     expect(within(fresh).getByText("deploy, env: prod, region: (blank)", { selector: ".sum" })).toBeTruthy();
     await save(user);
-    await waitFor(() => expect(lasso.sent).toHaveLength(1));
+    await waitFor(() => expect(laisso.sent).toHaveLength(1));
     // A param left blank is left out, so the server names it as missing.
-    expect(lasso.sent[0]!.body).toEqual({ order: ["plan", "notify", { action: "deploy", with: { env: "prod" } }] });
+    expect(laisso.sent[0]!.body).toEqual({ order: ["plan", "notify", { action: "deploy", with: { env: "prod" } }] });
   });
 
   it("swaps a saved Action Stage's params when another Action is picked, clearing the old ones", async () => {
-    const lasso = fakeLasso();
+    const laisso = fakeLaisso();
     const { user } = await showForm();
     await user.click(toggle("notify"));
     const notify = stage("notify");
@@ -229,12 +229,12 @@ describe("Save", () => {
     await user.type(within(notify).getByRole("textbox", { name: "env" }), "prod");
     await user.type(within(notify).getByRole("textbox", { name: "region" }), "eu");
     await save(user);
-    await waitFor(() => expect(lasso.sent).toHaveLength(1));
-    expect(lasso.sent[0]!.body).toEqual({ stages: { notify: { action: "deploy", with: { env: "prod", region: "eu", status: null } } } });
+    await waitFor(() => expect(laisso.sent).toHaveLength(1));
+    expect(laisso.sent[0]!.body).toEqual({ stages: { notify: { action: "deploy", with: { env: "prod", region: "eu", status: null } } } });
   });
 
   it("keeps an Action config lacks pickable, with the params the Stage has", async () => {
-    fakeLasso();
+    fakeLaisso();
     const { user } = await showForm({ ...PIPELINE, stages: [PIPELINE.stages[0]!, { kind: "action", name: "page", label: "ops", action: "pager", with: { team: "ops" } }] });
     await user.click(toggle("page"));
     const action = within(stage("page")).getByRole("combobox", { name: "Action" });
@@ -243,7 +243,7 @@ describe("Save", () => {
   });
 
   it("moves a Stage, sending the new order alone", async () => {
-    const lasso = fakeLasso();
+    const laisso = fakeLaisso();
     const { user } = await showForm();
     expect(screen.queryByRole("button", { name: "move plan up" })).toBeNull();
     expect(screen.queryByRole("button", { name: "move notify down" })).toBeNull();
@@ -251,12 +251,12 @@ describe("Save", () => {
     expect([...document.querySelectorAll(".rail > .stage .nm")].map((n) => n.textContent)).toEqual(["notify", "plan"]);
     expect(saveState()).toBe("Unsaved changes");
     await save(user);
-    await waitFor(() => expect(lasso.sent).toHaveLength(1));
-    expect(lasso.sent[0]!.body).toEqual({ order: ["notify", "plan"] });
+    await waitFor(() => expect(laisso.sent).toHaveLength(1));
+    expect(laisso.sent[0]!.body).toEqual({ order: ["notify", "plan"] });
   });
 
   it("removes a Stage on Save, with undo, and keeps at least one", async () => {
-    const lasso = fakeLasso();
+    const laisso = fakeLaisso();
     const { user } = await showForm();
     await user.click(screen.getByRole("button", { name: "remove plan" }));
     expect(stage("plan").className).toBe("stage k-runner removed");
@@ -270,12 +270,12 @@ describe("Save", () => {
     expect(stage("plan").className).toBe("stage k-runner");
     await user.click(screen.getByRole("button", { name: "remove notify" }));
     await save(user);
-    await waitFor(() => expect(lasso.sent).toHaveLength(1));
-    expect(lasso.sent[0]!.body).toEqual({ order: ["plan"] });
+    await waitFor(() => expect(laisso.sent).toHaveLength(1));
+    expect(laisso.sent[0]!.body).toEqual({ order: ["plan"] });
   });
 
   it("drops a new Stage at once when it is removed, leaving nothing to send", async () => {
-    const lasso = fakeLasso();
+    const laisso = fakeLaisso();
     const { user } = await showForm();
     await user.click(screen.getByRole("button", { name: "add a Stage after plan" }));
     await user.click(screen.getByRole("button", { name: "+ Runner Stage" }));
@@ -284,11 +284,11 @@ describe("Save", () => {
     expect(screen.queryByText("New Stage")).toBeNull();
     await save(user);
     expect(notice().textContent).toBe("nothing changed");
-    expect(lasso.sent).toEqual([]);
+    expect(laisso.sent).toEqual([]);
   });
 
   it("refuses a number field that holds something else, opening its Stage at the field, and shows a refused save", async () => {
-    const lasso = fakeLasso();
+    const laisso = fakeLaisso();
     const { user, onSaved } = await showForm();
     await user.click(toggle("plan"));
     await user.type(within(stage("plan")).getByRole("textbox", { name: "Attempts" }), "two");
@@ -296,9 +296,9 @@ describe("Save", () => {
     await save(user);
     expect(notice().textContent).toBe("attempts must be a number");
     expect(document.activeElement).toBe(within(stage("plan")).getByRole("textbox", { name: "Attempts" }));
-    expect(lasso.sent).toEqual([]);
+    expect(laisso.sent).toEqual([]);
 
-    lasso.state.refuse = "Stage plan: no profile named codex";
+    laisso.state.refuse = "Stage plan: no profile named codex";
     await user.clear(document.activeElement!);
     await user.type(document.activeElement!, "2");
     await save(user);
@@ -310,7 +310,7 @@ describe("Save", () => {
 
 describe("a Stage's Agent Profile", () => {
   it("shows what the Stage runs, inherited from the Pipeline dropdown or default_profile, and each mode's line", async () => {
-    fakeLasso();
+    fakeLaisso();
     const { user } = await showForm();
     await user.click(toggle("plan"));
     const button = within(stage("plan")).getByRole("button", { name: /^Agent Profile/ });
@@ -322,7 +322,7 @@ describe("a Stage's Agent Profile", () => {
   });
 
   it("opens the drawer on it, where Use and Inherit change the editor only, for Save to write", async () => {
-    const lasso = fakeLasso();
+    const laisso = fakeLaisso();
     const { user } = await showForm();
     await user.click(toggle("plan"));
     await user.click(within(stage("plan")).getByRole("button", { name: /^Agent Profile/ }));
@@ -333,14 +333,14 @@ describe("a Stage's Agent Profile", () => {
     await user.click(await within(drawer.querySelector<HTMLElement>('[data-role="profile-nav"]')!).findByText("codex"));
     await user.click(await within(drawer).findByRole("button", { name: "Use codex for plan" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(lasso.sent).toEqual([]);
+    expect(laisso.sent).toEqual([]);
     const button = within(stage("plan")).getByRole("button", { name: /^Agent Profile/ });
     expect(button.children[0]!.textContent).toBe("codex  ✎  (unsaved)");
     expect(within(stage("plan")).getByText("codex, leaves spec", { selector: ".sum" })).toBeTruthy();
     expect(saveState()).toBe("Unsaved changes");
     await save(user);
-    await waitFor(() => expect(lasso.sent).toHaveLength(1));
-    expect(lasso.sent[0]!.body).toEqual({ stages: { plan: { profile: "codex" } } });
+    await waitFor(() => expect(laisso.sent).toHaveLength(1));
+    expect(laisso.sent[0]!.body).toEqual({ stages: { plan: { profile: "codex" } } });
   });
 });
 
@@ -348,7 +348,7 @@ describe("the Artifact picker", () => {
   const artifact = (card: HTMLElement) => within(card).getByRole("combobox", { name: "Artifact" }) as HTMLSelectElement;
 
   it("lists the built-in Artifacts, a file, and config's Actions as checks, keeping a saved one config lacks", async () => {
-    fakeLasso();
+    fakeLaisso();
     const { user } = await showForm();
     await user.click(toggle("plan"));
     const picker = artifact(stage("plan"));
@@ -358,7 +358,7 @@ describe("the Artifact picker", () => {
   });
 
   it("shows a field per param of the Action picked and saves it as action and with", async () => {
-    const lasso = fakeLasso();
+    const laisso = fakeLaisso();
     const { user } = await showForm();
     await user.click(toggle("plan"));
     const plan = stage("plan");
@@ -368,28 +368,28 @@ describe("the Artifact picker", () => {
     // A param left blank is refused before anything is sent, and its field is focused.
     await save(user);
     expect(notice().textContent).toBe("action deploy needs region");
-    expect(lasso.sent).toEqual([]);
+    expect(laisso.sent).toEqual([]);
     await waitFor(() => expect(document.activeElement).toBe(within(plan).getByRole("textbox", { name: "region" })));
     await user.type(within(plan).getByRole("textbox", { name: "region" }), " eu ");
     await save(user);
-    await waitFor(() => expect(lasso.sent).toHaveLength(1));
-    expect(lasso.sent[0]!.body).toEqual({ stages: { plan: { artifact: { action: "deploy", with: { env: "prod", region: "eu" } } } } });
+    await waitFor(() => expect(laisso.sent).toHaveLength(1));
+    expect(laisso.sent[0]!.body).toEqual({ stages: { plan: { artifact: { action: "deploy", with: { env: "prod", region: "eu" } } } } });
   });
 
   it("saves an Action with no params as one line", async () => {
-    const lasso = fakeLasso();
+    const laisso = fakeLaisso();
     const { user } = await showForm();
     await user.click(toggle("plan"));
     const plan = stage("plan");
     await user.selectOptions(artifact(plan), "action ci-green");
     expect(within(plan).queryByRole("textbox", { name: "env" })).toBeNull();
     await save(user);
-    await waitFor(() => expect(lasso.sent).toHaveLength(1));
-    expect(lasso.sent[0]!.body).toEqual({ stages: { plan: { artifact: "action ci-green" } } });
+    await waitFor(() => expect(laisso.sent).toHaveLength(1));
+    expect(laisso.sent[0]!.body).toEqual({ stages: { plan: { artifact: "action ci-green" } } });
   });
 
   it("saves a file Artifact by its path, and refuses one with none", async () => {
-    const lasso = fakeLasso();
+    const laisso = fakeLaisso();
     const { user } = await showForm();
     await user.click(toggle("plan"));
     const plan = stage("plan");
@@ -398,12 +398,12 @@ describe("the Artifact picker", () => {
     expect(notice().textContent).toBe("a file Artifact needs a path");
     await user.type(within(plan).getByRole("textbox", { name: "Path" }), "NOTES.md");
     await save(user);
-    await waitFor(() => expect(lasso.sent).toHaveLength(1));
-    expect(lasso.sent[0]!.body).toEqual({ stages: { plan: { artifact: "file NOTES.md" } } });
+    await waitFor(() => expect(laisso.sent).toHaveLength(1));
+    expect(laisso.sent[0]!.body).toEqual({ stages: { plan: { artifact: "file NOTES.md" } } });
   });
 
   it("opens a saved check Action and its params as written, sending nothing until they change", async () => {
-    const lasso = fakeLasso();
+    const laisso = fakeLaisso();
     const plan = { ...PIPELINE.stages[0]!, artifact: "action deploy", artifactWith: { env: "prod", region: "eu" } } as PipelineView["stages"][number];
     const { user } = await showForm({ ...PIPELINE, stages: [plan, PIPELINE.stages[1]!] });
     await user.click(toggle("plan"));
@@ -415,7 +415,7 @@ describe("the Artifact picker", () => {
     await user.clear(within(card).getByRole("textbox", { name: "region" }));
     await user.type(within(card).getByRole("textbox", { name: "region" }), "us");
     await save(user);
-    await waitFor(() => expect(lasso.sent).toHaveLength(1));
-    expect(lasso.sent[0]!.body).toEqual({ stages: { plan: { artifact: { action: "deploy", with: { env: "prod", region: "us" } } } } });
+    await waitFor(() => expect(laisso.sent).toHaveLength(1));
+    expect(laisso.sent[0]!.body).toEqual({ stages: { plan: { artifact: { action: "deploy", with: { env: "prod", region: "us" } } } } });
   });
 });
