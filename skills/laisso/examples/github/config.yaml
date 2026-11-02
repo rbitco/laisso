@@ -1,0 +1,65 @@
+# A Laisso home's config.yaml for one GitHub-tracked repo. Pair it with
+# pipelines/github.yaml beside it. Every key not shown keeps its default.
+
+repos:
+  web:
+    tracker: github
+    project: acme/web          # acme/web#42 and its issue URL are suggested for this repo
+    path: ~/code/web           # local clone; worktrees are made from its origin
+    pipeline: github           # pipelines/github.yaml
+    default_profile: claude-opus
+    # This repo's own claude-opus replaces the global one whole for its
+    # Tickets: nothing is merged from the global profile of that name.
+    profiles:
+      claude-opus:
+        runner: claude
+        model: opus
+        effort: high
+        permission: auto
+
+actions:
+  # A GitHub issue is only open or closed. Kept global, so Laisso adds no
+  # acli version on start and acli is not needed on a GitHub-only machine.
+  tracker.transition:
+    params: [status]
+    run: |
+      [ -n "$LAISSO_REFERENCE" ] || { echo "$LAISSO_STAGE: the Ticket has no tracker issue yet" >&2; exit 1; }
+      case "$(printf %s "$LAISSO_STATUS" | tr '[:upper:]' '[:lower:]')" in
+        closed) verb=close ;;
+        open) verb=reopen ;;
+        *) echo "GitHub accepts only open and closed, not $LAISSO_STATUS" >&2; exit 1 ;;
+      esac
+      gh issue "$verb" "${LAISSO_REFERENCE##*#}" --repo "${LAISSO_REFERENCE%#*}" >&2 || exit $?
+      echo "moved $LAISSO_REFERENCE to $LAISSO_STATUS"
+  # An Action of the user's own: label the issue as the Ticket moves.
+  gh.label:
+    params: [label]
+    timeout: 1m
+    run: |
+      gh issue edit "${LAISSO_REFERENCE##*#}" --repo "${LAISSO_REFERENCE%#*}" --add-label "$LAISSO_LABEL" >&2 || exit $?
+      echo "labelled $LAISSO_REFERENCE $LAISSO_LABEL"
+
+profiles:
+  claude-fable:
+    runner: claude
+    model: fable
+    permission: auto
+  claude-opus:
+    runner: claude
+    model: opus
+    permission: auto
+  claude-sonnet:
+    runner: claude
+    model: sonnet
+    permission: auto
+  # Codex for code review, with a skill catalogue outside ~/.agents/skills.
+  codex-review:
+    runner: codex
+    effort: high
+    permission: edits
+    skills_dir: /Users/me/.agents/review-skills
+default_profile: claude-opus
+
+notifications:
+  enabled: true
+  gate: false                  # no notification when a Stage holds for Start

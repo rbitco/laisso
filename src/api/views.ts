@@ -1,0 +1,908 @@
+import { overrideFor, shortId, ticketLabel, type TicketRow } from "../store/tickets.ts";
+import { checkOf, latestVisit, type ArrivedBy, type ArtifactCheck, type ChosenBy, type VisitRow } from "../store/visits.ts";
+import { runnerOf, type SessionProfile, type SessionRow } from "../store/sessions.ts";
+import { type Pipeline, type Routes, type RunnerName, type RunnerStage, type Stage } from "../pipeline/load.ts";
+import type { PipelineSource } from "../pipeline/files.ts";
+import type { Drift, VersionRow } from "../store/versions.ts";
+import type { ActionConfig, Config, ProfileScope, ProfileSettings, ProfileSource } from "../server/config.ts";
+import { resumeRefusal, ticketProfile } from "../session/overrides.ts";
+import { heldRoute, startLabel } from "../route/route.ts";
+import { holdDropped, type UpgradeRow } from "../store/upgrades.ts";
+import type { BudgetView } from "../budget/budget.ts";
+import { adapterFor } from "../runner/adapters.ts";
+import type { FeedbackRow } from "../store/feedback.ts";
+import { quietWhy, type PrStatus } from "../review/review.ts";
+import { parsePrUrl } from "../review/github.ts";
+import type { PrState } from "../review/feedback.ts";
+import { roundDue, type PrLinkRow, type PrRole, type PrSource } from "../store/links.ts";
+import type { VersionNotice } from "../version-notice.ts";
+
+/** /api/health: which Laisso answered. The version and Laisso home tell an installed Laisso from a dev clone's. */
+export interface Health {
+  ok: true;
+  pid: number;
+  version: string;
+  home: string;
+}
+
+export type DisplayState = "flagged" | "needs_you" | "holding" | "ready" | "running" | "queued" | "watching" | "quiet" | "done" | "abandoned";
+
+/** A lever the human can pull on a Ticket right now; the dashboard renders one button per Trigger. Flagged, the six exits. */
+export interface Trigger {
+  /** `check` is Check now: it runs a Tick, in which a wait Stage runs its check. */
+  action: "terminal" | "done" | "skip" | "start" | "retry" | "resume" | "extend" | "abandon" | "takeover" | "handback" | "draft" | "check";
+  label: string;
+  /** Set when the lever is shown but cannot be pulled now, saying why: Resume when the Stage's profile is on another Runner. */
+  unavailable?: string;
+}
+
+/** Human wording for each display state, served so every client shows the same words. */
+export const DISPLAY_LABEL: Record<DisplayState, string> = {
+  flagged: "Flagged",
+  needs_you: "Needs you",
+  holding: "Holding",
+  ready: "Ready to start",
+  running: "Running",
+  queued: "Queued",
+  watching: "Watching",
+  quiet: "Quiet",
+  done: "Done",
+  abandoned: "Abandoned",
+};
+
+export interface StageView {
+  name: string;
+  kind: Stage["kind"];
+  /** What the Ledger and the stations show: the Stage name, or the tracker status for a transition. */
+  label: string;
+  human: boolean;
+  index: number;
+  total: number;
+  /** Whether the Stage repeats on PR feedback: Rounds, the orbit, and Check PR now belong to it. */
+  repeat: boolean;
+  /** The profile a human set for this Stage of the Ticket, or null when the Pipeline's choice stands; the Ledger stars it. */
+  override: string | null;
+}
+
+/** What one Runner Stage of a Ticket runs under now, for the Ticket page's profile buttons. */
+export interface StageProfileView {
+  stage: string;
+  /** The profile its next Session starts under: the override when set, else the Pipeline's choice; null when nothing names one. */
+  profile: string | null;
+  from: ProfileSource | null;
+  /** True while a human's override for this Stage stands. */
+  overridden: boolean;
+  /** Each mode's settings with its block merged in; null when the profile does not resolve. */
+  headless: ProfileSettings | null;
+  human: ProfileSettings | null;
+  /** Why the profile does not resolve (the Flag its next Session would raise), else null. */
+  problem: string | null;
+}
+
+export interface TicketView {
+  id: string;
+  /** The last 8 characters of the id: what a prompt Ticket shows in place of a reference. */
+  shortId: string;
+  title: string;
+  reference: string | null;
+  /** What a human named the Ticket, or null. */
+  name: string | null;
+  /** What people read the Ticket as: the name, else the reference, else the short id. */
+  label: string;
+  origin: "tracker" | "prompt";
+  /** The issue body pulled at intake, or the prompt text; what a Stage prompt gets to read. */
+  body: string | null;
+  repo: string;
+  branch: string;
+  worktree: string;
+  pipeline: string;
+  /** The Version of the Pipeline the Ticket runs (ADR 0009); null for a Ticket from before Versions that could not be pinned. */
+  pipelineVersion: number | null;
+  stage: StageView;
+  state: TicketRow["state"];
+  flag: { at: string; reason: string; detail: string | null } | null;
+  /** The Ticket's linked PRs, in the order they were linked; empty when it has none. */
+  prs: PrView[];
+  display: { state: DisplayState; label: string; why: string };
+  /** Place in the line for a headless slot when Queued, else null. */
+  queue: number | null;
+  triggers: Trigger[];
+  /** The four gauges as they stand, and the Ticket layer behind them. */
+  budget: BudgetView;
+  /** Every Stage of the Pipeline, for the Metro track and diagram, with when a human skipped it; empty when the Pipeline does not load. */
+  stages: Array<Pick<StageView, "name" | "kind" | "label" | "human"> & { skippedAt: string | null }>;
+  /** How the current Stage's check Action artifact last came out (ADR 0014), or null when it has none or has not run. */
+  check: ArtifactCheck | null;
+  /** The current Visit: which arrival at its Stage it is and how it began, for the Ledger's "×3 ↩"; null before Visits. */
+  visit: Pick<VisitView, "number" | "arrivedBy" | "route" | "chosenBy"> | null;
+  /** True while a label push to the tracker is owed and the tick will retry it. */
+  mirrorPending: boolean;
+  createdAt: string;
+  updatedAt: string;
+  url: string;
+}
+
+/** One PR linked to a Ticket, as the last read of it saw it. */
+export interface PrView {
+  url: string;
+  number: number;
+  /** Empty until Laisso has read the PR. */
+  title: string;
+  role: PrRole;
+  source: PrSource;
+  /** Null until Laisso has read the PR. */
+  state: PrState | null;
+  /** The head and base branch names, and who opened the PR; null until read. */
+  head: string | null;
+  base: string | null;
+  author: string | null;
+  /** Feedback items standing on the PR when last polled. */
+  feedback: number;
+  checks: PrStatus["checks"];
+}
+
+/** The Route a Session has picked for leaving its Stage (`laisso route`), or none after --clear. */
+export interface RoutePickView {
+  ticket: string;
+  stage: string;
+  route: string | null;
+  /** The Stage the Route goes to. */
+  to: string | null;
+  note: string | null;
+}
+
+/** One Feedback item a Round was told about, and how it was addressed once the Round ended. */
+export interface FeedbackView {
+  kind: FeedbackRow["kind"];
+  id: string;
+  summary: string;
+  url: string | null;
+  path: string | null;
+  line: number | null;
+  addressed: string | null;
+}
+
+export interface SessionView {
+  id: string;
+  ticket: string;
+  stage: string;
+  ordinal: number;
+  /** The Round this Session worked, in a repeating Stage. */
+  round: number | null;
+  /** The Round's Feedback snapshot; empty outside a repeating Stage. */
+  feedback: FeedbackView[];
+  mode: SessionRow["mode"];
+  startedBy: SessionRow["started_by"];
+  startedAt: string;
+  endedAt: string | null;
+  endedBy: SessionRow["ended_by"];
+  endedReason: SessionRow["ended_reason"];
+  outcome: SessionRow["outcome"];
+  finalMessage: string | null;
+  /** The newest message the agent wrote as it ran; null before its first, and for built-in Actions, which have no output. */
+  latestMessage: string | null;
+  costUsd: number | null;
+  usage: Record<string, unknown> | null;
+  /** Which of the requested limits the Runner honoured itself. */
+  limitsHonoured: string[];
+  openedAt: string | null;
+  /** The Runner's own id for the Session when it names its own (a Codex thread), for resuming by hand. */
+  runnerSessionId: string | null;
+  /** The Agent Profile it ran under and what that resolved to as it started; null for action Sessions and those from before profiles. */
+  profile: SessionProfile | null;
+  /** The Runner it ran on: its profile's, else the Stage snapshot's for a Session from before profiles; null for action Sessions. */
+  runner: RunnerName | null;
+  stdoutPath: string | null;
+  transcriptPath: string | null;
+  running: boolean;
+  /** Milliseconds so far, or to the end. */
+  durationMs: number;
+}
+
+/** One Ticket with every Stage of its Pipeline and its Sessions, for the detail page. */
+export interface TicketDetail extends TicketView {
+  /** The latest Session: the pane shows it, running or not. */
+  session: SessionView | null;
+  /** The timeline, newest first. */
+  sessions: SessionView[];
+  /** How the Pipeline file stands against the Ticket's Version (ADR 0009); null for a Ticket that runs the file itself. */
+  pipelineDrift: Drift | null;
+  /** Each Runner Stage of the Ticket's Version and the profile it runs under now, override included. */
+  profiles: StageProfileView[];
+  /** Send here (LASSO-197): null when the Ticket cannot be sent anywhere (done, Abandoned, or its Pipeline not loading). */
+  send: SendView | null;
+  /** The Mark done menu (LASSO-198) on a human or taken-over Stage; null where Mark done is a plain lever or absent. */
+  markDone: MarkDoneView | null;
+  /** Every Visit, oldest first, with how each began (LASSO-199). */
+  visits: VisitView[];
+  /** The arcs over the Stage track: one per Route that has fired, one per source and target of human sends. */
+  arcs: RouteArcView[];
+  /** Each Version upgrade, oldest first, for its marker on the track (LASSO-201). */
+  upgrades: UpgradeView[];
+}
+
+/**
+ * A Version upgrade of the Ticket (LASSO-201): from which Version to which, the Stage it continued on or landed on,
+ * the Route pick it dropped, and the Route records before it that touch a Stage no longer on the track.
+ */
+export interface UpgradeView {
+  /** "upgrade:<id>": what its marker on the track opens in the Route panel. */
+  key: string;
+  at: string;
+  /** The Version before; null for a Ticket from before Versions. */
+  from: number | null;
+  to: number;
+  /** The Stage the Ticket was on and stayed on, or the landing a human picked. */
+  stage: string;
+  /** An upgrade Visit opened at a landing the human picked; false when the Visit continued. */
+  landed: boolean;
+  /** A pending or held pick the upgrade dropped, its Route or target gone; where the Route went before, who picked it, and its note. */
+  dropped: { route: string; to: string | null; by: ChosenBy | null; note: string | null } | null;
+  /** Route and send records from before this upgrade that touch a Stage the current track lacks, so draw no arc; newest first. */
+  earlier: EarlierRecordView[];
+}
+
+/** A record no arc shows, as it touches a Stage an upgrade removed: shown as "earlier Version (vN)". */
+export interface EarlierRecordView extends RouteRecordView {
+  kind: "route" | "send";
+  from: string;
+  /** The Version the Ticket ran when it arrived by this record. */
+  version: number | null;
+}
+
+/** A Ticket's stay at one Stage, and the arrival record of how it began. */
+export interface VisitView {
+  id: number;
+  stage: string;
+  /** Which arrival at the Stage this is, from 1. */
+  number: number;
+  /** The Pipeline Version the Ticket ran when it arrived. */
+  version: number | null;
+  arrivedAt: string;
+  /** Null for the current Visit. */
+  leftAt: string | null;
+  arrivedBy: ArrivedBy;
+  /** The Visit left to arrive here, and its Stage; null for the first. */
+  fromVisit: number | null;
+  fromStage: string | null;
+  /** The Route taken, or the declared Route a human's send reused; null otherwise. */
+  route: string | null;
+  chosenBy: ChosenBy | null;
+  /** What the Route adds to the Stage's prompt, or replaces it with. */
+  text: string | null;
+  replaces: boolean;
+  /** The note the chooser left, or a human's send instructions. */
+  note: string | null;
+  skippedAt: string | null;
+}
+
+/**
+ * One arc on the Ticket page: a Route that fired from a source Stage (picked by an agent, Action or check), or the
+ * human sends from a source Stage to a target. A send never counts against a Route's Budget, so it carries none.
+ */
+export interface RouteArcView {
+  /** Stable across reads: "route:<from>:<name>" or "send:<from>:<to>". */
+  key: string;
+  kind: "route" | "send";
+  from: string;
+  /** Where its latest record went. */
+  to: string;
+  /** The Route's name; null for sends. */
+  route: string | null;
+  /** Times taken of the limit now; null for sends and for a Route the Ticket's Version no longer declares. */
+  budget: { used: number; limit: number } | null;
+  /** The Route's Budget is used up, so the next pick of it by an agent, Action or check Flags. Never for sends. */
+  spent: boolean;
+  /** Each time it fired, newest first. */
+  records: RouteRecordView[];
+}
+
+/** One firing of an arc: the Visit it began, who chose it, when, what it carried, and where its Budget stood after it. */
+export interface RouteRecordView {
+  visit: number;
+  /** Which arrival at the target this began. */
+  number: number;
+  to: string;
+  at: string;
+  chosenBy: ChosenBy;
+  /** The Route taken, or the one a human's send reused. */
+  route: string | null;
+  text: string | null;
+  replaces: boolean;
+  note: string | null;
+  /** The Route's count after this firing, of the limit now; null for a human's send, which never counts. */
+  budget: { used: number; limit: number | null } | null;
+}
+
+/** What the Send here popover offers on any station of an active Ticket. */
+export interface SendView {
+  /** Why no send can go now (a Session is running), else null. */
+  unavailable: string | null;
+  /** The current Stage's declared Routes, each offered as "Use Route <name>" on the Stage it goes to. */
+  routes: SendRoute[];
+}
+
+/**
+ * What Mark done offers on a human or taken-over Stage: "Done, walk forward", "Done via <route> -> <target>" for each
+ * of the Stage's declared Routes, and Send to Stage. A Route chosen here is a human's and never counts or Flags.
+ */
+export interface MarkDoneView {
+  routes: SendRoute[];
+  /** The terminal agent's pick on this Visit (`laisso route`), which the menu pre-selects with its note; null for none. */
+  suggested: { route: string; note: string | null } | null;
+}
+
+/** A declared Route a send may reuse, with the text it adds to its target's prompt. A human's send never counts against its Budget. */
+export interface SendRoute {
+  name: string;
+  to: string;
+  /** Its append or replace text; null when it has neither. */
+  text: string | null;
+  replaces: boolean;
+}
+
+/** What intake returns: the new Ticket's view plus whether its branch was found rather than made. */
+export interface IntakeResult extends TicketView {
+  branchExisted: boolean;
+}
+
+export interface ViewContext {
+  baseUrl: string;
+  pipelineFor(ticket: TicketRow): Pipeline | null;
+  /** A Ticket's Sessions, newest first. */
+  sessionsFor(ticket: TicketRow): SessionRow[];
+  /** A Ticket's Visits, oldest first. */
+  visitsFor(ticket: TicketRow): VisitRow[];
+  /** A Ticket's Version upgrades, oldest first. */
+  upgradesFor(ticket: TicketRow): UpgradeRow[];
+  /** A Round's Feedback snapshot as recorded. */
+  feedbackFor(session: SessionRow): FeedbackRow[];
+  /** The Ticket's live PR links, in the order they were added. */
+  linksFor(ticket: TicketRow): PrLinkRow[];
+  budgetFor(ticket: TicketRow, pipeline: Pipeline | null, stage: Stage | null, rows: SessionRow[]): BudgetView;
+  /** Each of the Stage's declared Routes with how often it was taken for the Ticket and its resolved limit. */
+  routeBudgetsFor(ticket: TicketRow, stage: Stage): Record<string, { used: number; limit: number }>;
+  driftFor(ticket: TicketRow): Drift | null;
+  /** The Ticket's place in the line for a headless slot, 1 first, or null when it is not in line. */
+  queuePosition(ticket: TicketRow): number | null;
+  /** config.yaml's profiles as they stand for this request: what each Stage would start under now. */
+  profiles: ProfileScope;
+}
+
+/** The order the Ledger shows display states in: attention first. */
+export const LEDGER_ORDER: DisplayState[] = ["flagged", "needs_you", "holding", "ready", "running", "queued", "watching", "quiet", "done", "abandoned"];
+
+/** A Pipeline as the editor sees it: every field of every Stage, action Stages included. */
+export interface PipelineView {
+  profile: string | null;
+  budget: { spend?: number };
+  stages: StageFields[];
+}
+
+export type StageFields =
+  | { kind: "runner"; name: string; label: string; prompt: string | null; skills: string[]; profile: string | null; human: boolean; advance: boolean; artifact: string | null; artifactWith?: Record<string, string>; repeat: "feedback" | null; budget: { rounds?: number; attempts?: number; wallTime?: string }; routes?: Routes; agentRoutes?: true }
+  | { kind: "action"; name: string; label: string; action: string; with: Record<string, string>; routes?: Routes }
+  | { kind: "wait"; name: string; label: string; wait: string; waitWith: Record<string, string>; advance: boolean; budget: { wallTime?: string }; routes?: Routes };
+
+export interface PipelineListing {
+  name: string;
+  file: string;
+  /** The Agent Profile its Stages inherit; null leaves them to default_profile. */
+  profile: string | null;
+  /** Each Stage, with the profile a Runner Stage names (null when it inherits, and for an action Stage). */
+  stages: Array<{ name: string; kind: Stage["kind"]; label: string; profile: string | null }>;
+  problem: string | null;
+}
+
+export interface PipelineFile {
+  name: string;
+  file: string;
+  text: string;
+  pipeline: PipelineView | null;
+  problem: string | null;
+}
+
+/** A Version of a Pipeline that active Tickets still run, and how many. */
+export interface LiveVersionView {
+  version: number;
+  createdAt: string;
+  live: number;
+}
+
+/** A frozen Version of a Pipeline, read-only, with how many active Tickets run it. */
+export interface PipelineVersionView {
+  name: string;
+  version: number;
+  createdAt: string;
+  live: number;
+  /** True once the Pipeline's file is gone; the Version still reads. */
+  deleted: boolean;
+  pipeline: PipelineView;
+}
+
+export interface ConfigFile {
+  file: string;
+  text: string;
+  config: Config;
+  /** Keys this edit changed whose new value applies only after a restart. */
+  restart: string[];
+}
+
+/** /api/config/pr-lists: config.yaml's pr_lists: block as YAML, as the Config page edits it. */
+export interface PrListsYaml {
+  text: string;
+}
+
+export type { PrListsView, PrListView, PrListError, PrListsStatus, GhProblem } from "../prs/lists.ts";
+export type { CheckCounts, PrRow, PrTicket, Reviewer, ReviewerState } from "../prs/rows.ts";
+
+/** The running version and what Laisso has to say about it; `text` is the line to show, null when there is nothing to say. */
+export interface VersionView {
+  version: string;
+  notice: VersionNotice;
+  text: string | null;
+}
+
+/** One Action config.yaml defines: global when repo is null, else that repo's own (an override when a global one shares its name). */
+export interface ActionListing {
+  name: string;
+  repo: string | null;
+  params: string[];
+  timeout: string;
+  run: string;
+}
+
+/** Every Action in config, the global ones first, then each repo's, each set by name. */
+export function actionListings(config: Config): ActionListing[] {
+  const list = (actions: Record<string, ActionConfig>, repo: string | null) =>
+    Object.entries(actions)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([name, a]) => ({ name, repo, params: a.params, timeout: a.timeout, run: a.run }));
+  return [...list(config.actions, null), ...Object.entries(config.repos).flatMap(([repo, r]) => list(r.actions, repo))];
+}
+
+export function pipelineListing(source: PipelineSource): PipelineListing {
+  const stages = (source.pipeline?.stages ?? []).map((s) => ({ name: s.name, kind: s.kind, label: stageLabel(s), profile: s.kind === "runner" ? s.profile : null }));
+  return { name: source.name, file: source.file, profile: source.pipeline?.profile ?? null, stages, problem: source.problem };
+}
+
+export function pipelineFileView(source: PipelineSource): PipelineFile {
+  const pipeline = source.pipeline;
+  return {
+    name: source.name,
+    file: source.file,
+    text: source.text,
+    pipeline: pipeline ? pipelineFields(pipeline) : null,
+    problem: source.problem,
+  };
+}
+
+export function pipelineVersionView(row: VersionRow, pipeline: Pipeline, deleted: boolean): PipelineVersionView {
+  return { name: row.pipeline, version: row.version, createdAt: row.created_at, live: row.live, deleted, pipeline: pipelineFields(pipeline) };
+}
+
+function pipelineFields(pipeline: Pipeline): PipelineView {
+  return { profile: pipeline.profile, budget: pipeline.budget, stages: pipeline.stages.map(stageFields) };
+}
+
+/** A Stage as the editor shows it; a profile it inherits is null, so the form can say so. */
+function stageFields(stage: Stage): StageFields {
+  return { ...stage, label: stageLabel(stage) };
+}
+
+/** What the stepper calls a Stage: an action Stage with params by their values (a transition by its status), any other by its name. */
+export function stageLabel(stage: Stage): string {
+  const values = stage.kind === "action" ? Object.values(stage.with).filter(Boolean) : [];
+  return values.length ? values.join(" ") : stage.name;
+}
+
+export function ticketView(ticket: TicketRow, ctx: ViewContext): TicketView {
+  const pipeline = ctx.pipelineFor(ticket);
+  const index = pipeline ? pipeline.stages.findIndex((s) => s.name === ticket.stage) : -1;
+  const stage = index >= 0 ? pipeline!.stages[index]! : null;
+  const human = stage?.kind === "runner" && stage.human;
+  const rows = ctx.sessionsFor(ticket);
+  const links = ctx.linksFor(ticket);
+  const queue = ctx.queuePosition(ticket);
+  const budget = ctx.budgetFor(ticket, pipeline, stage, rows);
+  const takenOver = stage?.kind === "runner" && !stage.human && rows.some((r) => r.mode === "terminal" && r.ended_at === null && r.stage === stage.name);
+  const visits = ctx.visitsFor(ticket);
+  const check = checkOf(latestVisit(visits, ticket.stage));
+  // Holding before a Route (LASSO-196), the Ticket waits at the Route's source, its Visit's pick naming the Route; an
+  // upgrade that dropped that pick leaves it holding at the finished source, Start walking forward (LASSO-201).
+  const visit = visits.find((v) => v.left_at === null) ?? null;
+  const held = ticket.holding_since && stage ? heldRoute(stage, visit?.picked_route ?? null) : null;
+  const walkOn = ticket.holding_since && stage && !held && holdDropped(ticket, visit, ctx.upgradesFor(ticket)) ? { next: pipeline!.stages[index + 1]?.name ?? null } : null;
+  const start = held || walkOn ? startLabel(ticket.stage, held, walkOn) : null;
+  const display = displayState(ticket, links, stage, rows[0] ?? null, queue, budget.rounds.limit, takenOver, check, start);
+  const resume = stage?.kind === "runner" ? (last: SessionRow) => resumeRefusal(stage.name, last, ticketProfile(ctx.profiles, ticket, pipeline!, stage)) : () => null;
+  const finished = held || walkOn ? stage : index > 0 ? pipeline!.stages[index - 1]! : null;
+  const draft = ticket.holding_since && finished?.kind === "runner" && !finished.human && resumableHeadless(rows, finished.name) ? finished.name : null;
+  const triggers = ticketTriggers(ticket, stage, rows, resume, takenOver, draft, start);
+  return {
+    id: ticket.id,
+    shortId: shortId(ticket.id),
+    title: ticket.title,
+    reference: ticket.reference,
+    name: ticket.name,
+    label: ticketLabel(ticket),
+    origin: ticket.origin,
+    body: ticket.origin === "prompt" ? ticket.prompt : ticket.body,
+    repo: ticket.repo,
+    branch: ticket.branch,
+    worktree: ticket.worktree,
+    pipeline: ticket.pipeline,
+    pipelineVersion: ticket.pipeline_version,
+    stage: {
+      name: ticket.stage,
+      kind: stage?.kind ?? "runner",
+      label: stage ? stageLabel(stage) : ticket.stage,
+      human,
+      index,
+      total: pipeline?.stages.length ?? 0,
+      repeat: stage?.kind === "runner" && stage.repeat === "feedback",
+      override: stage?.kind === "runner" ? overrideFor(ticket, stage.name) : null,
+    },
+    state: ticket.state,
+    flag: ticket.flagged_at ? { at: ticket.flagged_at, reason: ticket.flag_reason ?? "", detail: ticket.flag_detail } : null,
+    prs: links.map(prView),
+    display: { ...display, label: DISPLAY_LABEL[display.state] },
+    queue,
+    triggers,
+    budget,
+    stages: (pipeline?.stages ?? []).map((s) => ({ name: s.name, kind: s.kind, label: stageLabel(s), human: s.kind === "runner" && s.human, skippedAt: latestVisit(visits, s.name)?.skipped_at ?? null })),
+    check: (stage?.kind === "runner" && stage.artifactWith) || stage?.kind === "wait" ? check : null,
+    visit: currentVisit(visits),
+    mirrorPending: ticket.mirror_pending !== null,
+    createdAt: ticket.created_at,
+    updatedAt: ticket.updated_at,
+    url: `${ctx.baseUrl}/#${ticket.id}`,
+  };
+}
+
+export function ticketDetail(ticket: TicketRow, ctx: ViewContext): TicketDetail {
+  const sessions = ctx.sessionsFor(ticket).map((row) => sessionView(row, Date.now(), ctx.feedbackFor(row)));
+  const pipeline = ctx.pipelineFor(ticket);
+  const profiles = (pipeline?.stages ?? []).flatMap((stage) => (stage.kind === "runner" ? [stageProfileView(ctx.profiles, ticket, pipeline!, stage)] : []));
+  const visits = visitViews(ctx.visitsFor(ticket));
+  const arcs = pipeline ? routeArcs(visits, pipeline, (stage) => ctx.routeBudgetsFor(ticket, stage)) : [];
+  const view = ticketView(ticket, ctx);
+  const upgrades = upgradeViews(ctx.upgradesFor(ticket), visits, pipeline);
+  const markDone = markDoneView(view, pipeline, ctx.visitsFor(ticket));
+  return { ...view, session: sessions[0] ?? null, sessions, pipelineDrift: ctx.driftFor(ticket), profiles, send: sendView(ticket, pipeline, sessions), markDone, visits, arcs, upgrades };
+}
+
+/** The Mark done menu when the Ticket offers Mark done at an unflagged human or taken-over Stage, else null. */
+function markDoneView(view: TicketView, pipeline: Pipeline | null, visits: VisitRow[]): MarkDoneView | null {
+  const stage = pipeline?.stages.find((s) => s.name === view.stage.name);
+  if (view.flag || stage?.kind !== "runner" || !view.triggers.some((t) => t.action === "done")) return null;
+  const visit = visits.find((v) => v.left_at === null);
+  const picked = visit?.picked_by === "agent" && visit.picked_route && stage.routes?.[visit.picked_route] ? visit : null;
+  return { routes: declaredRoutes(stage), suggested: picked ? { route: picked.picked_route!, note: picked.picked_note } : null };
+}
+
+/** A Stage's declared Routes, each with the text it adds to its target's prompt. */
+function declaredRoutes(stage: Stage): SendRoute[] {
+  return Object.entries(stage.routes ?? {}).map(([name, r]) => ({ name, to: r.to, text: r.replace ?? r.append ?? null, replaces: r.replace !== undefined }));
+}
+
+/** The Visit not yet left, as the Ledger reads it; null for a Ticket with none. */
+function currentVisit(visits: VisitRow[]): TicketView["visit"] {
+  const v = visits.find((x) => x.left_at === null);
+  return v ? { number: v.number, arrivedBy: v.arrived_by, route: v.route, chosenBy: v.chosen_by } : null;
+}
+
+function visitViews(rows: VisitRow[]): VisitView[] {
+  const stageOf = new Map(rows.map((r) => [r.id, r.stage]));
+  return rows.map((r) => ({
+    id: r.id,
+    stage: r.stage,
+    number: r.number,
+    version: r.version,
+    arrivedAt: r.arrived_at,
+    leftAt: r.left_at,
+    arrivedBy: r.arrived_by,
+    fromVisit: r.from_visit,
+    fromStage: r.from_visit === null ? null : (stageOf.get(r.from_visit) ?? null),
+    route: r.route,
+    chosenBy: r.chosen_by,
+    text: r.text,
+    replaces: r.replaces === 1,
+    note: r.note,
+    skippedAt: r.skipped_at,
+  }));
+}
+
+/**
+ * The arcs over the Stage track, in the order each first fired: one per source Stage and Route name for Routes an
+ * agent, Action or check took (matched by name, as Route counts are, so a Route keeps its arc across Versions), and
+ * one per source and target for a human's sends. Records touching a Stage no longer on the track draw no arc. Each
+ * Route record carries the count after it; the arc's badge is the count and limit as they stand now.
+ */
+export function routeArcs(visits: VisitView[], pipeline: Pipeline, budgetsOf: (stage: Stage) => Record<string, { used: number; limit: number }>): RouteArcView[] {
+  const onTrack = new Map(pipeline.stages.map((s) => [s.name, s]));
+  const arcs = new Map<string, RouteArcView>();
+  const counted = new Map<string, number>();
+  const budgets = new Map<string, Record<string, { used: number; limit: number }>>();
+  const budgetAt = (stage: Stage) => {
+    if (!budgets.has(stage.name)) budgets.set(stage.name, budgetsOf(stage));
+    return budgets.get(stage.name)!;
+  };
+  for (const v of visits) {
+    if ((v.arrivedBy !== "route" && v.arrivedBy !== "send") || !v.fromStage || !v.chosenBy) continue;
+    const kind = v.arrivedBy;
+    // A Route counts by its source Stage and name, wherever it went, so every firing counts even off the track.
+    const countKey = `${v.fromStage}:${v.route}`;
+    const used = kind === "route" ? (counted.get(countKey) ?? 0) + 1 : 0;
+    if (kind === "route") counted.set(countKey, used);
+    const source = onTrack.get(v.fromStage);
+    if (!source || !onTrack.has(v.stage) || (kind === "route" && !v.route)) continue;
+    const key = kind === "route" ? `route:${v.fromStage}:${v.route}` : `send:${v.fromStage}:${v.stage}`;
+    const now = kind === "route" ? (budgetAt(source)[v.route!] ?? null) : null;
+    const arc = arcs.get(key) ?? { key, kind, from: v.fromStage, to: v.stage, route: kind === "route" ? v.route : null, budget: now && { used: now.used, limit: now.limit }, spent: now !== null && now.used >= now.limit, records: [] };
+    arc.to = v.stage;
+    arc.records.unshift({
+      visit: v.id,
+      number: v.number,
+      to: v.stage,
+      at: v.arrivedAt,
+      chosenBy: v.chosenBy,
+      route: v.route,
+      text: v.text,
+      replaces: v.replaces,
+      note: v.note,
+      budget: kind === "route" ? { used, limit: now?.limit ?? null } : null,
+    });
+    arcs.set(key, arc);
+  }
+  return [...arcs.values()];
+}
+
+/**
+ * The upgrades for their markers on the track (LASSO-201). A Route or send record touching a Stage the current track
+ * lacks draws no arc, so it goes with the first upgrade after it, marked with the Version it ran under; Route records
+ * carry the count after them, by source Stage and Route name as counts are kept.
+ */
+export function upgradeViews(rows: UpgradeRow[], visits: VisitView[], pipeline: Pipeline | null): UpgradeView[] {
+  const views = rows.map(
+    (u): UpgradeView => ({
+      key: `upgrade:${u.id}`,
+      at: u.at,
+      from: u.from_version,
+      to: u.to_version,
+      stage: (u.landed === null ? visits.find((v) => v.id === u.visit) : visits.find((v) => v.id === u.landed))?.stage ?? "",
+      landed: u.landed !== null,
+      dropped: u.dropped_route ? { route: u.dropped_route, to: u.dropped_to, by: u.dropped_by, note: u.dropped_note } : null,
+      earlier: [],
+    }),
+  );
+  if (!views.length) return views;
+  const onTrack = new Set((pipeline?.stages ?? []).map((s) => s.name));
+  const counted = new Map<string, number>();
+  for (const v of visits) {
+    if ((v.arrivedBy !== "route" && v.arrivedBy !== "send") || !v.fromStage || !v.chosenBy) continue;
+    const kind = v.arrivedBy;
+    const countKey = `${v.fromStage}:${v.route}`;
+    const used = kind === "route" ? (counted.get(countKey) ?? 0) + 1 : 0;
+    if (kind === "route") counted.set(countKey, used);
+    if (onTrack.has(v.fromStage) && onTrack.has(v.stage)) continue;
+    const after = views.find((u) => u.at > v.arrivedAt) ?? views[views.length - 1]!;
+    after.earlier.unshift({
+      kind,
+      from: v.fromStage,
+      version: v.version,
+      visit: v.id,
+      number: v.number,
+      to: v.stage,
+      at: v.arrivedAt,
+      chosenBy: v.chosenBy,
+      route: v.route,
+      text: v.text,
+      replaces: v.replaces,
+      note: v.note,
+      budget: kind === "route" ? { used, limit: null } : null,
+    });
+  }
+  return views;
+}
+
+/** Send here as it stands: refused only while a Session other than a terminal runs; Flags, holds and Budgets never stop it. */
+function sendView(ticket: TicketRow, pipeline: Pipeline | null, sessions: SessionView[]): SendView | null {
+  const stage = pipeline?.stages.find((s) => s.name === ticket.stage);
+  if (ticket.state !== "active" || !stage) return null;
+  const running = sessions.find((s) => s.running && s.mode !== "terminal");
+  return {
+    unavailable: running ? `${running.stage} has a Session running; stop it or let it end first` : null,
+    routes: declaredRoutes(stage),
+  };
+}
+
+/** A Runner Stage's profile as its next Session would resolve it, with both modes' settings for the summary lines. */
+export function stageProfileView(config: ProfileScope, ticket: TicketRow, pipeline: Pipeline, stage: RunnerStage): StageProfileView {
+  const override = overrideFor(ticket, stage.name);
+  const headless = ticketProfile(config, ticket, pipeline, { ...stage, human: false });
+  const human = ticketProfile(config, ticket, pipeline, { ...stage, human: true });
+  if ("problem" in headless || "problem" in human) {
+    const problem = "problem" in headless ? headless.problem : (human as { problem: string }).problem;
+    return { stage: stage.name, profile: override, from: override ? "override" : null, overridden: override !== null, headless: null, human: null, problem };
+  }
+  return { stage: stage.name, profile: headless.name, from: headless.from, overridden: override !== null, headless: headless.profile, human: human.profile, problem: null };
+}
+
+export function sessionView(row: SessionRow, now: number = Date.now(), feedback: FeedbackRow[] = []): SessionView {
+  const started = new Date(row.started_at).getTime();
+  const ended = row.ended_at ? new Date(row.ended_at).getTime() : now;
+  return {
+    id: row.id,
+    ticket: row.ticket,
+    stage: row.stage,
+    ordinal: row.ordinal,
+    round: row.round,
+    feedback: feedback.map((f) => ({ kind: f.kind, id: f.source_id, summary: f.summary, url: f.url, path: f.path, line: f.line, addressed: f.addressed })),
+    mode: row.mode,
+    startedBy: row.started_by,
+    startedAt: row.started_at,
+    endedAt: row.ended_at,
+    endedBy: row.ended_by,
+    endedReason: row.ended_reason,
+    outcome: row.outcome,
+    finalMessage: row.final_message,
+    latestMessage: row.latest_message,
+    costUsd: row.cost_usd,
+    usage: row.usage ? (JSON.parse(row.usage) as Record<string, unknown>) : null,
+    limitsHonoured: row.limits_honoured ? (JSON.parse(row.limits_honoured) as string[]) : [],
+    openedAt: row.opened_at,
+    runnerSessionId: row.runner_session_id,
+    profile: row.profile ? (JSON.parse(row.profile) as SessionProfile) : null,
+    runner: runnerOf(row),
+    stdoutPath: row.stdout_path,
+    transcriptPath: row.transcript_path,
+    running: row.ended_at === null,
+    durationMs: Math.max(0, ended - started),
+  };
+}
+
+/** A link as the API shows it: the number from its URL, and its state, Feedback and checks from the last poll. */
+export function prView(link: PrLinkRow): PrView {
+  const status = link.status ? (JSON.parse(link.status) as PrStatus) : null;
+  return {
+    url: link.url,
+    number: parsePrUrl(link.url)?.number ?? 0,
+    title: link.title ?? "",
+    role: link.role,
+    source: link.source,
+    state: link.state ?? status?.state ?? null,
+    head: link.head,
+    base: link.base,
+    author: link.author,
+    feedback: status?.outstanding ?? 0,
+    checks: status?.checks ?? "none",
+  };
+}
+
+function displayState(ticket: TicketRow, links: PrLinkRow[], stage: Stage | null, latest: SessionRow | null, queue: number | null, rounds: number, takenOver = false, check: ArtifactCheck | null = null, start: string | null = null): { state: DisplayState; why: string } {
+  const human = stage?.kind === "runner" && stage.human;
+  const name = stage ? stageLabel(stage) : ticket.stage;
+  if (ticket.state === "done") return { state: "done", why: "done" };
+  if (ticket.state === "abandoned") return { state: "abandoned", why: "abandoned" };
+  if (ticket.flagged_at) return { state: "flagged", why: ticket.flag_reason ?? "flagged" };
+  if (latest?.ended_at === null && latest.mode === "action") return { state: "running", why: `${latest.stage}, running its command` };
+  if (headlessRunning(latest)) return { state: "running", why: latest.round !== null ? `${latest.stage}, Round ${latest.round} of ${rounds}` : `${latest.stage}, run ${latest.ordinal}` };
+  if (ticket.holding_since) return { state: "holding", why: `${start ?? `Start ${name}`} when ready` };
+  if (human || takenOver) {
+    const opened = latest && latest.ended_at === null && latest.mode === "terminal" && latest.stage === ticket.stage ? latest.opened_at : null;
+    const why = opened ? `terminal opened ${clockTime(opened)}` : "not started";
+    return { state: "needs_you", why: takenOver ? `taken over; ${opened ? why : "terminal not opened"}` : why };
+  }
+  if (queue !== null) return { state: "queued", why: `${queue} in line; ${name} starts when a slot frees` };
+  // A wait Stage Watches its check: no slot, no human, never Queued (CONTEXT.md: Watching).
+  if (stage?.kind === "wait") return { state: "watching", why: watchingWhy(stage.wait, check) };
+  // A repeating Stage with no Round due waits on its PR: quiet (spec: Review loop).
+  if (stage?.kind === "runner" && stage.repeat && !roundDue(links)) return { state: "quiet", why: quietWhy(check, links, name) };
+  return { state: "ready", why: `${name} starts on the next tick` };
+}
+
+/** The why line of a Watching Ticket: the check's latest detail line and when it last ran, or that it has not run yet. */
+function watchingWhy(wait: string, check: ArtifactCheck | null): string {
+  if (!check) return `${wait}: not checked yet`;
+  const line = check.line ?? `${check.action} ${check.result === "met" ? "met" : "not met"}`;
+  return `${line} · checked ${clockTime(check.at)}`;
+}
+
+/** The last headless Session of the Stage, when there is one Resume could re-enter. */
+function resumableHeadless(rows: SessionRow[], stage: string): SessionRow | null {
+  const last = rows.find((r) => r.stage === stage && r.mode === "headless");
+  if (!last) return null;
+  const runner = runnerOf(last);
+  return runner === null || adapterFor(runner).sessionIds === "laisso" || last.runner_session_id !== null ? last : null;
+}
+
+/**
+ * `refusal` says why Resume cannot re-enter a Session under the profile the Stage runs now, or null. `takenOver`: a
+ * human works this headless Stage in a terminal; `draft`: the finished Stage a holding Ticket can open in a terminal;
+ * `start`: what Start does for a Ticket holding before a Route, or at a source whose held pick an upgrade dropped.
+ */
+function ticketTriggers(ticket: TicketRow, stage: Stage | null, rows: SessionRow[], refusal: (last: SessionRow) => string | null, takenOver = false, draft: string | null = null, start: string | null = null): Trigger[] {
+  if (ticket.state !== "active") return [];
+  const abandon: Trigger = { action: "abandon", label: "Abandon" };
+  if (!stage) return [abandon];
+  // Take over needs a headless Session of the Stage to re-enter: one running, or one Resume could re-enter.
+  const running = rows.find((r) => r.stage === stage.name && r.mode === "headless" && r.ended_at === null) ?? null;
+  const toTake = stage.kind === "runner" && !stage.human && !takenOver ? (running ?? resumableHeadless(rows, stage.name)) : null;
+  const takeOver = (): Trigger[] => {
+    if (!toTake) return [];
+    const unavailable = refusal(toTake);
+    return [{ action: "takeover", label: "Take over in terminal", ...(unavailable ? { unavailable } : {}) }];
+  };
+  if (stage.kind === "wait") {
+    // A wait Stage has no Mark done (LASSO-195): Skip advances it as if met, taking no Route.
+    const skip: Trigger = { action: "skip", label: `Skip ${stage.name}` };
+    if (ticket.flagged_at) return [{ action: "retry", label: `Retry ${stage.name}` }, { action: "extend", label: "Extend Budget" }, skip, abandon];
+    if (ticket.holding_since) return [{ action: "start", label: start ?? `Start ${stage.name}` }, skip, abandon];
+    return [{ action: "check", label: "Check now" }, skip, abandon];
+  }
+  if (ticket.flagged_at) {
+    // Resume needs something to re-enter: a terminal window that opened, or the last headless Session of this
+    // Stage, which a Runner that names its own sessions must have reported an id for.
+    const resumable = stage.kind !== "runner" ? null : stage.human ? (rows.find((r) => r.stage === stage.name && r.mode === "terminal" && r.ended_at === null && r.opened_at !== null) ?? null) : resumableHeadless(rows, stage.name);
+    // A profile now on another Runner keeps Resume on show, unavailable, so the page can say to Retry instead.
+    const unavailable = resumable ? refusal(resumable) : null;
+    return [
+      { action: "retry", label: `Retry ${stage.name}` },
+      ...(resumable ? [{ action: "resume" as const, label: `Resume ${stage.name}`, ...(unavailable ? { unavailable } : {}) }] : []),
+      ...takeOver(),
+      { action: "extend", label: "Extend Budget" },
+      { action: "done", label: `Mark ${stage.name} done` },
+      { action: "skip", label: `Skip ${stage.name}` },
+      abandon,
+    ];
+  }
+  const skip: Trigger = { action: "skip", label: `Skip ${stage.name}` };
+  if (ticket.holding_since) return [{ action: "start", label: start ?? `Start ${stage.name}` }, ...(draft ? [{ action: "draft" as const, label: `Open ${draft} in terminal` }] : []), skip, abandon];
+  if (stage.kind !== "runner" || headlessRunning(rows[0] ?? null) || !(stage.human || takenOver)) {
+    // A Stage that has not started may be skipped (LASSO-159): no Session of it yet, and none running.
+    const unstarted = !rows.some((r) => r.stage === stage.name || r.ended_at === null);
+    return [...takeOver(), ...(unstarted ? [skip] : []), abandon];
+  }
+  return [
+    { action: "terminal", label: "Open terminal" },
+    // A taken-over Stage can go back to Laisso: its Rounds, or a headless Session on the terminal's session.
+    ...(takenOver ? [{ action: "handback" as const, label: "Hand back to Laisso" }] : []),
+    { action: "done", label: `Mark ${stage.name} done` },
+    skip,
+    abandon,
+  ];
+}
+
+function headlessRunning(latest: SessionRow | null): latest is SessionRow & { mode: "headless"; ended_at: null } {
+  return latest !== null && latest.ended_at === null && latest.mode === "headless";
+}
+
+function clockTime(iso: string): string {
+  const d = new Date(iso);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+export function sortForLedger(views: TicketView[]): TicketView[] {
+  return [...views].sort((a, b) => {
+    const order = LEDGER_ORDER.indexOf(a.display.state) - LEDGER_ORDER.indexOf(b.display.state);
+    if (order !== 0) return order;
+    // Queued rows by their place in line; every other group most recent activity first.
+    if (a.queue !== null && b.queue !== null) return a.queue - b.queue;
+    return b.updatedAt.localeCompare(a.updatedAt);
+  });
+}
+
+/** A tool Laisso needs that PATH lacked at startup, and what needs it. */
+export interface MissingTool {
+  name: string;
+  reasons: string[];
+}
+
+/** /api/health: who answered, and what the startup tool check found missing. */
+export interface Health {
+  ok: true;
+  pid: number;
+  version: string;
+  missingTools: MissingTool[];
+}

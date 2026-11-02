@@ -1,0 +1,275 @@
+import type { RunnerName } from "../pipeline/load.ts";
+import type { Effort, ProfileSettings } from "../server/config.ts";
+import { renderFeedback, type PrFeedback } from "../review/feedback.ts";
+import type { PrLinkRow } from "../store/links.ts";
+import type { VisitRow } from "../store/visits.ts";
+import type { Routes } from "../pipeline/load.ts";
+import { withLegacyNames } from "../legacy.ts";
+
+export type OutcomeStatus = "succeeded" | "failed" | "exhausted" | "interrupted";
+
+/** What a Session gets told about its Ticket: rendered into the prompt preamble and LAISSO_* variables. */
+export interface TicketContext {
+  id: string;
+  reference: string | null;
+  repo: string;
+  branch: string;
+  title: string;
+  body: string | null;
+  /** The Ticket's linked PRs as Laisso last saw them, in link order; prompt only, never an env variable. */
+  prs: TicketPr[];
+}
+
+/** One linked PR as a Session is told of it; what no read of the PR has seen yet is null. */
+export type TicketPr = Pick<PrLinkRow, "url" | "role" | "title" | "head" | "base">;
+
+/** Best-effort limits handed to a Runner that can stop cleanly at them; Laisso enforces wall time itself. */
+export interface RunLimits {
+  wallTimeMs?: number;
+  remainingSpendUsd?: number;
+}
+
+export interface RunRequest {
+  stage: string;
+  prompt: string | null;
+  skills: string[];
+  context: TicketContext;
+  cwd: string;
+  mode: "headless" | "terminal";
+  /** Laisso's id for the Session: chosen up front, and what LAISSO_SESSION always names. */
+  sessionId: string;
+  /** The session id is held from an earlier launch: re-enter it rather than start it. */
+  resume?: boolean;
+  /** On resume, the session to re-enter when it is not `sessionId`: an earlier Session's id, or the id the Runner gave it (Codex). */
+  runnerSessionId?: string;
+  /** A human-readable label for terminal Sessions; never an identity. */
+  name?: string;
+  limits: RunLimits;
+  /** The Agent Profile the Session runs under, resolved from config as it starts (ADR 0011). */
+  profile: ProfileSettings;
+  /** A Round of a repeating Stage: the Feedback snapshot it addresses and the marker its comments carry. */
+  feedback?: RoundContext;
+  /** The Routes the Stage lets its agent choose from (`agentRoutes: true`), each with its count; absent otherwise. */
+  routes?: RouteChoice[];
+}
+
+/** A Route an opted-in agent may choose, as its preamble lists it: where it goes, when to choose it, and its Budget. */
+export interface RouteChoice {
+  name: string;
+  to: string;
+  when: string | null;
+  used: number;
+  /** How many times an agent, Action or check may take it; Infinity for one with no count. */
+  limit: number;
+}
+
+export interface RoundContext {
+  round: number;
+  /** The Feedback grouped by the PR it is on. */
+  prs: PrFeedback[];
+  marker: string;
+}
+
+export interface Command {
+  argv: string[];
+  cwd: string;
+  env: Record<string, string>;
+  stdin?: string;
+}
+
+export interface Outcome {
+  status: OutcomeStatus;
+  sessionId: string | null;
+  finalMessage: string | null;
+  usage: Record<string, unknown> | null;
+  costUsd: number | null;
+  /** The Runner's own transcript, or the directory it will land in: a pointer for humans, never read by Laisso (ADR 0003). */
+  transcriptPath: string | null;
+}
+
+export type Limit = keyof RunLimits;
+
+/** A pure translator between Laisso and one Runner CLI (ADR 0003): no filesystem, no processes. */
+export interface RunnerAdapter {
+  name: RunnerName;
+  /** The limits this Runner stops at by itself when asked; the rest Laisso enforces. */
+  honours: Limit[];
+  /** Whether the Runner takes the session id Laisso chose, or assigns its own for `findSession` to recover. */
+  sessionIds: "laisso" | "runner";
+  command(request: RunRequest): Command;
+  /** The Runner in a terminal on `prompt` alone, outside any Ticket (`laisso setup`): a person is there, as on a human Stage. */
+  interactive(prompt: string, profile: ProfileSettings, cwd: string): Command;
+  parse(stdout: string, request: Pick<RunRequest, "cwd" | "sessionId">): Outcome;
+  /** The agent's own words in one complete line of headless stdout, or null when the line holds none: the Latest Message as it streams. */
+  message(line: string): string | null;
+  /** Where the Runner will keep its own transcript for this request; null when the Runner has none. */
+  transcriptPath(request: Pick<RunRequest, "cwd" | "sessionId">): string | null;
+  /**
+   * The session id a Runner assigned itself, found after launch; null for Runners that take
+   * Laisso's id. The one operation that reads the Runner's own store (ADR 0003), and only its index.
+   */
+  findSession(query: { cwd: string; launchedAfter: Date }): string | null;
+}
+
+/**
+ * The part of a RunRequest that comes from the Ticket, the Stage, and the Visit it is on; the caller adds mode,
+ * session id, and limits. A Visit at another Stage (a draft opened while the next one holds) changes nothing.
+ */
+export function requestFor(
+  ticket: TicketLike,
+  stage: StageLike,
+  profile: ProfileSettings,
+  links: TicketPr[],
+  visit: VisitLike | null = null,
+  counts: Record<string, { used: number; limit: number }> = {},
+): Pick<RunRequest, "stage" | "prompt" | "skills" | "context" | "cwd" | "profile" | "routes"> {
+  const prs = links.map(({ url, role, title, head, base }) => ({ url, role, title, head, base }));
+  return {
+    ...(stage.agentRoutes && stage.routes ? { routes: routeChoices(stage.routes, counts) } : {}),
+    stage: stage.name,
+    prompt: visit?.stage === stage.name ? visitPrompt(stage.prompt, visit) : stage.prompt,
+    skills: stage.skills,
+    context: { id: ticket.id, reference: ticket.reference, repo: ticket.repo, branch: ticket.branch, title: ticket.title, body: ticket.origin === "prompt" ? ticket.prompt : ticket.body, prs },
+    cwd: ticket.worktree,
+    profile,
+  };
+}
+
+interface TicketLike {
+  id: string;
+  reference: string | null;
+  repo: string;
+  branch: string;
+  title: string;
+  origin: string;
+  prompt: string | null;
+  body: string | null;
+  worktree: string;
+}
+
+interface StageLike {
+  name: string;
+  prompt: string | null;
+  skills: string[];
+  routes?: Routes;
+  agentRoutes?: boolean;
+}
+
+/** The Stage's Routes in the order written, each with its count; one with no count has none used and no cap. */
+function routeChoices(routes: Routes, counts: Record<string, { used: number; limit: number }>): RouteChoice[] {
+  return Object.entries(routes).map(([name, route]) => ({ name, to: route.to, when: route.when?.trim() || null, used: counts[name]?.used ?? 0, limit: counts[name]?.limit ?? Infinity }));
+}
+
+type VisitLike = Pick<VisitRow, "stage" | "arrived_by" | "route" | "chosen_by" | "text" | "note" | "replaces">;
+
+const CHOOSERS: Record<NonNullable<VisitRow["chosen_by"]>, string> = { agent: "the agent", action: "an Action", check: "a check", human: "a human" };
+
+/**
+ * The Stage prompt for a Visit that arrived by Route, or that a human sent here (LASSO-197): the Route's text after
+ * the prompt, or in place of its text (skills and the preamble are not part of it, so they stay), then the note it
+ * carried, which for a send is the human's instructions. It lasts for the Visit, retries and Rounds included; any
+ * other Visit runs the Stage prompt as written.
+ */
+export function visitPrompt(prompt: string | null, visit: Omit<VisitLike, "stage">): string | null {
+  const sent = visit.arrived_by === "send";
+  if (!visit.route && !(sent && visit.note)) return prompt;
+  const by = visit.route ? ` by Route ${visit.route}` : "";
+  const note = !visit.note
+    ? null
+    : sent
+      ? `A human sent this Ticket here${by}, with these instructions: ${visit.note}`
+      : `Laisso sent this Ticket here${by}, chosen by ${visit.chosen_by ? CHOOSERS[visit.chosen_by] : "Laisso"}, with this note: ${visit.note}`;
+  const parts = [visit.replaces ? null : prompt?.trim(), visit.route ? visit.text?.trim() : null, note].filter(Boolean);
+  return parts.length ? parts.join("\n\n") : null;
+}
+
+/** The Ticket context and Stage prompt every Runner sees, with skills in the Runner's own invocation form. */
+export function renderPrompt(request: RunRequest, skill: (name: string) => string): string {
+  const { context } = request;
+  const who = context.reference ? `${context.id} (${context.reference})` : context.id;
+  const preamble = [
+    `You are working Laisso Ticket ${who} in repo ${context.repo} on branch ${context.branch}, Stage ${request.stage}.`,
+    `Title: ${context.title}`,
+    ...(context.body ? ["", context.body.trim()] : []),
+    "",
+    ...renderPrs(context),
+    ...(request.routes?.length ? ["", ...renderRoutes(request.routes)] : []),
+  ];
+  // Skill invocations lead so the Runner sees them where it expects a command (spec: adapters prepend them).
+  const skills = request.skills.map(skill);
+  const feedback = request.feedback ? renderFeedback(request.feedback.prs, request.feedback.round, request.feedback.marker) : "";
+  const body = [skills.join("\n"), preamble.join("\n"), request.prompt?.trim() ?? "", feedback].filter(Boolean);
+  return body.join("\n\n");
+}
+
+/** The Ticket's linked PRs, when it has any, then the line that has the Runner link each PR it opens off the Ticket's branch. */
+function renderPrs(context: TicketContext): string[] {
+  const list = context.prs.map((pr) => {
+    const branches = [pr.head ? `head ${pr.head}` : null, pr.base ? `base ${pr.base}` : null].filter(Boolean);
+    return `- ${pr.role}: ${pr.url}${pr.title ? ` "${pr.title}"` : ""}${branches.length ? ` (${branches.join(", ")})` : ""}`;
+  });
+  return [
+    ...(list.length ? ["Linked PRs:", ...list, ""] : []),
+    `If you open a PR on a branch other than ${context.branch}, run \`laisso pr link <url>\` so Laisso tracks it as this Ticket's; for a PR you only read, add --referenced. \`laisso pr list --json\` shows the Ticket's PRs as they are now.`,
+  ];
+}
+
+/**
+ * The Route block of an opted-in Stage (LASSO-193): each Route as name -> target with its `when:` text and count,
+ * how to choose one, and that no call walks forward. A spent Route stays listed, so the agent is never cornered.
+ */
+function renderRoutes(routes: RouteChoice[]): string[] {
+  const list = routes.map((r) => {
+    const count = r.limit === Infinity ? null : r.used >= r.limit ? `used ${r.used}/${r.limit}: choosing it Flags the Ticket for a human` : `used ${r.used}/${r.limit}`;
+    return `- ${r.name} -> ${r.to}${count ? ` (${count})` : ""}${r.when ? `: ${r.when}` : ""}`;
+  });
+  return [
+    "This Stage lets you choose a Route, which sends the Ticket to another Stage instead of the next one:",
+    ...list,
+    'To choose one, run `laisso route <name> [--note "..."]` before you finish; the note goes with the Ticket to say why. The last call wins, and `laisso route --clear` drops your choice. With no call, the Ticket continues to the next Stage as usual. Laisso takes the Route only if this Stage finishes with its work done.',
+  ];
+}
+
+export function ticketEnv(request: RunRequest): Record<string, string> {
+  const { context } = request;
+  return withLegacyNames({
+    LAISSO_TICKET: context.id,
+    LAISSO_REFERENCE: context.reference ?? "",
+    LAISSO_REPO: context.repo,
+    LAISSO_BRANCH: context.branch,
+    LAISSO_STAGE: request.stage,
+    LAISSO_SESSION: request.sessionId,
+    ...(request.feedback ? { LAISSO_ROUND: String(request.feedback.round), LAISSO_MARKER: request.feedback.marker } : {}),
+  });
+}
+
+/**
+ * The flags a profile adds to the baseline, in this order: its model under the
+ * Runner's own flag, its effort as the Runner spells it, then its extra args.
+ * Permission is not here: it replaces a baseline flag, so each adapter places it.
+ */
+export function profileArgs(profile: ProfileSettings, modelFlag: string, effort: (level: Effort) => string[]): string[] {
+  return [...(profile.model ? [modelFlag, profile.model] : []), ...(profile.effort ? effort(profile.effort) : []), ...(profile.args ?? [])];
+}
+
+/** Every well-formed JSON object on its own line of captured stdout; anything else is skipped. */
+export function jsonLines(stdout: string): Record<string, unknown>[] {
+  return stdout
+    .split("\n")
+    .map((line) => {
+      try {
+        return JSON.parse(line) as unknown;
+      } catch {
+        return null;
+      }
+    })
+    .filter((r): r is Record<string, unknown> => r !== null && typeof r === "object" && !Array.isArray(r));
+}
+
+export function str(value: unknown): string | null {
+  return typeof value === "string" && value ? value : null;
+}
+
+export function obj(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}

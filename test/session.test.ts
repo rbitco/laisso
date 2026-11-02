@@ -1,0 +1,281 @@
+import { describe, it, expect, afterEach } from "vitest";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { startLaissoWithRepos, startLaisso, runCli, waitFor, claudeFixture, type Laisso } from "./harness.ts";
+import type { TicketDetail, IntakeResult, SessionView } from "../src/api/views.ts";
+import type { TickChange } from "../src/server/tick.ts";
+
+// Seam one: a headless Stage from check-now through the fake claude Runner to
+// advance or Flag, watched through the API the dashboard and CLI use.
+const running: Laisso[] = [];
+afterEach(async () => {
+  while (running.length) await running.pop()!.destroy();
+});
+
+const PIPELINE = `stages:
+  - name: implement
+    prompt: Do the work.
+    skills: [implement]
+    artifact: commits-on-branch
+  - name: notes
+    prompt: Write NOTES.md.
+    artifact: file NOTES.md
+`;
+
+async function laissoWithTicket(pipeline = PIPELINE) {
+  const started = await startLaissoWithRepos({ app: { pipeline: "two" } }, {}, { two: pipeline });
+  running.push(started.laisso);
+  const ticket = await started.laisso.api<IntakeResult>("/api/tickets", {
+    method: "POST",
+    body: JSON.stringify({ input: "Add dark mode", repo: "app", pipeline: "two" }),
+  });
+  return { ...started, ticket };
+}
+
+const launched = (laisso: Laisso) => waitFor(async () => { const calls = await laisso.runner.calls(); return calls.length ? calls : null; }, "the Runner to launch");
+const detailOf = (laisso: Laisso, id: string) => laisso.api<TicketDetail>(`/api/tickets/${id}`);
+const checkNow = (laisso: Laisso) => laisso.api<{ changes: TickChange[] }>("/api/check-now", { method: "POST" });
+const settled = (laisso: Laisso, id: string) => waitFor(async () => {
+  const d = await detailOf(laisso, id);
+  return d.session && !d.session.running ? d : null;
+}, "the Session to end");
+
+describe("a headless Stage", () => {
+  it("starts a fresh Session on check-now, tees stdout live, and Stop ends it as interrupted", async () => {
+    const { laisso, ticket } = await laissoWithTicket();
+    await laisso.runner.script({ stdout: '{"type":"system","subtype":"init","session_id":"ignored"}', hang: true });
+
+    const tick = await checkNow(laisso);
+    expect(tick.changes).toEqual([{ ticket: ticket.id, summary: "started implement" }]);
+
+    const d = await detailOf(laisso, ticket.id);
+    expect(d.display).toEqual({ state: "running", label: "Running", why: "implement, run 1" });
+    expect(d.session).toMatchObject({ stage: "implement", ordinal: 1, mode: "headless", startedBy: "auto", running: true, outcome: null, endedAt: null, limitsHonoured: ["remainingSpendUsd"] });
+    expect(d.sessions).toHaveLength(1);
+    const session = d.session!;
+    expect(session.stdoutPath).toBe(`${laisso.home}/tickets/${ticket.id}/sessions/${session.id}.stdout`);
+
+    const [call] = await launched(laisso);
+    expect(realpathSync(call!.cwd)).toBe(realpathSync(ticket.worktree));
+    expect(call!.argv.slice(0, 2)).toEqual(["claude", "-p"]);
+    expect(call!.argv[2]).toContain("Add dark mode");
+    expect(call!.argv[2]).toContain("/implement");
+    expect(call!.argv).toContain("--session-id");
+    expect(call!.argv[call!.argv.indexOf("--session-id") + 1]).toBe(session.id);
+    expect(call!.argv).toContain("--max-budget-usd");
+    expect(call!.env).toMatchObject({ LAISSO_TICKET: ticket.id, LAISSO_STAGE: "implement", LAISSO_SESSION: session.id, LAISSO_BRANCH: ticket.branch });
+
+    const tail = await waitFor(async () => {
+      const t = await laisso.api<{ text: string; offset: number; ended: boolean }>(`/api/tickets/${ticket.id}/sessions/${session.id}/stdout`);
+      return t.text ? t : null;
+    }, "stdout to arrive");
+    expect(tail.text).toContain('"subtype":"init"');
+    expect(tail.ended).toBe(false);
+    const more = await laisso.api<{ text: string; offset: number }>(`/api/tickets/${ticket.id}/sessions/${session.id}/stdout?offset=${tail.offset}`);
+    expect(more.text).toBe("");
+
+    // A second check-now leaves the running Session alone.
+    expect((await checkNow(laisso)).changes).toEqual([]);
+
+    const stopped = await laisso.api<SessionView>(`/api/tickets/${ticket.id}/sessions/${session.id}/stop`, { method: "POST" });
+    expect(stopped).toMatchObject({ id: session.id, running: false, outcome: "interrupted", endedBy: "human", endedReason: "stop", finalMessage: "killed: stop" });
+    expect(() => process.kill(call!.pid, 0)).toThrow();
+
+    const after = await detailOf(laisso, ticket.id);
+    expect(after.display.state).toBe("flagged");
+    expect(after.flag).toMatchObject({ reason: "outcome.interrupted" });
+    expect(readFileSync(session.stdoutPath!, "utf8")).toContain('"subtype":"init"');
+    await expect(laisso.api(`/api/tickets/${ticket.id}/sessions/${session.id}/stop`, { method: "POST" })).rejects.toThrow("is not running");
+  });
+
+  it("keeps the Latest Message as the Runner writes, apart from the final message", async () => {
+    const { laisso, ticket } = await laissoWithTicket();
+    const said = (text: string, parent: string | null = null) => JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text }] }, parent_tool_use_id: parent });
+    await laisso.runner.script({ stdout: [said("Reading the code."), said("A subagent's words.", "toolu_1"), said("Adding the toggle.")].join("\n"), hang: true });
+    await checkNow(laisso);
+    const live = await waitFor(async () => {
+      const d = await detailOf(laisso, ticket.id);
+      return d.session?.latestMessage === "Adding the toggle." ? d : null;
+    }, "the Latest Message");
+    expect(live.session).toMatchObject({ running: true, finalMessage: null });
+
+    const stopped = await laisso.api<SessionView>(`/api/tickets/${ticket.id}/sessions/${live.session!.id}/stop`, { method: "POST" });
+    expect(stopped).toMatchObject({ finalMessage: "killed: stop", latestMessage: "Adding the toggle." });
+  });
+
+  it("advances on succeeded with the artifact present, and finishes the Ticket after the last Stage", async () => {
+    const { laisso, ticket } = await laissoWithTicket();
+    // One check-now: implement's end kicks the tick, which starts notes without waiting for the timer.
+    await laisso.runner.script({ commands: [["git", "commit", "-q", "--allow-empty", "-m", "work"]], files: { "NOTES.md": "notes\n" }, stdout: claudeFixture("success.json") });
+    await checkNow(laisso);
+    const done = await waitFor(async () => {
+      const d = await detailOf(laisso, ticket.id);
+      return d.state === "done" ? d : null;
+    }, "the Ticket to be done");
+    expect(done.display.state).toBe("done");
+    // Done tears the worktree down (ADR 0007); the artifact was checked before that.
+    await waitFor(async () => (existsSync(ticket.worktree) ? null : true), "the worktree to go");
+
+    // The timeline is newest first, one Session per Stage run.
+    expect(done.sessions.map((s) => [s.stage, s.ordinal, s.outcome])).toEqual([["notes", 1, "succeeded"], ["implement", 1, "succeeded"]]);
+    const first = done.sessions[1]!;
+    expect(first).toMatchObject({ stage: "implement", outcome: "succeeded", endedBy: "outcome", endedReason: null, finalMessage: "OK", costUsd: 0.2936585 });
+    expect(first.usage).toMatchObject({ output_tokens: 4 });
+    expect(first.transcriptPath).toMatch(/3e728ae2-8d99-42f3-a7ba-6066de05d169\.jsonl$/);
+    expect(laisso.stdout()).toMatch(/ tick trigger=session-end /);
+    expect(await laisso.api<unknown[]>("/api/tickets")).toEqual([]);
+
+    const cli = await runCli(["status", ticket.id], laisso);
+    expect(cli.stdout).toContain("sessions:");
+    expect(cli.stdout).toMatch(/notes.*succeeded/);
+    expect(cli.stdout).toMatch(/implement.*succeeded.*\$0\.29/);
+  });
+
+  it("Flags artifact.missing when the Runner succeeds without the artifact", async () => {
+    const { laisso, ticket } = await laissoWithTicket();
+    await laisso.runner.script({ stdout: claudeFixture("success.json") });
+    await checkNow(laisso);
+    const d = await settled(laisso, ticket.id);
+    expect(d.session!.outcome).toBe("succeeded");
+    expect(d.stage.name).toBe("implement");
+    expect(d.display.state).toBe("flagged");
+    expect(d.flag).toEqual({ reason: "artifact.missing", detail: "commits-on-branch: no commits on the branch beyond origin/main", at: expect.any(String) });
+    // A missing artifact asks at once: no second attempt.
+    expect(d.sessions).toHaveLength(1);
+  });
+
+  it("Flags outcome.failed with the Runner's message", async () => {
+    const { laisso, ticket } = await laissoWithTicket();
+    await laisso.runner.script({ stdout: claudeFixture("failed.jsonl"), exit: 1 });
+    await checkNow(laisso);
+    const d = await settled(laisso, ticket.id);
+    expect(d.session).toMatchObject({ outcome: "failed", costUsd: 0 });
+    expect(d.flag).toMatchObject({ reason: "outcome.failed", detail: expect.stringContaining("There's an issue with the selected model") });
+    // A failed run asks at once: no second attempt.
+    expect(d.sessions).toHaveLength(1);
+  });
+
+  it("Flags outcome.exhausted when the Runner hits max turns", async () => {
+    const { laisso, ticket } = await laissoWithTicket();
+    await laisso.runner.script({ stdout: claudeFixture("max-turns.json"), exit: 1 });
+    await checkNow(laisso);
+    const d = await settled(laisso, ticket.id);
+    // Exhausted is retryable: the second attempt runs at once, then the Flag names the attempts used.
+    expect(d.flag).toMatchObject({ reason: "budget.attempts", detail: "implement: 2 of 2 attempts used; Reached maximum number of turns (1)" });
+    expect(d.sessions.map((s) => s.startedBy)).toEqual(["auto", "auto"]);
+  });
+
+  it("refuses a Pipeline whose wall time is not a duration", async () => {
+    const { laisso } = await laissoWithTicket();
+    const { writeFile } = await import("node:fs/promises");
+    await writeFile(`${laisso.home}/pipelines/bad.yaml`, PIPELINE.replace("artifact: commits-on-branch", "artifact: commits-on-branch\n    budget: { wallTime: 45min }"));
+    const res = await laisso.api<Response>("/api/tickets", { method: "POST", raw: true, body: JSON.stringify({ input: "Another", repo: "app", pipeline: "bad" }) });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'Pipeline bad stage 1: budget.wallTime "45min" is not a duration like 30m, 90s, or 1h30m' });
+  });
+
+  it("kills a Session past the Stage's wall time and Flags budget.wall_time once attempts are used", async () => {
+    const { laisso, ticket } = await laissoWithTicket(PIPELINE.replace("artifact: commits-on-branch", "artifact: commits-on-branch\n    budget: { wallTime: 1s, attempts: 1 }"));
+    await laisso.runner.script({ hang: true });
+    await checkNow(laisso);
+    const d = await settled(laisso, ticket.id);
+    expect(d.session).toMatchObject({ outcome: "interrupted", endedBy: "outcome", endedReason: "wall_time", ordinal: 1 });
+    expect(d.session!.durationMs).toBeGreaterThanOrEqual(900);
+    expect(d.flag).toMatchObject({ reason: "budget.wall_time", detail: "implement: 1 of 1 attempts used; killed: wall time" });
+    expect(d.budget.attempts).toEqual({ used: 1, limit: 1, source: "pipeline" });
+    const [call] = await laisso.runner.calls();
+    expect(() => process.kill(call!.pid, 0)).toThrow();
+  });
+
+  it("records a Session cut off by shutdown as interrupted and leaves the Ticket to run again", async () => {
+    const { laisso, ticket } = await laissoWithTicket();
+    await laisso.runner.script({ hang: true });
+    await checkNow(laisso);
+    const [call] = await laisso.runner.calls();
+    expect(await laisso.stop()).toBe(0);
+    expect(() => process.kill(call!.pid, 0)).toThrow();
+
+    const again = await startLaisso({ home: laisso.home, pathDir: laisso.pathDir, port: laisso.port });
+    running.push(again);
+    // The health check answers before the startup tick is through, so wait for run 2 to show.
+    const d = await waitFor(async () => { const x = await detailOf(again, ticket.id); return x.session?.ordinal === 2 ? x : null; }, "the startup tick to start run 2");
+    expect(d.flag).toBeNull();
+    const shut = d.sessions.find((s) => s.endedReason === "shutdown");
+    expect(shut).toMatchObject({ ordinal: 1, outcome: "interrupted", endedBy: "outcome" });
+    expect(d.session).toMatchObject({ ordinal: 2, running: true });
+  });
+
+  it("reconciles a Session left running by a Laisso that died: kills the Runner and records shutdown", async () => {
+    const { laisso, ticket } = await laissoWithTicket();
+    await laisso.runner.script({ hang: true });
+    await checkNow(laisso);
+    const [call] = await launched(laisso);
+    laisso.child.kill("SIGKILL");
+    await new Promise((r) => laisso.child.once("exit", r));
+    expect(() => process.kill(call!.pid, 0)).not.toThrow();
+
+    const again = await startLaisso({ home: laisso.home, pathDir: laisso.pathDir, port: laisso.port });
+    running.push(again);
+    // Reconciliation waits the orphan out before closing its row, so the row closes only once the process is gone.
+    const d = await waitFor(async () => { const x = await detailOf(again, ticket.id); return x.sessions.find((s) => s.ordinal === 1)?.running === false ? x : null; }, "the orphan's row to close");
+    expect(d.sessions.find((s) => s.ordinal === 1)).toMatchObject({ outcome: "interrupted", endedBy: "outcome", endedReason: "shutdown" });
+    expect(() => process.kill(call!.pid, 0)).toThrow();
+    expect(d.flag).toBeNull();
+  });
+});
+
+// LASSO-167: every Session's preamble lists the Ticket's linked PRs and has the Runner link the PRs it opens.
+describe("a Session's linked PRs", () => {
+  const LINKED = `stages:
+  - name: grill
+    prompt: Interview me about the Ticket.
+    human: true
+  - name: implement
+    prompt: Do the work.
+    artifact: commits-on-branch
+`;
+  const OWNED = "https://github.com/owner/app/pull/7";
+  const REFERENCED = "https://github.com/owner/lib/pull/3";
+  /** gh's answer to the lookup of one PR. */
+  const lookup = (url: string, title: string, head: string, base: string) => ({
+    tool: "gh" as const,
+    match: ["pr view", url, "--json"],
+    stdout: JSON.stringify({ number: Number(url.split("/").at(-1)), url, title, state: "OPEN", headRefName: head, baseRefName: base, author: { login: "alice" } }),
+  });
+  const linking = (branch: string) => `If you open a PR on a branch other than ${branch}, run \`laisso pr link <url>\``;
+
+  it("lists both links, with role, title, head and base, in a headless Session's prompt", async () => {
+    const { laisso, ticket } = await laissoWithTicket(LINKED);
+    await laisso.tracker.reply(lookup(OWNED, "Add dark mode", "feat-dark", "main"));
+    await laisso.tracker.reply(lookup(REFERENCED, "Theme tokens", "tokens", "develop"));
+    for (const [pr, role] of [[OWNED, "owned"], [REFERENCED, "referenced"]]) {
+      await laisso.api(`/api/tickets/${ticket.id}/prs`, { method: "POST", body: JSON.stringify({ pr, role }) });
+    }
+    await laisso.runner.script({ stdout: '{"type":"system","subtype":"init","session_id":"ignored"}', hang: true });
+    await laisso.api(`/api/tickets/${ticket.id}/done`, { method: "POST", body: "{}" });
+    await checkNow(laisso);
+
+    const [call] = await launched(laisso);
+    expect(call!.argv[2]).toContain(
+      [
+        "Linked PRs:",
+        `- owned: ${OWNED} "Add dark mode" (head feat-dark, base main)`,
+        `- referenced: ${REFERENCED} "Theme tokens" (head tokens, base develop)`,
+        "",
+        linking(ticket.branch),
+      ].join("\n"),
+    );
+    expect(call!.argv[2]).toContain("`laisso pr list --json`");
+    // The prompt carries the links; no environment variable does.
+    expect(Object.keys(call!.env).filter((k) => k.startsWith("LAISSO_PR"))).toEqual([]);
+  });
+
+  it("gives a Ticket with no links no PR list, but still the linking line", async () => {
+    const { laisso, ticket } = await laissoWithTicket();
+    await laisso.runner.script({ stdout: '{"type":"system","subtype":"init","session_id":"ignored"}', hang: true });
+    await checkNow(laisso);
+
+    const [call] = await launched(laisso);
+    expect(call!.argv[2]).not.toContain("Linked PRs:");
+    expect(call!.argv[2]).toContain(linking(ticket.branch));
+  });
+});

@@ -1,0 +1,571 @@
+// Test harness for the Laisso v1 test seam: the localhost JSON API, end to end.
+//
+// Each test gets a temporary Laisso home, the server spawned as a child process,
+// a PATH directory for fake executables, and a fake notifier on that PATH that
+// records what it was asked to post, and gh and acli shims that answer from
+// canned replies and record every invocation, and a fake Runner (claude, codex, pi) that
+// plays a script (stdout, exit code, commands to run and files to write in its
+// cwd, or hang) and records every launch. Time is driven by check-now, never
+// by timers: the harness config sets a tick cadence long enough never to fire.
+
+import { spawn, execFile, execFileSync, type ChildProcess } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { mkdtemp, mkdir, writeFile, rm, readFile } from "node:fs/promises";
+import { createServer } from "node:net";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { stringify } from "yaml";
+
+const REPO_ROOT = path.resolve(import.meta.dirname, "..");
+const BIN = path.join(REPO_ROOT, "bin", "laisso.js");
+
+import { DEFAULT_CONFIG, type Config, type RepoConfig } from "../src/server/config.ts";
+import { parsePipeline } from "../src/pipeline/load.ts";
+import { CLASSIC_PIPELINE_YAML } from "./fixtures/classic-pipeline.ts";
+import { findOnPath } from "../src/tools/tools.ts";
+
+const DEFAULT_PIPELINE_STATUSES = [...new Set(parsePipeline("default", CLASSIC_PIPELINE_YAML).stages.flatMap((s) => (s.kind === "action" && "status" in s ? [s.status] : [])))];
+
+/** What a test writes to config.yaml: any subset of the real Config. */
+/** An Action as a test writes it: params and timeout may be left to their defaults. */
+export type ActionSpec = { run: string; params?: string[]; timeout?: string };
+
+export type LaissoConfig = {
+  [K in Exclude<keyof Config, "actions" | "repos">]?: Config[K] extends object ? Partial<Config[K]> : Config[K];
+} & { actions?: Record<string, ActionSpec>; repos?: Record<string, Partial<Omit<RepoConfig, "actions">> & { actions?: Record<string, ActionSpec> }> };
+
+export interface Laisso {
+  home: string;
+  pathDir: string;
+  port: number;
+  url: string;
+  child: ChildProcess;
+  /** Everything the server wrote to stdout so far. */
+  stdout(): string;
+  /** Everything the server wrote to stderr so far. */
+  stderr(): string;
+  /** JSON request against the API; throws on non-2xx unless `raw` is set. */
+  api<T = unknown>(route: string, init?: RequestInit & { raw?: boolean }): Promise<T>;
+  /** Fetch a page (HTML) as text. */
+  page(route: string): Promise<Response>;
+  /** The notifications the fake notifier recorded, oldest first. */
+  notifications(): Promise<Array<{ title: string; body: string; click?: string }>>;
+  /** The gh and acli shims: canned replies in, recorded invocations out. */
+  tracker: TrackerShim;
+  /** The fake Runner behind claude, codex and pi: a script in, recorded launches out. */
+  runner: RunnerShim;
+  /** The fake osascript: what Terminal.app was told to run, oldest first. */
+  terminals(): Promise<Array<{ script: string; launcher: string | null }>>;
+  /** The fake tmux and herdr: every invocation, oldest first. */
+  windows(): Promise<WindowCall[]>;
+  /** Make the fake tmux or herdr fail from now on, as when its server has gone. */
+  breakWindows(tool: "tmux" | "herdr"): Promise<void>;
+  /** Make the fake notifier exit 1 from now on, so a post fails. */
+  breakNotifier(): Promise<void>;
+  /** SIGINT the server and wait for exit; the home is left in place. */
+  stop(): Promise<number | null>;
+  /** SIGKILL the server, as a crash would: nothing is reconciled on the way out. */
+  kill(): Promise<void>;
+  /** Stop and delete the home. */
+  destroy(): Promise<void>;
+}
+
+export interface StartOptions {
+  home?: string;
+  pathDir?: string;
+  port?: number;
+  config?: LaissoConfig;
+  /** Extra environment for the server process. */
+  env?: Record<string, string>;
+}
+
+export async function makeHome(config: LaissoConfig = {}): Promise<{ home: string; pathDir: string }> {
+  const root = await mkdtemp(path.join(tmpdir(), "laisso-test-"));
+  const home = path.join(root, "home");
+  const pathDir = path.join(root, "bin");
+  await mkdir(home, { recursive: true });
+  await mkdir(pathDir, { recursive: true });
+  await writeConfig(home, { tick: 3600, ...config });
+  await installFakeNotifier(pathDir);
+  await installTrackerShims(pathDir);
+  await installFakeRunner(pathDir);
+  await installFakeOsascript(pathDir);
+  await installFakeMultiplexers(pathDir);
+  return { home, pathDir };
+}
+
+export interface WindowCall {
+  tool: "tmux" | "herdr";
+  args: string[];
+}
+
+/** The pane id the fake herdr says each new tab's root pane has. */
+export const HERDR_PANE = "w1:p7";
+
+async function installFakeMultiplexers(pathDir: string): Promise<void> {
+  // Each records its argv. tmux answers display-message with a session id;
+  // herdr answers tab create as herdr 0.9.4 does, and fails with JSON on stderr as it does.
+  const failure = {
+    tmux: "no server running on /tmp/tmux-501/default\n",
+    herdr: JSON.stringify({ id: "cli:tab:create", error: { code: "server_not_running", message: "no herdr server is running" } }),
+  };
+  const answers = {
+    tmux: { "display-message": "$3\n" },
+    herdr: { tab: JSON.stringify({ id: "cli:tab:create", result: { type: "tab_created", tab: { tab_id: "w1:t2" }, root_pane: { pane_id: HERDR_PANE, tab_id: "w1:t2" } } }) },
+  };
+  for (const tool of ["tmux", "herdr"] as const) {
+    const script = `#!/usr/bin/env node
+const fs = require("node:fs");
+const path = require("node:path");
+const args = process.argv.slice(2);
+fs.appendFileSync(path.join(__dirname, "window-calls.jsonl"), JSON.stringify({ tool: ${JSON.stringify(tool)}, args }) + "\\n");
+if (fs.existsSync(path.join(__dirname, ${JSON.stringify(`${tool}-broken`)}))) { process.stderr.write(${JSON.stringify(failure[tool])}); process.exit(1); }
+process.stdout.write(${JSON.stringify(answers[tool])}[args[0]] ?? "");
+`;
+    await writeFile(path.join(pathDir, tool), script, { mode: 0o755 });
+  }
+}
+
+async function installFakeOsascript(pathDir: string): Promise<void> {
+  // Records each -e script; a `do script "<path>"` line is pulled out as the launcher.
+  const script = `#!/usr/bin/env node
+const fs = require("node:fs");
+const path = require("node:path");
+const args = process.argv.slice(2);
+const script = args.filter((a, i) => args[i - 1] === "-e").join("\\n");
+const m = /do script "((?:[^"\\\\]|\\\\.)*)"/.exec(script);
+const line = m ? m[1].replace(/\\\\(.)/g, "$1") : null;
+const quoted = line && /^'(.*)'$/.exec(line);
+fs.appendFileSync(path.join(__dirname, "osascript-calls.jsonl"), JSON.stringify({ script, launcher: quoted ? quoted[1].replace(/'\\\\''/g, "'") : line }) + "\\n");
+`;
+  await writeFile(path.join(pathDir, "osascript"), script, { mode: 0o755 });
+}
+
+/** What the fake Runner does when launched. Fields apply in this order. */
+export interface RunnerScript {
+  /** Written to stdout, one line at a time; a recorded fixture goes in whole. */
+  stdout?: string;
+  /** Per-Runner stdout (keyed claude, codex, pi) when one script serves several; wins over `stdout`. */
+  stdoutByRunner?: Record<string, string>;
+  /** Wait this long before writing stdout, so a test can watch the Session run. */
+  delayMs?: number;
+  /** Files to write in the cwd (the worktree), relative path to content. */
+  files?: Record<string, string>;
+  /** Commands to run in the cwd before exiting, such as a git commit. */
+  commands?: string[][];
+  /** Never exit: the Session runs until something kills it. */
+  hang?: boolean;
+  exit?: number;
+}
+
+export interface RunnerCall {
+  pid: number;
+  /** argv[0] is the Runner launched: claude, codex or pi. */
+  argv: string[];
+  cwd: string;
+  env: Record<string, string>;
+}
+
+export interface RunnerShim {
+  /** Set what the next launches do; the script stays until replaced. */
+  script(script: RunnerScript): Promise<void>;
+  /** Every launch so far, oldest first. */
+  calls(): Promise<RunnerCall[]>;
+}
+
+const RUNNER_SCRIPT_FILE = "runner-script.json";
+const RUNNER_CALLS_FILE = "runner-calls.jsonl";
+
+async function installFakeRunner(pathDir: string): Promise<void> {
+  // With no script it exits at once with nothing on stdout, which Laisso reads
+  // as interrupted: a test that runs a Stage sets a script first.
+  const script = `#!/usr/bin/env node
+const fs = require("node:fs");
+const path = require("node:path");
+const { execFileSync } = require("node:child_process");
+const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.startsWith("LAISSO_")));
+fs.appendFileSync(path.join(__dirname, ${JSON.stringify(RUNNER_CALLS_FILE)}), JSON.stringify({ pid: process.pid, argv: [path.basename(process.argv[1]), ...process.argv.slice(2)], cwd: process.cwd(), env }) + "\\n");
+let script = {};
+try { script = JSON.parse(fs.readFileSync(path.join(__dirname, ${JSON.stringify(RUNNER_SCRIPT_FILE)}), "utf8")); } catch {}
+const gitEnv = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" };
+(async () => {
+  if (script.delayMs) await new Promise((r) => setTimeout(r, script.delayMs));
+  for (const [file, content] of Object.entries(script.files ?? {})) {
+    fs.mkdirSync(path.dirname(path.resolve(file)), { recursive: true });
+    fs.writeFileSync(path.resolve(file), content);
+  }
+  for (const [cmd, ...args] of script.commands ?? []) execFileSync(cmd, args, { env: gitEnv, stdio: ["ignore", "ignore", "inherit"] });
+  const stdout = (script.stdoutByRunner ?? {})[path.basename(process.argv[1])] ?? script.stdout;
+  if (stdout) for (const line of stdout.split("\\n")) process.stdout.write(line + "\\n");
+  if (script.hang) { setInterval(() => {}, 1000); return; }
+  process.exit(script.exit ?? 0);
+})();
+`;
+  for (const runner of ["claude", "codex", "pi"]) await writeFile(path.join(pathDir, runner), script, { mode: 0o755 });
+}
+
+export function runnerShim(pathDir: string): RunnerShim {
+  return {
+    script: (script) => writeFile(path.join(pathDir, RUNNER_SCRIPT_FILE), JSON.stringify(script)),
+    calls: () => readJsonl<RunnerCall>(path.join(pathDir, RUNNER_CALLS_FILE)),
+  };
+}
+
+/** Poll until `probe` returns a truthy value, or fail with the last value seen. */
+export async function waitFor<T>(probe: () => Promise<T>, what: string, timeoutMs = 10_000): Promise<NonNullable<T>> {
+  const deadline = Date.now() + timeoutMs;
+  let last: T | undefined;
+  while (Date.now() < deadline) {
+    last = await probe();
+    if (last) return last;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  throw new Error(`timed out waiting for ${what}; last saw ${JSON.stringify(last)}`);
+}
+
+/** Output recorded from a real Runner, from test/fixtures/<runner>. */
+export function runnerFixture(runner: string, name: string): string {
+  return readFileSync(path.join(import.meta.dirname, "fixtures", runner, name), "utf8");
+}
+
+/** Output recorded from a real claude run, from test/fixtures/claude. */
+export const claudeFixture = (name: string): string => runnerFixture("claude", name);
+
+export interface TrackerReply {
+  tool: "gh" | "acli";
+  /** Every string must appear in the invocation's arguments joined by spaces. */
+  match: string[];
+  stdout?: string;
+  stderr?: string;
+  code?: number;
+  /** Consumed by the first invocation it matches, so a later identical call falls through to the next reply. */
+  once?: boolean;
+  /** Hold the answer this long: a tracker that never comes back. */
+  sleepMs?: number;
+}
+
+export interface TrackerCall {
+  tool: "gh" | "acli";
+  args: string[];
+}
+
+export interface TrackerShim {
+  /** Add a canned reply; the first reply whose `match` strings all appear wins, so `first` puts this one ahead of the rest. */
+  reply(reply: TrackerReply, first?: boolean): Promise<void>;
+  /** Every gh and acli invocation so far, oldest first. */
+  calls(): Promise<TrackerCall[]>;
+  /** Forget recorded calls (replies stay). */
+  clearCalls(): Promise<void>;
+}
+
+const REPLIES_FILE = "tracker-replies.json";
+const CALLS_FILE = "tracker-calls.jsonl";
+
+async function installTrackerShims(pathDir: string): Promise<void> {
+  // Both shims record argv and answer from the same replies file. An
+  // invocation nothing matches exits 1 so a test fails on an unexpected call.
+  const script = (tool: string) => `#!/usr/bin/env node
+const fs = require("node:fs");
+const path = require("node:path");
+const args = process.argv.slice(2);
+fs.appendFileSync(path.join(__dirname, ${JSON.stringify(CALLS_FILE)}), JSON.stringify({ tool: ${JSON.stringify(tool)}, args }) + "\\n");
+let replies = [];
+try { replies = JSON.parse(fs.readFileSync(path.join(__dirname, ${JSON.stringify(REPLIES_FILE)}), "utf8")); } catch {}
+const joined = args.join(" ");
+const hit = replies.find((r) => r.tool === ${JSON.stringify(tool)} && r.match.every((m) => joined.includes(m)));
+if (!hit) { process.stderr.write("shim: no reply for ${tool} " + joined + "\\n"); process.exit(1); }
+if (hit.once) fs.writeFileSync(path.join(__dirname, ${JSON.stringify(REPLIES_FILE)}), JSON.stringify(replies.filter((r) => r !== hit)));
+if (hit.sleepMs) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, hit.sleepMs);
+if (hit.stdout) process.stdout.write(hit.stdout);
+if (hit.stderr) process.stderr.write(hit.stderr);
+process.exit(hit.code ?? 0);
+`;
+  await writeFile(path.join(pathDir, "gh"), script("gh"), { mode: 0o755 });
+  await writeFile(path.join(pathDir, "acli"), script("acli"), { mode: 0o755 });
+}
+
+export function trackerShim(pathDir: string): TrackerShim {
+  const repliesFile = path.join(pathDir, REPLIES_FILE);
+  const callsFile = path.join(pathDir, CALLS_FILE);
+  return {
+    async reply(reply, first = false) {
+      let replies: TrackerReply[] = [];
+      try {
+        replies = JSON.parse(await readFile(repliesFile, "utf8"));
+      } catch {
+        // first reply
+      }
+      if (first) replies.unshift(reply);
+      else replies.push(reply);
+      await writeFile(repliesFile, JSON.stringify(replies));
+    },
+    calls: () => readJsonl<TrackerCall>(callsFile),
+    async clearCalls() {
+      await rm(callsFile, { force: true });
+    },
+  };
+}
+
+/** One record per line; a file nothing has written yet reads as empty. */
+async function readJsonl<T>(file: string): Promise<T[]> {
+  try {
+    const text = await readFile(file, "utf8");
+    return text.split("\n").filter(Boolean).map((line) => JSON.parse(line) as T);
+  } catch {
+    return [];
+  }
+}
+
+export interface RepoSpec {
+  tracker?: RepoConfig["tracker"];
+  /** Defaults to the repo name upper-cased for JIRA, owner/name for GitHub. */
+  project?: string;
+  pipeline?: string;
+  actions?: Record<string, ActionSpec>;
+  profiles?: RepoConfig["profiles"];
+  default_profile?: string;
+}
+
+export interface LaissoWithRepos {
+  laisso: Laisso;
+  repos: Record<string, Awaited<ReturnType<typeof makeRepo>>>;
+}
+
+/**
+ * A running Laisso whose config names one real temp git repo per entry, plus
+ * any extra config and Pipelines. Its default Pipeline is the classic one, unless the test gives its own; that one
+ * transitions through three JIRA statuses; the acli shim is seeded to accept each so a reference
+ * intake into a JIRA repo passes the status check without every test saying so.
+ */
+export async function startLaissoWithRepos(specs: Record<string, RepoSpec>, extra: LaissoConfig = {}, pipelines: Record<string, string> = {}, env?: Record<string, string>): Promise<LaissoWithRepos> {
+  const { home, pathDir } = await makeHome();
+  const repos: LaissoWithRepos["repos"] = {};
+  const config: NonNullable<LaissoConfig["repos"]> = {};
+  for (const [name, spec] of Object.entries(specs)) {
+    repos[name] = await makeRepo(path.join(home, "..", "repos"), name);
+    const tracker = spec.tracker ?? "jira";
+    config[name] = { tracker, project: spec.project ?? (tracker === "jira" ? name.toUpperCase() : `owner/${name}`), path: repos[name].path, pipeline: spec.pipeline ?? "default", ...(spec.actions ? { actions: spec.actions } : {}), ...(spec.profiles ? { profiles: spec.profiles } : {}), ...(spec.default_profile ? { default_profile: spec.default_profile } : {}) };
+  }
+  await writeConfig(home, { tick: 3600, repos: config, ...extra });
+  for (const [name, yaml] of Object.entries({ default: CLASSIC_PIPELINE_YAML, ...pipelines })) {
+    await mkdir(path.join(home, "pipelines"), { recursive: true });
+    await writeFile(path.join(home, "pipelines", `${name}.yaml`), yaml);
+  }
+  const laisso = await startLaisso({ home, pathDir, env });
+  for (const status of DEFAULT_PIPELINE_STATUSES) {
+    await laisso.tracker.reply({ tool: "acli", match: ["workitem search", `status = "${status}"`], stdout: "[]" });
+  }
+  return { laisso, repos };
+}
+
+/**
+ * config.yaml as a test gives it. Without profiles of its own it gets the
+ * shipped ones the default Pipeline names, and with no default_profile the
+ * startup migration adds the runner-only claude one, as for an old home.
+ */
+export async function writeConfig(home: string, config: LaissoConfig): Promise<void> {
+  await mkdir(home, { recursive: true });
+  await writeFile(path.join(home, "config.yaml"), stringify({ profiles: DEFAULT_CONFIG.profiles, ...config }));
+}
+
+async function installFakeNotifier(pathDir: string): Promise<void> {
+  // The fake notifier appends one JSON line per call to notifications.jsonl
+  // beside itself. Laisso's macOS adapter looks for terminal-notifier on PATH.
+  const script = `#!/usr/bin/env node
+const fs = require("node:fs");
+const path = require("node:path");
+const args = process.argv.slice(2);
+const flags = { "-title": "title", "-message": "body", "-execute": "click" };
+const record = {};
+for (let i = 0; i < args.length; i++) {
+  const key = flags[args[i]];
+  if (key) { record[key] = args[i + 1] ?? ""; i++; }
+}
+if (fs.existsSync(path.join(__dirname, "notifier-broken"))) { process.stderr.write("terminal-notifier: broken\\n"); process.exit(1); }
+fs.appendFileSync(path.join(__dirname, "notifications.jsonl"), JSON.stringify(record) + "\\n");
+`;
+  await writeFile(path.join(pathDir, "terminal-notifier"), script, { mode: 0o755 });
+}
+
+/** What says a process runs inside herdr or tmux: dropped from what a test inherits, so the suite runs alike inside either. */
+const MULTIPLEXER_ENV = /^(TMUX|TMUX_PANE|HERDR_.*)$/;
+
+export function serverEnv(home: string, pathDir: string, extra: Record<string, string> = {}): NodeJS.ProcessEnv {
+  return {
+    ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !MULTIPLEXER_ENV.test(key))),
+    LAISSO_HOME: home,
+    PATH: `${pathDir}:${process.env.PATH ?? ""}`,
+    ...extra,
+  };
+}
+
+export async function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const srv = createServer();
+    srv.once("error", reject);
+    srv.listen(0, "127.0.0.1", () => {
+      const address = srv.address();
+      const port = typeof address === "object" && address ? address.port : 0;
+      srv.close(() => resolve(port));
+    });
+  });
+}
+
+export async function startLaisso(opts: StartOptions = {}): Promise<Laisso> {
+  const { home, pathDir } = opts.home
+    ? { home: opts.home, pathDir: opts.pathDir ?? path.join(opts.home, "..", "bin") }
+    : await makeHome(opts.config);
+  const port = opts.port ?? (await freePort());
+  const url = `http://localhost:${port}`;
+  const child = spawn(process.execPath, [BIN, "--port", String(port)], {
+    env: serverEnv(home, pathDir, opts.env),
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let out = "";
+  let err = "";
+  child.stdout!.on("data", (d) => (out += d.toString()));
+  child.stderr!.on("data", (d) => (err += d.toString()));
+
+  const exited = new Promise<number | null>((resolve) => child.once("exit", (code) => resolve(code)));
+  await waitForHealth(url, exited, () => out + err);
+
+  const laisso: Laisso = {
+    home,
+    pathDir,
+    port,
+    url,
+    child,
+    stdout: () => out,
+    stderr: () => err,
+    async api<T>(route: string, init: RequestInit & { raw?: boolean } = {}) {
+      const { raw, ...rest } = init;
+      const res = await fetch(url + route, {
+        ...rest,
+        headers: { "content-type": "application/json", ...(rest.headers ?? {}) },
+      });
+      if (raw) return res as unknown as T;
+      const text = await res.text();
+      if (!res.ok) throw new Error(`${rest.method ?? "GET"} ${route} -> ${res.status}: ${text}`);
+      return (text ? JSON.parse(text) : undefined) as T;
+    },
+    page: (route) => fetch(url + route),
+    tracker: trackerShim(pathDir),
+    runner: runnerShim(pathDir),
+    terminals: () => readJsonl(path.join(pathDir, "osascript-calls.jsonl")),
+    windows: () => readJsonl<WindowCall>(path.join(pathDir, "window-calls.jsonl")),
+    breakWindows: (tool) => writeFile(path.join(pathDir, `${tool}-broken`), ""),
+    breakNotifier: () => writeFile(path.join(pathDir, "notifier-broken"), ""),
+    notifications: () => readJsonl(path.join(pathDir, "notifications.jsonl")),
+    async stop() {
+      if (child.exitCode !== null) return child.exitCode;
+      child.kill("SIGINT");
+      const timer = setTimeout(() => child.kill("SIGKILL"), 5000);
+      const code = await exited;
+      clearTimeout(timer);
+      return code;
+    },
+    async kill() {
+      if (child.exitCode === null) child.kill("SIGKILL");
+      await exited;
+    },
+    async destroy() {
+      await laisso.stop();
+      // A fake a Session spawned may still be writing its calls file as the directory goes.
+      await rm(path.dirname(home), { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    },
+  };
+  return laisso;
+}
+
+/**
+ * Stop Laisso and start it again on the same home with a PATH of only the
+ * fakes, node and git, so a test that deletes a fake leaves that tool missing
+ * whatever this machine has installed.
+ */
+export async function restartOnFakesOnly(laisso: Laisso): Promise<Laisso> {
+  await laisso.stop();
+  const systemDir = path.join(path.dirname(laisso.home), "system");
+  await mkdir(systemDir, { recursive: true });
+  const git = findOnPath()("git");
+  if (!git) throw new Error("git is not on PATH");
+  for (const [name, target] of [["node", process.execPath], ["git", git]]) {
+    await writeFile(path.join(systemDir, name), `#!/bin/sh\nexec '${target}' "$@"\n`, { mode: 0o755 });
+  }
+  return startLaisso({ home: laisso.home, pathDir: laisso.pathDir, env: { PATH: `${laisso.pathDir}:${systemDir}` } });
+}
+
+async function waitForHealth(url: string, exited: Promise<number | null>, out: () => string): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  let done = false;
+  exited.then(() => (done = true));
+  while (Date.now() < deadline) {
+    if (done) throw new Error(`laisso exited before becoming healthy:\n${out()}`);
+    try {
+      const res = await fetch(url + "/api/health");
+      if (res.ok) return;
+    } catch {
+      // not up yet
+    }
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  throw new Error(`laisso did not become healthy in time:\n${out()}`);
+}
+
+export interface CliResult {
+  code: number;
+  stdout: string;
+  stderr: string;
+}
+
+/** Run the laisso CLI as a client against a home/port. */
+export function runCli(
+  args: string[],
+  ctx: { home: string; pathDir: string; port: number; env?: Record<string, string>; stdin?: string },
+): Promise<CliResult> {
+  return new Promise((resolve) => {
+    const child = execFile(
+      process.execPath,
+      [BIN, "--port", String(ctx.port), ...args],
+      { env: serverEnv(ctx.home, ctx.pathDir, ctx.env), maxBuffer: 10 * 1024 * 1024 },
+      (error, stdout, stderr) => {
+        const code = error && typeof (error as { code?: unknown }).code === "number" ? ((error as { code: number }).code) : error ? 1 : 0;
+        resolve({ code, stdout, stderr });
+      },
+    );
+    if (ctx.stdin !== undefined) child.stdin?.end(ctx.stdin);
+    else child.stdin?.end();
+  });
+}
+
+// --- git ---------------------------------------------------------------------
+
+export interface TempRepo {
+  /** The bare origin. */
+  origin: string;
+  /** The local checkout Laisso is configured with; worktrees hang off it. */
+  path: string;
+  defaultBranch: string;
+  git(args: string[], cwd?: string): string;
+}
+
+/** A real git origin (bare) plus a clone with one commit on `main`, for intake tests. */
+export async function makeRepo(root: string, name = "app"): Promise<TempRepo> {
+  const git = (args: string[], cwd = clone) =>
+    execFileSync("git", args, {
+      cwd,
+      encoding: "utf8",
+      env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" },
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+  const origin = path.join(root, `${name}.git`);
+  const clone = path.join(root, name);
+  await mkdir(root, { recursive: true });
+  git(["init", "--bare", "-b", "main", origin], root);
+  git(["clone", "-q", origin, clone], root);
+  await writeFile(path.join(clone, "README.md"), `# ${name}\n`);
+  git(["add", "README.md"]);
+  git(["commit", "-q", "-m", "init"]);
+  git(["push", "-q", "-u", "origin", "main"]);
+  git(["remote", "set-head", "origin", "main"]);
+  return { origin, path: clone, defaultBranch: "main", git };
+}

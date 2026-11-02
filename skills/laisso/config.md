@@ -1,0 +1,280 @@
+# config.yaml
+
+`<Laisso home>/config.yaml`. Laisso writes a commented one on first start and
+never rewrites it, except for the start-up move described under
+[tracker.transition](#trackertransition). Every key is optional; a key left
+out takes its default. A key that is present with a wrong value stops Laisso
+from starting and makes `laisso doctor` exit 1 with a message naming the key.
+Unknown top-level keys are ignored.
+
+| Key | Default | Rule |
+| --- | --- | --- |
+| `repos` | `{}` | see [Repos](#repos) |
+| `actions` | `{}` | see [Actions](#actions) |
+| `profiles` | `claude-fable`, `claude-opus`, `claude-sonnet` | see [profiles.md](profiles.md); leaving the key out entirely brings back these three |
+| `default_profile` | `claude-opus` | a profile name, or `null` for none |
+| `budget.rounds` | `5` | whole number, 0 or more: Rounds per repeating Stage |
+| `budget.attempts` | `2` | whole number, 0 or more: attempts per Stage |
+| `budget.wallTime` | `30m` | duration: wall time per headless Session |
+| `budget.spend` | `25` | number, 0 or more: agent spend per Ticket, USD |
+| `budget.routes` | `3` | whole number, 0 or more: times an agent, Action or check may take each Route of a Ticket (see [pipelines.md](pipelines.md#routes)) |
+| `tick` | `60` | whole number, 1 or more: seconds between Ticks |
+| `concurrency` | `3` | whole number, 1 or more: headless Sessions at once across all Tickets |
+| `retention` | `30` | whole number, 0 or more: days a done or Abandoned Ticket's directory is kept |
+| `branch_prefix` | `""` | text; `me` makes branches `me/<key>-<slug>` |
+| `port` | `7433` | whole number, 1 or more: dashboard and API port |
+| `terminal` | `auto` | `auto`, `herdr`, `tmux` or `terminal-app`: where a human Stage's terminal opens; see [Terminals](#terminals) |
+| `notifications.enabled` / `.flagged` / `.human` / `.gate` | all `true` | `true` or `false` |
+| `pr_lists` | `Mine`, `Review requested` | see [PR Lists](#pr-lists); leaving the key out entirely brings back these two |
+| `pr_list_refresh` | `5m` | duration, at least `tick`: how often the PR Lists refresh while the Pull Requests page is open |
+| `pr_page_layout` | `stacked` | `stacked` or `side-by-side`: the Pull Requests page's layout until a browser picks its own with the page's switch |
+| `review.ignore_authors` | `[]` | list of GitHub logins whose PR comments are never Feedback; see [Review](#review) |
+| `review.ignore_self` | `false` | `true` or `false`: also ignore the login `gh` is authenticated as; see [Review](#review) |
+
+A duration is hours, minutes and seconds in that order, each optional:
+`30m`, `90s`, `2h`, `1h30m`. Names (profiles, Actions) are lowercase
+letters, digits, dots, hyphens and underscores, starting with a letter or
+digit.
+
+```yaml laisso-config
+budget:
+  rounds: 8
+  attempts: 3
+  wallTime: 45m
+  spend: 40
+concurrency: 2
+branch_prefix: matt
+notifications:
+  enabled: true
+  gate: false
+```
+
+## Repos
+
+A repo is where Intake makes Tickets' worktrees. Keyed by a short name the
+user picks; that name is what `laisso add --repo` and the dashboard show.
+
+| Field | Rule |
+| --- | --- |
+| `tracker` | `jira` or `github`. Anything else, or leaving it out, is read as `jira` without an error. |
+| `project` | JIRA: the project key (`SHOP`). GitHub: `owner/repo`. Intake suggests this repo for a reference that starts `SHOP-` or `owner/repo#`. |
+| `path` | the local clone. `~/` is expanded. Worktrees are made from its `origin`. |
+| `pipeline` | the repo's default Pipeline, by file name without `.yaml`. Default `default`; a name with no file falls back to `default`, else the first Pipeline. |
+| `actions` | this repo's own Actions; one named like a global Action replaces it for this repo's Tickets |
+| `profiles` | this repo's own Agent Profiles; see [profiles.md](profiles.md#per-repo-profiles) |
+| `default_profile` | the profile this repo's Stages run under when neither Stage nor Pipeline names one |
+| `review` | this repo's own `ignore_authors` and `ignore_self`; each one set here replaces the global one for this repo's Tickets, and one left out keeps the global one |
+
+The repo needs its tracker CLI installed and logged in: `acli` for JIRA,
+`gh` for GitHub (`laisso doctor` checks both). A JIRA key can only be intaken
+into a JIRA repo and a GitHub reference only into a GitHub repo; a prompt
+goes into any repo.
+
+```yaml laisso-config
+repos:
+  shop:
+    tracker: jira
+    project: SHOP
+    path: ~/code/shop
+    pipeline: default
+  web:
+    tracker: github
+    project: acme/web
+    path: ~/code/web
+    pipeline: github
+    default_profile: claude-sonnet
+```
+
+## Actions
+
+An Action is a shell command an action Stage runs by name. Global ones sit
+under top-level `actions:`; a repo's own under `repos.<name>.actions:` and
+win for that repo.
+
+| Field | Rule |
+| --- | --- |
+| `run` | required, non-empty: the command, run with `$SHELL -c` (else `/bin/sh`) in the Ticket's worktree |
+| `params` | optional list of names (lowercase letters, digits, underscores, starting with a letter), no repeats. A Stage must supply exactly these under `with:`. |
+| `timeout` | optional duration, default `60s`; the command is killed and the Ticket Flagged after it |
+
+Any other field is an error. Exit 0 advances the Ticket; anything else, a
+timeout, or a command that cannot start Flags it `outcome.failed` with the
+last line of output. The last line of output is the Session's final message.
+
+The command's environment is Laisso's own plus:
+
+- `LAISSO_TICKET`, `LAISSO_REFERENCE` (empty for a prompt Ticket with no issue
+  yet), `LAISSO_REPO`, `LAISSO_BRANCH`, `LAISSO_STAGE`, `LAISSO_SESSION`
+- `LAISSO_TITLE`, `LAISSO_TRACKER`, `LAISSO_PROJECT`, `LAISSO_PR` (empty before
+  a PR), `LAISSO_WORKTREE`, `LAISSO_PIPELINE`
+- one `LAISSO_<PARAM>` per param, upper-cased: `params: [status]` gives
+  `LAISSO_STATUS`
+
+Use these variables in `run`; Laisso does no template substitution, so
+quoting stays the shell's job.
+
+An Action can also be a Stage's artifact, run as a check: exit 0 is met,
+exit 1 is not met, anything else is a broken check. See
+[Check Actions](pipelines.md#check-actions). A check gets the same
+variables, with `LAISSO_SESSION` naming that check run, so it can pick a
+[Route](pipelines.md#routes) with `laisso route`. Write a check so it only looks.
+
+```yaml laisso-config
+actions:
+  notify:
+    params: [channel]
+    timeout: 1m
+    run: echo "$LAISSO_REFERENCE is at $LAISSO_STAGE" >> ~/laisso-$LAISSO_CHANNEL.log
+```
+
+### tracker.transition
+
+A Pipeline moves the tracker issue with an Action named
+`tracker.transition` taking `status`. It is an ordinary Action, but Laisso
+writes it for you: at every start, if `config.yaml` has no **global**
+`actions.tracker.transition`, Laisso adds the JIRA one below globally and the
+GitHub one to each `github` repo that lacks its own. Once a global one
+exists Laisso never touches this again, so a GitHub repo added later gets no
+override: add it by hand.
+
+JIRA, the global one Laisso writes:
+
+```yaml laisso-config
+actions:
+  tracker.transition:
+    params: [status]
+    run: |
+      [ -n "$LAISSO_REFERENCE" ] || { echo "$LAISSO_STAGE: the Ticket has no tracker issue yet" >&2; exit 1; }
+      acli jira workitem transition --key "$LAISSO_REFERENCE" --status "$LAISSO_STATUS" --yes >&2 || exit $?
+      echo "moved $LAISSO_REFERENCE to $LAISSO_STATUS"
+```
+
+GitHub, the per-repo override Laisso writes. A GitHub issue is only open or
+closed, so this accepts `status` `open` or `closed` (any case) and fails on
+anything else. Transitions to JIRA status names such as `In Progress`
+therefore Flag a GitHub Ticket: give GitHub repos a Pipeline whose
+transitions use `open`/`closed`, or none (see
+[examples/github/](examples/github/)).
+
+```yaml laisso-config
+repos:
+  web:
+    tracker: github
+    project: acme/web
+    path: ~/code/web
+    actions:
+      tracker.transition:
+        params: [status]
+        run: |
+          [ -n "$LAISSO_REFERENCE" ] || { echo "$LAISSO_STAGE: the Ticket has no tracker issue yet" >&2; exit 1; }
+          case "$(printf %s "$LAISSO_STATUS" | tr '[:upper:]' '[:lower:]')" in
+            closed) verb=close ;;
+            open) verb=reopen ;;
+            *) echo "GitHub accepts only open and closed, not $LAISSO_STATUS" >&2; exit 1 ;;
+          esac
+          gh issue "$verb" "${LAISSO_REFERENCE##*#}" --repo "${LAISSO_REFERENCE%#*}" >&2 || exit $?
+          echo "moved $LAISSO_REFERENCE to $LAISSO_STATUS"
+```
+
+On a machine with only GitHub repos, put the GitHub command in the global
+`tracker.transition` instead: Laisso then adds nothing, and `acli` is not
+needed (doctor lists a tool as needed when any Action's `run` names it).
+
+## PR Lists
+
+The dashboard's Pull Requests page shows one PR List per entry under
+`pr_lists`, in the order written. Each is keyed by the name the page shows.
+
+| Field | Rule |
+| --- | --- |
+| `query` | GitHub search syntax. `is:pr` is added; a query with `is:issue` is an error. It is scoped to the configured repos' GitHub origins unless it names `repo:`, `org:` or `user:`. |
+| `limit` | PRs shown, 1 to 100. Default `25`. |
+| `search` | `legacy` (the default) or `advanced`. `advanced` runs GitHub's advanced search, where `AND`, `OR` and parentheses work; under `legacy` they are plain words. Laisso wraps an advanced query in parentheses and adds the repo scope as one `OR` group, so the query's own `OR`s stay its own. |
+| `hide_when_empty` | `true` or `false`, default `false`. `true` leaves the list off the page while its last search succeeded with no PRs; the page names hidden lists in a note. It still shows while its first search loads, after a failed search (with the error), and when it cannot search. It comes back on the first refresh that finds PRs. |
+
+Writing `pr_lists` replaces the two defaults whole; `pr_lists: {}` shows no
+lists. While any list is configured, `gh` is a needed tool, logged in, even
+on a JIRA-only machine (`laisso doctor` lists it).
+
+```yaml laisso-config
+pr_lists:
+  Mine:
+    query: is:open author:@me
+  Team reviews:
+    query: is:open team-review-requested:acme/web-platform org:acme
+    limit: 50
+  Needs attention:
+    query: is:open (author:@me OR assignee:@me) (-status:success OR -review:approved)
+    search: advanced
+  Pending train:
+    query: is:open assignee:@me status:success review:approved
+    hide_when_empty: true
+pr_list_refresh: 10m
+pr_page_layout: side-by-side
+```
+
+## Review
+
+A repeating Stage takes every unresolved review thread and PR comment as
+Feedback, whoever wrote it, except the Runner's own marked replies. So a
+note or an answer the PR's author leaves by hand starts a Round. List the
+logins whose comments should never count:
+
+| Field | Rule |
+| --- | --- |
+| `ignore_authors` | GitHub logins, matched without regard to case |
+| `ignore_self` | `true` also ignores the login `gh` is authenticated as, read once when Laisso starts. Safe: the Runner's replies are told apart by their marker, not their author. |
+
+An ignored author's top-level comment is dropped. A review thread is
+dropped when all its comments, the Runner's aside, are by ignored authors;
+once anyone else comments in it, it is Feedback and its Round reads the
+whole thread, ignored comments included. Failed checks and a
+changes-requested verdict count whoever is involved. A repo may set either
+key under `repos.<name>.review`.
+
+```yaml laisso-config
+review:
+  ignore_authors: [dependabot]
+  ignore_self: true
+repos:
+  web:
+    tracker: github
+    project: acme/web
+    path: ~/code/web
+    review:
+      ignore_self: false
+```
+
+## Terminals
+
+Open terminal on a human Stage runs the Runner in a new terminal, in the
+Ticket's worktree, named like `Laisso: LASSO-42 grill`. Where it opens:
+
+| `terminal` | Opens |
+| --- | --- |
+| `auto` | a herdr tab when Laisso was started inside herdr (`HERDR_ENV=1`), else a tmux window when it was started inside tmux (`TMUX` set), else a Terminal.app window |
+| `herdr` | a new tab in Laisso's herdr workspace, focused |
+| `tmux` | a new window in Laisso's tmux session, which becomes its current window |
+| `terminal-app` | a Terminal.app window, brought to the front |
+
+The window opens where the `laisso` process runs, not where the browser
+is. Under `auto`, a herdr or tmux that fails (its server gone since Laisso
+started) falls back to Terminal.app and logs `terminal.fallback`; a
+terminal named outright that fails is an error on Open terminal instead,
+and `laisso doctor` lists it as a needed tool. `laisso doctor` ends with
+where human Stages open, as Laisso started from that shell would choose.
+
+## When edits apply
+
+| Edit | Applies |
+| --- | --- |
+| `actions`, `profiles`, `default_profile` (global or a repo's), `terminal` | at the next Session or action Stage that starts; no restart |
+| `concurrency` | at the next Tick |
+| Pipeline files | at the next Intake; Tickets already under way keep their Version |
+| `repos` (added, removed, or changed `tracker`/`project`/`path`/`pipeline`), `budget`, `retention`, `branch_prefix`, `notifications`, `pr_lists`, `pr_list_refresh`, `pr_page_layout`, `review` (global or a repo's) | after a restart, or after the next save from the dashboard's Config page, which rereads the whole file |
+| `port`, `tick` | after a restart only |
+
+Restart means stopping the foreground `laisso` process (Ctrl-C) and starting
+it again. Ctrl-C stops running headless Sessions; they are rerun on the next
+start without counting as an attempt. Human (terminal) Sessions are left
+alone.

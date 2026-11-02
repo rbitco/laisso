@@ -1,0 +1,52 @@
+# A Pipeline for GitHub-tracked repos. It has no In Progress / In Review
+# transitions, since a GitHub issue is only open or closed; a label marks
+# progress instead. The PR body should say "Closes #<n>" so merging closes
+# the issue; tracker.transition with status closed would do it by hand.
+
+budget:
+  spend: 20
+
+stages:
+  - name: grill
+    profile: claude-fable
+    human: true
+    advance: false
+    skills: [grilling]
+    prompt: |
+      Grill the Ticket's idea until we share an understanding. Write the
+      agreed spec into the GitHub issue body.
+
+  - action: gh.label
+    with: { label: in-progress }
+
+  - name: implement
+    skills: [implement]
+    artifact: commits-on-branch
+    budget: { attempts: 3 }
+    prompt: |
+      Implement the issue. Commit to the current branch; do not push.
+
+  - name: open-pr
+    profile: claude-sonnet
+    artifact: pr-exists
+    prompt: |
+      Update the repo's docs for this change. Push the branch and open a PR
+      whose body ends with "Closes #<issue number>".
+
+  - name: code-review
+    profile: codex-review
+    skills: [code-review]
+    artifact: pr-review
+    prompt: |
+      Review this branch against main. Post the findings as one PR review
+      with inline comments, each carrying Laisso's Stage marker, so the
+      review Stage addresses them as Feedback.
+
+  - name: review
+    repeat: feedback
+    artifact: pr-merged
+    budget: { rounds: 6, wallTime: 40m }
+    prompt: |
+      Address each unaddressed Feedback item below on this branch. Reply on
+      each thread with the marker, commit, and push. Then resolve each
+      thread you fixed.

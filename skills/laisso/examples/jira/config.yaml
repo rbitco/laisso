@@ -1,0 +1,50 @@
+# A Laisso home's config.yaml for one JIRA-tracked repo. Pair it with
+# pipelines/jira.yaml beside it. Every key not shown keeps its default.
+
+repos:
+  shop:
+    tracker: jira
+    project: SHOP              # SHOP-123 is suggested for this repo
+    path: ~/code/shop          # local clone; worktrees are made from its origin
+    pipeline: jira             # pipelines/jira.yaml
+
+actions:
+  # Moves the JIRA issue; jira.yaml's action Stages run it. This is the one
+  # Laisso writes on start when config.yaml has no global tracker.transition.
+  tracker.transition:
+    params: [status]
+    run: |
+      [ -n "$LAISSO_REFERENCE" ] || { echo "$LAISSO_STAGE: the Ticket has no tracker issue yet" >&2; exit 1; }
+      acli jira workitem transition --key "$LAISSO_REFERENCE" --status "$LAISSO_STATUS" --yes >&2 || exit $?
+      echo "moved $LAISSO_REFERENCE to $LAISSO_STATUS"
+  # An Action of the user's own: comment on the issue when the PR is up.
+  jira.comment:
+    params: [message]
+    timeout: 2m
+    run: |
+      acli jira workitem comment create --key "$LAISSO_REFERENCE" --body "$LAISSO_MESSAGE $LAISSO_PR" >&2 || exit $?
+      echo "commented on $LAISSO_REFERENCE"
+
+profiles:
+  claude-fable:
+    runner: claude
+    model: fable
+    permission: auto
+  claude-opus:
+    runner: claude
+    model: opus
+    permission: auto
+  claude-sonnet:
+    runner: claude
+    model: sonnet
+    permission: auto
+default_profile: claude-opus
+
+budget:
+  rounds: 5
+  attempts: 2
+  wallTime: 30m
+  spend: 25
+
+concurrency: 3
+branch_prefix: ""

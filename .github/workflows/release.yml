@@ -1,0 +1,87 @@
+name: Release
+
+# Pushing a vX.Y.Z tag publishes laisso to the public npm registry
+# (ADR 0015). The version lives only in the tag: package.json stays
+# 0.0.0-dev in git, since main only takes squash-merged PRs, and is set
+# from the tag here before packing.
+#
+# A prerelease tag (vX.Y.Z-next.N) publishes under the npm dist-tag
+# `next`, so `npm i -g laisso@next` installs it while `latest`
+# and the upgrade notice stay on the last release.
+#
+# Run by hand (workflow_dispatch) it is a dry run: everything up to the
+# smoke test, as 0.0.0-dryrun, with nothing published.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # The rbitco org allows only GitHub-owned and verified actions, so
+      # pnpm comes from npm rather than pnpm/action-setup.
+      - run: npm install --global pnpm@8
+
+      - run: pnpm install --frozen-lockfile
+
+      # Some tests commit in temporary repos.
+      - run: |
+          git config --global user.name "laisso release"
+          git config --global user.email "release@laisso.invalid"
+
+      # The suite drives real processes against timing; on a small
+      # hosted runner fewer workers, a longer per-test timeout and a retry
+      # keep load-induced flakes from blocking a release. A test that fails
+      # three times still fails.
+      - run: pnpm test -- --maxWorkers=2 --retry=2 --testTimeout=60000
+
+      - name: Set version from tag
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then VERSION="${GITHUB_REF_NAME#v}"; else VERSION=0.0.0-dryrun; fi
+          npm version "$VERSION" --no-git-tag-version
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          case "$VERSION" in *-*) DIST_TAG=next ;; *) DIST_TAG=latest ;; esac
+          echo "DIST_TAG=$DIST_TAG" >> "$GITHUB_ENV"
+
+      # prepack typechecks, builds the dashboard, then bundles.
+      - run: npm pack
+
+      # Stops the release before anything is published if the tarball
+      # does not install and serve as $VERSION.
+      - run: node scripts/smoke-test.ts "laisso-$VERSION.tgz" "$VERSION"
+
+      # NPMJS_TOKEN is an npmjs granular access token that may publish
+      # laisso.
+      - name: Publish to npmjs
+        if: github.ref_type == 'tag'
+        env:
+          NPMJS_TOKEN: ${{ secrets.NPMJS_TOKEN }}
+        run: |
+          npmrc="$RUNNER_TEMP/.npmrc"
+          echo "//registry.npmjs.org/:_authToken=${NPMJS_TOKEN}" > "$npmrc"
+          npm publish "laisso-$VERSION.tgz" --tag "$DIST_TAG" --userconfig "$npmrc"
+          rm -f "$npmrc"
+
+      - name: GitHub Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=""
+          if [ "$DIST_TAG" = next ]; then prerelease=--prerelease; fi
+          gh release create "$GITHUB_REF_NAME" "laisso-$VERSION.tgz" --generate-notes $prerelease

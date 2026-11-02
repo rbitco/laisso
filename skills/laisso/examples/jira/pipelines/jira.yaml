@@ -1,0 +1,69 @@
+# A Pipeline for JIRA-tracked repos: the default Pipeline's shape, with the
+# issue moved through the board's statuses by tracker.transition. The
+# statuses must exist on the project's board; that is only found out when
+# the Action runs. Thinking Stages use Fable, docs use Sonnet, the rest the
+# Pipeline's claude-opus.
+
+profile: claude-opus
+budget:
+  spend: 30
+
+stages:
+  # A human Stage: Laisso opens the Runner in a terminal, the human marks it
+  # done, and the Ticket holds until Start is pressed on the next Stage. No
+  # artifact: tracker-spec is not checked by this Laisso version.
+  - name: grill
+    profile: claude-fable
+    human: true
+    advance: false
+    skills: [grilling, to-spec]
+    prompt: |
+      Grill the Ticket's idea until we share an understanding, then publish
+      the spec to the issue with to-spec.
+
+  - action: tracker.transition
+    with: { status: In Progress }
+
+  # No artifact: tracker-comment is not checked by this Laisso version and
+  # would Flag every run; a succeeded Outcome advances it.
+  - name: plan
+    profile: claude-fable
+    skills: [codebase-design]
+    prompt: |
+      Read the spec on the Ticket's issue and explore the repo. Post an
+      implementation plan as a comment on the issue.
+
+  - name: implement
+    skills: [implement]
+    artifact: commits-on-branch
+    budget: { attempts: 3, wallTime: 45m }
+    prompt: |
+      Implement the spec on the Ticket's issue, following the plan comment.
+      Commit to the current branch; do not push.
+
+  - name: document
+    profile: claude-sonnet
+    artifact: pr-exists
+    prompt: |
+      Update the repo's docs for the change on this branch. Write the PR
+      body from the spec and the diff. Push and open the PR.
+
+  - action: jira.comment
+    name: announce-pr
+    with: { message: "PR opened:" }
+
+  - action: tracker.transition
+    with: { status: In Review }
+
+  - name: review
+    repeat: feedback
+    artifact: pr-merged
+    budget: { rounds: 8 }
+    prompt: |
+      Address each unaddressed Feedback item below on this branch: failed
+      checks and review threads. Reply on each thread with the marker,
+      commit, and push. Then resolve each thread you fixed. Leave a thread
+      unresolved when you could not fix it, and say why in your reply.
+
+  - action: tracker.transition
+    with: { status: Done }
