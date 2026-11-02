@@ -15,14 +15,14 @@ const request: RunRequest = {
   prompt: "Do the work described by the Ticket.",
   skills: ["implement", "tdd"],
   context: { id: "01J8ZK3M9Q4R5S6T7V8W9X0Y1Z", reference: "APP-12", repo: "app", branch: "APP-12-add-dark-mode", title: "Add dark mode", body: "A toggle in settings.", prs: [] },
-  cwd: "/Users/matt/.claude/jobs/dcee61b2/tmp/piprobe",
+  cwd: "/tmp/laisso-fixture/piprobe",
   mode: "headless",
   sessionId: "7d3f2c10-5b1e-4a8c-9e2f-1234567890ab",
   limits: { wallTimeMs: 60_000, remainingSpendUsd: 4.5 },
   profile: { runner: "pi" },
 };
 
-const sessionsDir = path.join(homedir(), ".pi", "agent", "sessions", "--Users-matt-.claude-jobs-dcee61b2-tmp-piprobe--");
+const sessionsDir = path.join(homedir(), ".pi", "agent", "sessions", "--tmp-laisso-fixture-piprobe--");
 
 describe("pi adapter command", () => {
   it("builds a headless pi -p in JSON mode on the chosen session id with skills as /skill:name first", () => {

@@ -1,4 +1,4 @@
-{"type":"session","version":3,"id":"7d3f2c10-5b1e-4a8c-9e2f-1234567890ab","timestamp":"2026-09-27T06:09:58.627Z","cwd":"/Users/matt/.claude/jobs/dcee61b2/tmp/piprobe"}
+{"type":"session","version":3,"id":"7d3f2c10-5b1e-4a8c-9e2f-1234567890ab","timestamp":"2026-09-27T06:09:58.627Z","cwd":"/tmp/laisso-fixture/piprobe"}
 {"type":"agent_start"}
 {"type":"turn_start"}
 {"type":"message_start","message":{"role":"user","content":[{"type":"text","text":"Reply with exactly the word OK and nothing else."}],"timestamp":1790489398748}}

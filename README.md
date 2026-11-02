@@ -104,9 +104,6 @@ and JIRA in [skills/laisso/examples](skills/laisso/examples).
 
 ## Coming from Lasso
 
-An install of `@rbitco/laisso` from the homelab registry switches with
-`npm uninstall -g @rbitco/laisso && npm i -g laisso`; its home is unchanged.
-
 Laisso was named Lasso. Install `laisso`, uninstall `@rbitco/lasso`, and set
 `LAISSO_DIRECTORY_NAME=.lasso` to keep using `~/.lasso` as it is: its
 `lasso.db`, `lasso.log` and backups are picked up, `LASSO_HOME` and

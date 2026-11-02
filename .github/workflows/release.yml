@@ -5,9 +5,6 @@ name: Release
 # 0.0.0-dev in git, since main only takes squash-merged PRs, and is set
 # from the tag here before packing.
 #
-# GitHub-hosted: the repo is public, so it never runs on the shared
-# self-hosted rbitco runner, and npmjs needs no LAN access.
-#
 # A prerelease tag (vX.Y.Z-next.N) publishes under the npm dist-tag
 # `next`, so `npm i -g laisso@next` installs it while `latest`
 # and the upgrade notice stay on the last release.

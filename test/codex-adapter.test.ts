@@ -189,7 +189,7 @@ describe("codex adapter findSession", () => {
 
   it("finds the newest thread Codex created in the worktree since the launch, in the thread table under CODEX_HOME", () => {
     process.env.CODEX_HOME = fixturesHome;
-    const cwd = "/Users/matt/.claude/jobs/dcee61b2/tmp/codexprobe";
+    const cwd = "/tmp/laisso-fixture/codexprobe";
     // Two exec threads in that cwd: 06:10:44.934 and 06:11:30.545 UTC on 2026-09-27.
     expect(codexAdapter.findSession({ cwd, launchedAfter: new Date("2026-09-27T06:10:00Z") })).toBe("01a0e17d-746e-7123-93ce-e3f3b05e8375");
     expect(codexAdapter.findSession({ cwd, launchedAfter: new Date("2026-09-27T06:11:00Z") })).toBe("01a0e17d-746e-7123-93ce-e3f3b05e8375");

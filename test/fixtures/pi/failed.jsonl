@@ -1,4 +1,4 @@
-{"type":"session","version":3,"id":"8e4a3d21-6c2f-4b9d-af30-abcdef123456","timestamp":"2026-09-27T06:10:14.607Z","cwd":"/Users/matt/.claude/jobs/dcee61b2/tmp/piprobe"}
+{"type":"session","version":3,"id":"8e4a3d21-6c2f-4b9d-af30-abcdef123456","timestamp":"2026-09-27T06:10:14.607Z","cwd":"/tmp/laisso-fixture/piprobe"}
 {"type":"agent_start"}
 {"type":"turn_start"}
 {"type":"message_start","message":{"role":"user","content":[{"type":"text","text":"Reply OK"}],"timestamp":1790489414756}}

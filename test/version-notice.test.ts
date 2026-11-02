@@ -7,7 +7,7 @@ const none: VersionNotice = { kind: "none" };
 const available = (version: string): VersionNotice => ({ kind: "available", version });
 const restart = (version: string): VersionNotice => ({ kind: "restart", version });
 
-// Laisso tells Matt when a newer version is published, or when he has upgraded but still runs the old process.
+// Laisso says when a newer version is published, or when it has been upgraded but still runs the old process.
 describe("the version notice", () => {
   it.each<[string, string, string, string | null, VersionNotice]>([
     ["all the same", "1.2.0", "1.2.0", "1.2.0", none],
