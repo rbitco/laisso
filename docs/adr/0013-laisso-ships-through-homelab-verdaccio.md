@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by 0015
 ---
 
 # Laisso ships through a homelab Verdaccio registry

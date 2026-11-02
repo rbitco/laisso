@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { startLaissoWithRepos, waitFor, HERDR_PANE, type Laisso, type LaissoConfig } from "./harness.ts";
 import type { TicketDetail, IntakeResult } from "../src/api/views.ts";
@@ -133,6 +134,22 @@ describe("terminal: in config.yaml", () => {
   it("logs at startup where human Stages will open", async () => {
     const { laisso } = await laissoWithTicket(HERDR_ENV);
     await waitFor(async () => /INFO terminal terminal=herdr why="Laisso runs inside herdr \(HERDR_ENV=1\)"/.test(logLines(laisso)), "the terminal line");
+  });
+});
+
+describe("Set up Laisso", () => {
+  it("opens laisso setup in a terminal, in the home, with the Laisso skill installed first", async () => {
+    const userHome = mkdtempSync(path.join(tmpdir(), "laisso-user-"));
+    const { laisso } = await startLaissoWithRepos({}, {}, {}, { HOME: userHome });
+    running.push(laisso);
+    const opened = await laisso.api<{ launcher: string; terminal: string; profile: string }>("/api/setup", { method: "POST", body: "{}" });
+    expect(opened).toEqual({ launcher: path.join(laisso.home, "setup.command"), terminal: "terminal-app", profile: "claude" });
+    expect((await laisso.terminals()).map((t) => t.launcher)).toEqual([opened.launcher]);
+    const script = readFileSync(opened.launcher, "utf8");
+    expect(script).toContain(`cd '${laisso.home}'`);
+    expect(script).toContain("exec 'claude' '--permission-mode'");
+    expect(existsSync(path.join(userHome, ".claude", "skills", "laisso", "SKILL.md"))).toBe(true);
+    expect(logLines(laisso)).toMatch(/setup\.opened .* terminal=terminal-app profile=claude$/m);
   });
 });
 

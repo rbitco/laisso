@@ -7,6 +7,7 @@ import { showNotice } from "../notice.tsx";
 import { MiniRings } from "../ticket/Budget.tsx";
 import { prStateWord, prTone } from "../ticket/PullRequests.tsx";
 import { listTickets, message, pullTrigger } from "../ticket/ticket.ts";
+import { SetupCard } from "./SetupCard.tsx";
 
 export interface LedgerProps {
   /** Whether done and Abandoned Tickets are listed too, greyed. */
@@ -49,7 +50,7 @@ export function Ledger({ all, visit }: LedgerProps) {
   useEffect(() => () => clearTimeout(owed.current ?? undefined), []);
 
   if (!tickets) return null;
-  if (!tickets.length) return <p className="empty">{all ? "No Tickets yet. Paste a reference or a prompt above to start one." : "No active Tickets. Paste a reference or a prompt above to start one."}</p>;
+  if (!tickets.length) return <SetupCard empty={all ? "No Tickets yet. Paste a reference or a prompt above to start one." : "No active Tickets. Paste a reference or a prompt above to start one."} />;
   return (
     <>
       {tickets.map((t) => (

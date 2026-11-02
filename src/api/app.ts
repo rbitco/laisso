@@ -19,6 +19,7 @@ import type { Runs } from "../session/runs.ts";
 import { RunError } from "../session/runs.ts";
 import { ArtifactWarning, TriggerError, type Progress } from "../session/progress.ts";
 import { TerminalError, type Terminal } from "../session/terminal.ts";
+import { SetupError } from "../setup/command.ts";
 import type { Exits, ExtendRequest } from "../session/exits.ts";
 import type { Overrides } from "../session/overrides.ts";
 import type { Budgets } from "../budget/budgets.ts";
@@ -108,7 +109,7 @@ export function createApp(deps: AppDeps): Hono {
   });
 
   app.onError((error, c) => {
-    if (error instanceof IntakeError || error instanceof RunError || error instanceof TriggerError || error instanceof TerminalError || error instanceof PipelineError || error instanceof ConfigError) return c.json({ error: error.message }, 400);
+    if (error instanceof IntakeError || error instanceof RunError || error instanceof TriggerError || error instanceof TerminalError || error instanceof SetupError || error instanceof PipelineError || error instanceof ConfigError) return c.json({ error: error.message }, 400);
     if (error instanceof ArtifactWarning) return c.json({ error: error.message, artifact: error.artifact, detail: error.detail, override: true }, 409);
     console.error(error);
     return c.json({ error: error.message }, 500);
@@ -207,6 +208,9 @@ export function createApp(deps: AppDeps): Hono {
       const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
       return c.json(ticketDetail(await pull(ticket, body), viewContext()));
     });
+
+  // Set up Laisso (`laisso setup`) from the dashboard: the setup Runner opens in a terminal beside the Laisso process.
+  app.post("/api/setup", async (c) => c.json(await deps.terminal.openSetup()));
 
   trigger("terminal", async (ticket) => {
     const { pipeline, stage } = deps.progress.humanStage(ticket);

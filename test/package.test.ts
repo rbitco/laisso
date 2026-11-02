@@ -29,7 +29,7 @@ describe("the packed package", () => {
         .map((e) => path.relative(REPO_ROOT, path.join(e.parentPath, e.name)).split(path.sep).join("/"));
       expect(skill).toContain("skills/laisso/SKILL.md");
       expect(files).toEqual(expect.arrayContaining(skill));
-      expect(files.filter((f) => !f.startsWith("dist/") && !f.startsWith("skills/") && f !== "package.json" && f !== "README.md")).toEqual([]);
+      expect(files.filter((f) => !f.startsWith("dist/") && !f.startsWith("skills/") && f !== "package.json" && f !== "README.md" && f !== "LICENSE")).toEqual([]);
       await smokeTest({ tarball: path.join(out, packed!.filename), version: findPackageRoot().version });
     } finally {
       await rm(out, { recursive: true, force: true });

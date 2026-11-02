@@ -507,15 +507,17 @@ stages:
 
 ## The default Pipeline
 
-`default.yaml` as Laisso writes it runs grill (human, holds before the next
-Stage), a `tracker.transition` to `In Progress`, plan, implement, document
-(opens the PR), code-review, a transition to `In Review`, review (the
-repeating Stage), and a transition to `Done`. Its grill and plan Stages
-declare `tracker-spec` and `tracker-comment` (see [Artifacts](#artifacts)),
-and its transitions use JIRA status names (see
-[config.md](config.md#trackertransition) for GitHub). Its skills (`grilling`,
-`to-spec`, `implement`, `code-review` and so on) must be installed for the
-Runner.
+`default.yaml` as Laisso writes it is a starter that needs no skills and no
+tracker Actions, so it runs for prompt Tickets and issue Tickets alike: plan
+(human, holds before the next Stage, `file PLAN.md` Artifact), implement
+(commits on the branch, keeping PLAN.md out of them), open-pr (`pr-exists`),
+and review (the repeating Stage, until the PR merges). Its Stages name no
+profile, so they run under `default_profile`. `laisso setup` reshapes it with
+the person: adding Stages, `tracker.transition` Actions for issue Tickets, and
+skills they already have installed. The worked examples in
+[examples](examples) name third-party skills (`grilling`, `to-spec`,
+`code-review` and so on); a Stage may name a skill only once it is installed
+for that Stage's Runner.
 
 ## The pr-review Pipeline
 
@@ -524,7 +526,7 @@ Runner.
 `--pr` (repeatable) links each PR as Referenced, and without `--repo` the
 Ticket's repo is the configured one whose origin is the first PR's repo. The
 Ticket's branch starts at the head of the first Referenced PR in its repo.
-Its one headless Stage runs `code-review` over the Referenced PRs and writes
-the findings to `review-findings.md` in the worktree, its `file` Artifact.
+Its one headless Stage reviews the Referenced PRs, as its prompt describes,
+under `default_profile`, and writes the findings to `review-findings.md` in the worktree, its `file` Artifact.
 It has no tracker Actions and posts nothing to the PR: the human reads the
 findings and posts them.

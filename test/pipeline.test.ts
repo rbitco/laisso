@@ -155,24 +155,14 @@ describe("checkProfiles", () => {
 });
 
 describe("the default Pipeline", () => {
-  it("names Fable for the thinking Stages and Sonnet for Document, and leaves Implement and Review to default_profile", () => {
+  it("is a starter that needs only a Runner and gh: plan with a human, implement, open the PR, then the Review loop", () => {
     const pipeline = parsePipeline("default", DEFAULT_PIPELINE_YAML);
     expect(pipeline.profile).toBeNull();
-    expect(pipeline.stages.flatMap((s) => (s.kind === "runner" ? [[s.name, s.profile]] : []))).toEqual([
-      ["grill", "claude-fable"],
-      ["plan", "claude-fable"],
-      ["implement", null],
-      ["document", "claude-sonnet"],
-      ["code-review", "claude-fable"],
-      ["review", null],
+    expect(pipeline.stages.map((s) => (s.kind === "runner" ? [s.name, s.human, s.skills, s.profile, s.artifact] : [s.kind]))).toEqual([
+      ["plan", true, [], null, "file PLAN.md"],
+      ["implement", false, [], null, "commits-on-branch"],
+      ["open-pr", false, [], null, "pr-exists"],
+      ["review", false, [], null, "pr-merged"],
     ]);
-  });
-
-  it("has code-review post one review on each Owned PR, not just the branch (LASSO-166)", () => {
-    const stage = parsePipeline("default", DEFAULT_PIPELINE_YAML).stages.find((s) => s.kind === "runner" && s.name === "code-review");
-    const prompt = stage?.kind === "runner" ? stage.prompt : null;
-    expect(prompt).toContain("Review each Owned PR");
-    expect(prompt).toContain("one PR review per Owned PR");
-    expect(prompt).not.toContain("this branch");
   });
 });

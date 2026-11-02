@@ -129,7 +129,7 @@ actions:
 
 ### tracker.transition
 
-The default Pipeline moves the tracker issue with an Action named
+A Pipeline moves the tracker issue with an Action named
 `tracker.transition` taking `status`. It is an ordinary Action, but Laisso
 writes it for you: at every start, if `config.yaml` has no **global**
 `actions.tracker.transition`, Laisso adds the JIRA one below globally and the
@@ -151,7 +151,7 @@ actions:
 
 GitHub, the per-repo override Laisso writes. A GitHub issue is only open or
 closed, so this accepts `status` `open` or `closed` (any case) and fails on
-anything else. The default Pipeline's `In Progress`, `In Review` and `Done`
+anything else. Transitions to JIRA status names such as `In Progress`
 therefore Flag a GitHub Ticket: give GitHub repos a Pipeline whose
 transitions use `open`/`closed`, or none (see
 [examples/github/](examples/github/)).

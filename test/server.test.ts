@@ -22,8 +22,7 @@ describe("the laisso process", () => {
     expect(health.pid).toBe(laisso.child.pid);
 
     const pipeline = await readFile(path.join(laisso.home, "pipelines", "default.yaml"), "utf8");
-    expect(pipeline).toContain("name: grill");
-    expect(pipeline).toContain("action: tracker.transition");
+    expect(pipeline).toBe(DEFAULT_PIPELINE_YAML);
 
     // A hand edit survives a restart: the default is written only when absent.
     await laisso.stop();

@@ -50,7 +50,7 @@ type Sent = { method: string; route: string };
 /** A stand-in for Laisso's /api: the Tickets it lists, in the order given, refusals by route, and every request. */
 function fakeLaisso(tickets: TicketView[]) {
   const sent: Sent[] = [];
-  const state = { tickets, refuse: {} as Record<string, string> };
+  const state = { tickets, refuse: {} as Record<string, string>, repos: { app: { path: "/code/app" } } as Record<string, unknown> };
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
   vi.stubGlobal("fetch", async (url: string, init: RequestInit = {}) => {
     const method = init.method ?? "GET";
@@ -58,6 +58,8 @@ function fakeLaisso(tickets: TicketView[]) {
     if (state.refuse[url]) return json({ error: state.refuse[url] }, 409);
     if (url === "/api/tickets") return json(state.tickets.filter((t) => t.state === "active"));
     if (url === "/api/tickets?all=1") return json(state.tickets);
+    if (url === "/api/config") return json({ config: { repos: state.repos } });
+    if (url === "/api/setup") return json({ terminal: "terminal-app", profile: "claude-opus", launcher: "/h/setup.command" });
     return json({ changes: [] });
   });
   return { sent, state, reads: () => sent.filter((s) => s.method === "GET").length };
@@ -149,6 +151,16 @@ describe("the Ledger", () => {
     await screen.findByText("No Tickets yet. Paste a reference or a prompt above to start one.");
     view.rerender(<Ledger all={false} visit={2} />);
     await screen.findByText("No active Tickets. Paste a reference or a prompt above to start one.");
+  });
+
+  it("offers Set up Laisso in place of the empty line while there are no repos, and says where it opened", async () => {
+    const laisso = fakeLaisso([]);
+    laisso.state.repos = {};
+    render(<Ledger all={false} visit={1} />);
+    await userEvent.click(await screen.findByRole("button", { name: "Set up Laisso" }));
+    expect(laisso.sent).toContainEqual({ method: "POST", route: "/api/setup" });
+    await screen.findByText(/Opened in Terminal with profile claude-opus/);
+    expect(screen.queryByText(/No active Tickets/)).toBeNull();
   });
 
   it("leads the why line with a chip per Owned PR, its dot toned by the PR's state, and leaves Referenced PRs off", async () => {

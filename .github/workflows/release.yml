@@ -1,15 +1,15 @@
 name: Release
 
-# Pushing a vX.Y.Z tag publishes @rbitco/laisso to the homelab Verdaccio
-# (ADR 0013). The version lives only in the tag: package.json stays
+# Pushing a vX.Y.Z tag publishes laisso to the public npm registry
+# (ADR 0015). The version lives only in the tag: package.json stays
 # 0.0.0-dev in git, since main only takes squash-merged PRs, and is set
 # from the tag here before packing.
 #
-# Self-hosted: npm.matty.rocks is LAN-only, so a GitHub-hosted runner
-# cannot reach it.
+# GitHub-hosted: the repo is public, so it never runs on the shared
+# self-hosted rbitco runner, and npmjs needs no LAN access.
 #
 # A prerelease tag (vX.Y.Z-next.N) publishes under the npm dist-tag
-# `next`, so `npm i -g @rbitco/laisso@next` installs it while `latest`
+# `next`, so `npm i -g laisso@next` installs it while `latest`
 # and the upgrade notice stay on the last release.
 #
 # Run by hand (workflow_dispatch) it is a dry run: everything up to the
@@ -28,7 +28,7 @@ concurrency:
 
 jobs:
   release:
-    runs-on: [self-hosted, rbitco]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -47,8 +47,8 @@ jobs:
           git config --global user.name "laisso release"
           git config --global user.email "release@laisso.invalid"
 
-      # The suite drives real processes against timing; on this shared
-      # 4-core runner fewer workers, a longer per-test timeout and a retry
+      # The suite drives real processes against timing; on a small
+      # hosted runner fewer workers, a longer per-test timeout and a retry
       # keep load-induced flakes from blocking a release. A test that fails
       # three times still fails.
       - run: pnpm test -- --maxWorkers=2 --retry=2 --testTimeout=60000
@@ -66,16 +66,18 @@ jobs:
 
       # Stops the release before anything is published if the tarball
       # does not install and serve as $VERSION.
-      - run: node scripts/smoke-test.ts "rbitco-laisso-$VERSION.tgz" "$VERSION"
+      - run: node scripts/smoke-test.ts "laisso-$VERSION.tgz" "$VERSION"
 
-      - name: Publish to npm.matty.rocks
+      # NPMJS_TOKEN is an npmjs granular access token that may publish
+      # laisso.
+      - name: Publish to npmjs
         if: github.ref_type == 'tag'
         env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPMJS_TOKEN: ${{ secrets.NPMJS_TOKEN }}
         run: |
           npmrc="$RUNNER_TEMP/.npmrc"
-          echo "//npm.matty.rocks/:_authToken=${NPM_TOKEN}" > "$npmrc"
-          npm publish "rbitco-laisso-$VERSION.tgz" --tag "$DIST_TAG" --userconfig "$npmrc"
+          echo "//registry.npmjs.org/:_authToken=${NPMJS_TOKEN}" > "$npmrc"
+          npm publish "laisso-$VERSION.tgz" --tag "$DIST_TAG" --userconfig "$npmrc"
           rm -f "$npmrc"
 
       - name: GitHub Release
@@ -85,4 +87,4 @@ jobs:
         run: |
           prerelease=""
           if [ "$DIST_TAG" = next ]; then prerelease=--prerelease; fi
-          gh release create "$GITHUB_REF_NAME" "rbitco-laisso-$VERSION.tgz" --generate-notes $prerelease
+          gh release create "$GITHUB_REF_NAME" "laisso-$VERSION.tgz" --generate-notes $prerelease

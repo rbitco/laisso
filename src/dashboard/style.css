@@ -114,6 +114,10 @@ button.busy::after { content: ''; display: inline-block; width: 0.75em; height: 
 .tick { color: var(--muted); font-variant-numeric: tabular-nums; }
 main { padding: 16px; }
 .empty { color: var(--muted); padding: 32px 0; text-align: center; }
+.setup-card { max-width: 560px; margin: 32px auto; padding: 20px 24px; border: 1px solid var(--line); border-radius: 12px; }
+.setup-card h2 { margin: 0 0 8px; font-size: 18px; }
+.setup-card p { margin: 0 0 16px; line-height: 1.5; }
+.setup-card p:last-child { margin-bottom: 0; }
 .notice { color: var(--crit); }
 .tools-notice { flex-basis: 100%; margin: 0; color: var(--amber); font-size: 13px; }
 .version-notice { color: var(--amber); font-size: 12px; }

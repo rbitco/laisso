@@ -45,6 +45,10 @@ export const piAdapter: RunnerAdapter = {
     return { argv: ["pi", "-p", "--mode", "json", "--session-id", session, "-a", ...args, prompt], cwd: request.cwd, env };
   },
 
+  interactive(prompt, profile, cwd) {
+    return { argv: ["pi", "-a", ...profileArgs(profile, "--model", (level) => ["--thinking", level]), prompt], cwd, env: {} };
+  },
+
   parse(stdout: string, request: Pick<RunRequest, "cwd" | "sessionId">): Outcome {
     const records = jsonLines(stdout);
     const header = records.find((r) => r.type === "session") as Header | undefined;

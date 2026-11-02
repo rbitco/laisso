@@ -1,263 +1,128 @@
 # Laisso
 
-Laisso drives a Ticket through a Pipeline of Stages using a coding-agent Runner
-(Claude Code, Codex, or Pi), keeps Ticket state in its own store mirrored to the
-tracker, and shows every Ticket on a local dashboard. The spec is
-`docs/spec/laisso-v1.md`; the glossary is `CONTEXT.md`; decisions are in `docs/adr`.
+Laisso runs coding agents through your own development process. You give it
+a Ticket (a tracker issue or a plain prompt), and it walks the Ticket through
+a Pipeline of Stages, such as plan, implement, open the PR and answer review,
+using Claude Code, Codex or Pi. Each Ticket gets its own git worktree. Every
+Ticket shows on a local dashboard, where you step in when a Stage needs you.
 
-## New machine
+## Requirements
 
-Node 24 or later, on the homelab LAN.
+- macOS. Human Stages open in Terminal.app, tmux or herdr.
+- Node 24 or later.
+- At least one coding agent, installed and logged in: [Claude Code](https://claude.com/claude-code)
+  (`claude`), [Codex](https://github.com/openai/codex) (`codex`) or Pi (`pi`).
+- `git`, and [`gh`](https://cli.github.com) logged in, for PRs and GitHub issues.
+- [`acli`](https://developer.atlassian.com/cloud/acli/) logged in, only for JIRA issues.
 
-```sh
-npm config set @rbitco:registry=https://npm.matty.rocks/
-npm i -g @rbitco/laisso
-laisso skill install
-laisso doctor   # which tools Laisso needs, whether each is found and logged in, and what needs it
-```
-
-`laisso skill install` copies the Laisso skill (how to write `config.yaml`
-and Pipelines, and why a Ticket is Flagged) into `~/.claude/skills/laisso`,
-and `~/.codex/skills/laisso` when `~/.codex` exists, so a coding agent can
-set Laisso up from docs matching the installed version; rerun it after an
-upgrade, as `laisso doctor` will say.
-
-A machine without homelab DNS (the work VLAN) uses
-`http://10.30.0.61:4873/` as the registry instead. Only the `@rbitco`
-scope points there; everything else still comes from npmjs.
-
-To upgrade, `npm update -g @rbitco/laisso`, then restart Laisso. The
-dashboard and `laisso status` say when a newer version is published, and
-when one is installed but not yet running.
-
-To try unreleased work from main, `npm i -g @rbitco/laisso@next`
-installs the latest preview (a `vX.Y.Z-next.N` tag); `npm i -g
-@rbitco/laisso@latest` goes back to the last release.
-
-Laisso also checks PATH at each start, logs a warning per missing tool,
-and lists them in the dashboard header.
-
-### Coming from Lasso
-
-Laisso was named Lasso. Install `@rbitco/laisso`, uninstall
-`@rbitco/lasso`, and set `LAISSO_DIRECTORY_NAME=.lasso` to keep using
-`~/.lasso` as it is: its `lasso.db`, `lasso.log` and backups are picked up,
-`LASSO_HOME` and `LASSO_PORT` still work, and Sessions and Actions get each
-`LAISSO_*` variable under its `LASSO_*` name too, so Action scripts written
-for Lasso run unchanged. Prompts that tell an agent to run `lasso route` or
-`lasso pr link` need `laisso` instead, as no `lasso` command is installed.
-`laisso skill install` removes the skill Lasso installed. Tracker issues keep
-their old `lasso:*` labels beside the new `laisso:*` ones until removed by hand.
-
-## Run
-
-Node 24 or later. From a checkout the server runs as TypeScript directly; only the
-dashboard is built, by Vite, into `dist/dashboard/` (ADR 0012). Laisso
-refuses to start until it is built.
+## Quickstart
 
 ```sh
-pnpm install
-pnpm start               # builds the dashboard, then starts laisso on http://localhost:7434
-pnpm start status        # the ledger, as a client of the running process
-pnpm start check         # run a tick now and print what changed
-pnpm start --port 7500   # any laisso command and options follow pnpm start
-pnpm build               # build the dashboard alone
-pnpm dev                 # serve the dashboard from source, forwarding /api to the dev laisso (port 7434)
+npm i -g laisso
+laisso setup     # a coding agent sets up your repos and Pipelines with you
+laisso           # start Laisso; the dashboard is at http://localhost:7433
+laisso add "Add a dark mode toggle" --repo app
 ```
 
-A clone keeps out of the installed Laisso's way: `pnpm start` and `pnpm dev`
-use the Laisso home `~/.laisso-dev` on port 7434, where an installed `laisso`
-uses `~/.laisso` on 7433, so both can run at once. Set `LAISSO_HOME` or
-`LAISSO_PORT` to override either, such as `LAISSO_HOME=~/.laisso` to point dev
-at the real home on purpose. `LAISSO_PORT` only sets the port in a new
-home's `config.yaml`; an existing one keeps its `port:`. A dev build
-(version `0.0.0-dev`) shows a "dev" badge in the dashboard header and
-"(dev)" in the tab title, and `laisso status` starts with the version and
-Laisso home that answered.
+`laisso setup` opens your default coding agent in this terminal, in the
+Laisso home (`~/.laisso`). It asks one question at a time, shows each change
+before writing it, and works through:
 
-The package `@rbitco/laisso` ships prebuilt JavaScript, since Node will not
-run TypeScript from `node_modules`. `npm pack` typechecks, builds the
-dashboard, then bundles the CLI and server with esbuild into
-`dist/laisso.js` (with a source map, so stack traces show `.ts` lines). The
-tarball holds only `dist/` and `skills/`. To check one installs and serves:
+1. which coding agents you have, and the Agent Profiles that run them,
+2. which repos Laisso should work in, suggested from your checkouts and
+   `gh repo list`,
+3. a default Pipeline shaped to how you work, using only skills you already
+   have installed,
+4. more Pipelines for special kinds of work, until you say stop,
+5. a final `laisso doctor` check.
 
-```sh
-npm pack
-node scripts/smoke-test.ts rbitco-laisso-0.0.0-dev.tgz 0.0.0-dev
-```
+Pass `--profile <name>` to run setup under a different Agent Profile. The
+dashboard also offers a Set up Laisso button until a repo is added.
 
-To cut a release, tag main and push the tag:
+Without setup, Laisso still runs: the first start writes a commented
+`config.yaml` and a starter Pipeline (plan with you, implement, open the PR,
+answer review until it merges). Add repos to `config.yaml` by hand.
 
-```sh
-git fetch origin
-git tag vX.Y.Z origin/main && git push origin vX.Y.Z
-```
+## How it works
 
-`.github/workflows/release.yml` then runs on the homelab runner: tests,
-sets the version from the tag, packs, smoke-tests the tarball, publishes it
-to `npm.matty.rocks` and creates a GitHub Release. package.json stays
-`0.0.0-dev` in git.
+- A **Ticket** is one unit of work, made from a tracker issue or a prompt.
+  It runs in its own worktree on its own branch.
+- A **Pipeline** is the ordered list of **Stages** a Ticket walks through,
+  one YAML file per Pipeline.
+- A Stage is run by a coding agent (a **Runner**), headless or in a terminal
+  with you, or is an **Action**: a shell command such as moving the tracker
+  issue or running tests.
+- An **Agent Profile** says which Runner, model and permissions a Stage uses.
+- An **Artifact** is what a Stage must leave behind before the Ticket moves
+  on, such as commits on the branch, a PR or a file.
+- A Ticket is **Flagged** when it needs a person: its attempts or spend ran
+  out, or review feedback still stands. The dashboard says why and offers
+  the ways out.
 
-Everything Laisso owns lives under `~/.laisso` (`LAISSO_HOME` overrides it,
-and `LAISSO_DIRECTORY_NAME` changes just the directory's name under `~`):
-`config.yaml`, `pipelines/`, `tickets/`, `laisso.db`, `backups/`, `laisso.log`, `laisso.pid`.
-The first run writes a commented `config.yaml` and the default Pipeline and
-never touches either again. Before an upgrade migrates `laisso.db`, Laisso copies
-it to `backups/` (the newest 5 are kept); an older Laisso refuses to open a
-`laisso.db` a newer one has migrated.
+The full glossary is [CONTEXT.md](CONTEXT.md).
 
-Stages run under Agent Profiles defined in `config.yaml` (`profiles:`):
-each names a `runner` (`claude | codex | pi`) and may set a `model`,
-an `effort` (`low | medium | high | xhigh | max`), a `permission`
-(`auto | edits | full`; Pi has none and ignores it), extra `args` (argv
-before the prompt) and, for Codex, `skills_dir` (where its skill catalog
-lives, default `~/.agents/skills`). Unset effort keeps the Runner's
-default; unset permission keeps Laisso's per mode (Claude `auto` headless
-with prompts off, `acceptEdits` in a terminal; Codex workspace-write). Optional
-`headless:` and `human:` blocks set `model`, `effort`, `permission` and
-`args` for one mode only: a human Stage's Sessions take `human:`, the rest
-`headless:`. A block's fields replace the shared ones and its args follow
-the shared args; each Session records the merged result. A Stage
-runs its own `profile:`, else its Pipeline's, else its repo's
-`default_profile`, else the global one. A repo entry may carry its own
-`profiles:`; one named like a global profile replaces it whole for that
-repo's Tickets, with no field merge, and one may exist only for that
-repo. Intake checks profiles against the chosen repo; saving a Pipeline
-accepts a profile any repo has.
-Profiles are read when each Session starts, so an edit applies to the
-next Session without a restart. Codex ignores a skill mention whose path
-is outside its catalog without a word, so set `skills_dir` when the
-skills live elsewhere. A Pipeline still using `runner:` or
-`runnerOptions` is rewritten to profiles when Laisso starts.
+## Commands
 
-A new install ships `claude-fable`, `claude-opus` and `claude-sonnet`
-(Claude with that model alias, `permission: auto`, effort unset), with
-`default_profile: claude-opus`, plus commented Codex and Pi examples. The
-default Pipeline runs Grill, Plan and Code Review on `claude-fable`,
-Document on `claude-sonnet`, and Implement and Review on the default. An
-existing install keeps its files; its migration writes runner-only
-`claude`, `codex` and `pi` profiles and `default_profile: claude`.
+| Command                              | Does                                                      |
+| ------------------------------------ | --------------------------------------------------------- |
+| `laisso`                             | start Laisso: dashboard, tick and Sessions                |
+| `laisso setup`                       | set up repos and Pipelines with a coding agent            |
+| `laisso add <ref \| prompt>`         | make a Ticket from a tracker reference or a prompt        |
+| `laisso add <prompt> --pr <pr> --pipeline pr-review` | review a teammate's PR                    |
+| `laisso status [ticket]`             | print the Ledger, or one Ticket's detail                  |
+| `laisso check [ticket]`              | run a tick now and print what changed                     |
+| `laisso pr link \| unlink \| list`   | manage the PRs linked to a Ticket                         |
+| `laisso doctor`                      | list the tools Laisso needs and whether each is ready     |
+| `laisso skill install`               | install the Laisso skill for Claude Code and Codex        |
 
-Open terminal on a human Stage runs the Runner in a new terminal named
-for the Ticket and Stage. `terminal:` in `config.yaml` says where:
-`auto` (the default) opens a herdr tab when Laisso was started inside
-herdr, a tmux window when inside tmux, and a Terminal.app window
-otherwise; `herdr`, `tmux` or `terminal-app` names one outright. The
-window opens beside the `laisso` process, not the browser. Under `auto`
-a herdr or tmux that fails falls back to Terminal.app and logs why; a
-named one that fails is reported on Open terminal. `laisso doctor` says
-which applies.
+`laisso --help` lists every option.
 
-Take over in terminal steps into any headless Stage, running or Flagged:
-Laisso stops the Session (a Flag clears), opens its Runner session in a
-terminal, and the Stage is then worked as a human Stage until Mark done,
-Skip, Abandon or Hand back. Hand back ends the terminal Session and gives
-the Stage back to Laisso without spending an attempt: a Review Stage polls
-the PR at once and opens a Round for any Feedback that arrived meanwhile,
-and any other Stage starts a headless Session that re-enters the terminal's
-Runner session. For an approval step, give the drafting Stage
-`advance: false`: while the Ticket holds, Open <Stage> in terminal
-re-enters the finished draft without changing anything, and Start releases
-the next Stage.
+The Laisso skill teaches a coding agent how to write `config.yaml` and
+Pipelines and why a Ticket is Flagged, from docs that match the installed
+version. `laisso setup` installs it; after an upgrade, rerun `laisso skill
+install`, as `laisso doctor` will say.
 
-A Ticket may be given a name, in the Import Ticket dialog or later with
-Name or Rename on its page. The name then shows in place of its reference
-or short id in the dashboard, `laisso status`, notifications and terminal
-window names; branches and URLs keep the id, and the tracker never sees it.
+## Upgrading
 
-Every Ticket runs under a Budget: `rounds` (per repeating Stage),
-`attempts` (per Stage), `wallTime` (per headless Session) and `spend`
-(USD per Ticket). `config.yaml` sets the defaults, a Pipeline may
-tighten or loosen them (`budget:` on the Pipeline for `spend`, on a
-Stage for the rest), and Extend on a Ticket overrides both. Laisso
-retries an interrupted or exhausted Session while attempts remain and
-Flags the Ticket when they run out or the spend is used up. A Flagged
-Ticket offers six exits in the dashboard and the API: Retry, Resume,
-Extend, Mark done, Skip and Abandon.
+`npm update -g laisso`, then restart Laisso. The dashboard and `laisso
+status` say when a newer version is published, and when one is installed
+but not yet running. `npm i -g laisso@next` installs the latest preview from
+main; `npm i -g laisso@latest` goes back to the last release.
 
-Skip also passes over a Stage that has not started yet, such as a
-second review you don't need: from a Start gate, or while the Stage is
-ready or queued. The Pipeline's hold after that Stage still applies,
-and the Ticket page marks the Stage Skipped.
+## Guides
 
-`concurrency:` in `config.yaml` caps how many headless Sessions run at
-once across all Tickets (default 3). Terminal Sessions never hold a
-slot. Tickets past the cap queue in the order they became runnable and
-show their position in the Ledger; each tick starts the oldest in line
-as slots free up. A change to the cap applies on the next tick without
-a restart. Retry and Resume, being explicit human acts, start
-regardless of the cap.
+- [The Laisso home and editing config](docs/guide/home.md)
+- [Agent Profiles](docs/guide/profiles.md)
+- [Terminals and Take over](docs/guide/terminals.md)
+- [Budgets, Flags and concurrency](docs/guide/budgets.md)
+- [The Review loop](docs/guide/review-loop.md)
+- [Shutdown, restart and end of life](docs/guide/lifecycle.md)
 
-A Stage with `repeat: feedback` is the Review loop. Each tick Laisso
-polls the Ticket's PR through `gh` (comments, review threads, check
-runs on the head commit, the review decision) with ETags, so an
-unchanged PR costs nothing against the rate limit. New Feedback opens a
-Round: a Session whose prompt carries the snapshot of what to address
-and a marker (`<!-- laisso:<ticket>:<stage>:round-<n> -->`) the Runner
-ends each of its PR comments with, so its own replies are never taken
-for Feedback. To comment on your own PR without starting a Round, list
-logins under `review.ignore_authors`, or set `review.ignore_self: true`
-to ignore the login `gh` is authenticated as (a repo may set either
-under `repos.<name>.review`). Their PR comments, and threads no one
-else has joined, are never Feedback; a thread someone else has joined
-still is, and its Round reads every comment in it. Failed checks and a
-changes-requested verdict count whoever is involved. When the Round ends Laisso records how each item was
-addressed (a resolved thread, a marked reply, a new push) and Flags
-`review.unaddressed` for what still stands, `review.check_repeat` when
-the same check fails two Rounds running, and `review.pr_closed` when
-the PR closes unmerged. A merged PR finishes the Stage; green checks
-with nothing outstanding show as quiet. `laisso check` and the header's
-Check now run a tick and report what changed. The dot left of Check now
-pulses while a Tick runs and turns red while the dashboard can't reach
-Laisso; hover it for when the last Tick ran and the next is due.
+Field references for `config.yaml`, Pipelines and profiles are in
+[skills/laisso](skills/laisso/SKILL.md), with worked examples for GitHub
+and JIRA in [skills/laisso/examples](skills/laisso/examples).
 
-Ctrl-C stops every running headless Session by process group and
-records each as interrupted with reason shutdown before Laisso exits;
-terminal Sessions are left alone. On the next start, before the first
-tick, any Session row still marked running is reconciled the same way
-(a leftover process is killed and waited out first), and the first tick
-runs at once, so queued Tickets and interrupted runs and Rounds resume
-within seconds. Ctrl-C during that first tick is honoured too. A
-Session cut off by shutdown never counts as an attempt, and a Round cut
-off is run again against its own attempts, not the previous Round's.
+## Coming from Lasso
 
-A Ticket's end of life is final (ADR 0007). Done, when the last Stage
-completes or Mark done or Skip lands on it, removes the worktree and
-the local branch and clears every `laisso:*` label; the tracker's status
-stays where the Pipeline left it. Abandon kills the Ticket's headless
-Sessions, commits anything uncommitted as `wip: abandoned in Laisso` and
-pushes it when the branch has a remote, removes the worktree, keeps the
-branch, and closes the open Owned PRs you tick in its popover, each with
-a marked comment naming its head branch as kept. Unticked, merged and
-Referenced PRs are left alone. There is no
-Reopen: intaking the same issue again makes a new Ticket on the kept
-branch. The per-Ticket directory under `~/.laisso/tickets/` outlives
-both until the tick sweeps it `retention` days later (default 30);
-store rows are never swept. Done and Abandoned Tickets sit greyed
-behind the dashboard's "Show done and Abandoned" toggle.
+An install of `@rbitco/laisso` from the homelab registry switches with
+`npm uninstall -g @rbitco/laisso && npm i -g laisso`; its home is unchanged.
 
-Pipelines and `config.yaml` can be edited from the dashboard (the
-Pipelines and Config links in the header) or through `/api/pipelines`
-and `/api/config`. Edits change only the fields you touched and keep
-the file's comments and ordering; nothing is written that does not
-parse. Budget, concurrency, retention, branch prefix and notification
-changes apply at once; `port:` and `tick:` apply after a restart, and
-`repos:` stays a hand edit, though a config edit from the dashboard
-picks up any change to it made since Laisso started.
+Laisso was named Lasso. Install `laisso`, uninstall `@rbitco/lasso`, and set
+`LAISSO_DIRECTORY_NAME=.lasso` to keep using `~/.lasso` as it is: its
+`lasso.db`, `lasso.log` and backups are picked up, `LASSO_HOME` and
+`LASSO_PORT` still work, and Sessions and Actions get each `LAISSO_*`
+variable under its `LASSO_*` name too, so Action scripts written for Lasso
+run unchanged. Prompts that tell an agent to run `lasso route` or `lasso pr
+link` need `laisso` instead, as no `lasso` command is installed. `laisso
+skill install` removes the skill Lasso installed. Tracker issues keep their
+old `lasso:*` labels beside the new `laisso:*` ones until removed by hand.
 
-## Test
+## Contributing
 
-```sh
-pnpm typecheck
-pnpm test
-```
+See [CONTRIBUTING.md](CONTRIBUTING.md) for running from a clone, tests and
+releases. The spec is [docs/spec/laisso-v1.md](docs/spec/laisso-v1.md), and
+decisions are in [docs/adr](docs/adr).
 
-Tests drive the localhost JSON API end to end against a temporary Laisso home,
-with fake executables on `PATH` standing in for anything outside the process:
-the notifier, and `gh` and `acli` shims that answer from canned replies a test
-seeds and record every invocation for it to assert on (the fake Runner arrives
-with the slice that needs it). See `test/harness.ts`.
+## License
 
-Reference intake talks to the tracker through those same CLIs: `acli jira
-workitem view` and a JQL search per transition status for JIRA, `gh issue view`
-for GitHub. Both must be installed and authenticated for reference Tickets.
+[MIT](LICENSE)

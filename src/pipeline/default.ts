@@ -1,60 +1,33 @@
 /** The embedded default Pipeline, written to pipelines/default.yaml on first run and never touched again. */
-export const DEFAULT_PIPELINE_YAML = `# Laisso's default Pipeline. Edit freely: Laisso never overwrites this file.
-# Runner-run Stages take a prompt and/or skills; action Stages take an action.
-# A Runner Stage runs under the profile: it names, else the Pipeline's, else
-# config.yaml's default_profile. Thinking Stages use Fable, docs use Sonnet.
+export const DEFAULT_PIPELINE_YAML = `# Laisso's starter Pipeline. Edit freely: Laisso never overwrites this file.
+# It needs only a Runner and gh: no skills, no tracker Actions. \`laisso setup\`
+# helps you shape it to how you work. A Runner Stage runs under the profile:
+# it names, else the Pipeline's, else config.yaml's default_profile.
 
 stages:
-  - name: grill
-    profile: claude-fable
+  - name: plan
     human: true
     advance: false
-    skills: [grilling, domain-modeling, to-spec]
-    artifact: tracker-spec
+    artifact: file PLAN.md
     prompt: |
-      Grill the Ticket's idea until we share an understanding, sharpening
-      the glossary and recording ADRs as we go. Then publish the spec to the
-      tracker with to-spec. For a prompt Ticket, to-spec creates the issue.
-
-  - action: tracker.transition
-    with: { status: In Progress }
-
-  - name: plan
-    profile: claude-fable
-    skills: [codebase-design]
-    artifact: tracker-comment
-    prompt: |
-      Read the spec on the Ticket's issue and explore the repo. Write an
-      implementation plan: seams to test at, modules touched, test approach,
-      ordered steps. Post it as a comment on the issue.
+      Work out with me how to do this Ticket. Explore the repo, ask what you
+      need to know, and agree a plan: what changes and where, the tests that
+      prove it, and the order of the steps. Write the plan to PLAN.md at the
+      worktree root and change no code. I mark this Stage done when we agree.
 
   - name: implement
-    skills: [implement]
     artifact: commits-on-branch
     prompt: |
-      Implement the spec on the Ticket's issue, following the plan comment.
-      Commit to the current branch; do not push.
+      Carry out PLAN.md on the current branch. Add or update tests for the
+      change and run the repo's tests and linters until they pass. Commit as
+      you go, leaving PLAN.md out of every commit. Do not push.
 
-  - name: document
-    profile: claude-sonnet
-    skills: [domain-modeling]
+  - name: open-pr
     artifact: pr-exists
     prompt: |
-      Update repo docs, CONTEXT.md, and ADRs for the change on this branch.
-      Write the PR body from the spec and the diff. Push and open the PR.
-
-  - name: code-review
-    profile: claude-fable
-    skills: [code-review]
-    artifact: pr-review
-    prompt: |
-      Review each Owned PR of this Ticket ("laisso pr list" names them)
-      against its base with code-review. Post one PR review per Owned PR
-      with inline comments, each carrying Laisso's Stage marker, so the
-      Review Stage addresses them as Feedback. Leave Referenced PRs alone.
-
-  - action: tracker.transition
-    with: { status: In Review }
+      Push the branch and open a pull request with gh. Write its title and
+      body from PLAN.md and the diff: what changed, why, and how it was
+      tested. Leave PLAN.md out of the PR.
 
   - name: review
     repeat: feedback
@@ -66,7 +39,4 @@ stages:
       thread addressed only once it has a marked reply and is resolved.
       Leave a thread unresolved when you could not fix it, and say why in
       your reply.
-
-  - action: tracker.transition
-    with: { status: Done }
 `;

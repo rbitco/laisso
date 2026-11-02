@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 /** Laisso's own package name; a package.json with any other name is someone else's and the walk goes on past it. */
-export const PACKAGE_NAME = "@rbitco/laisso";
+export const PACKAGE_NAME = "laisso";
 
 /** Where Laisso's own files are: the same answer from a source checkout and from an installed bundle in any prefix. */
 export interface PackageRoot {

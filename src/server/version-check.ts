@@ -5,10 +5,10 @@ import type { Logger } from "./log.ts";
 
 /** How often Laisso asks the registry again after the check at start. */
 export const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
-/** Off the LAN npm can retry for minutes; past this the latest version is simply unknown. */
+/** Offline npm can retry for minutes; past this the latest version is simply unknown. */
 const NPM_TIMEOUT_MS = 30_000;
 
-/** The latest published version through the machine's own npm config, or null on any failure (off the LAN, homelab down, no npm). */
+/** The latest published version through the machine's own npm config, or null on any failure (offline, registry down, no npm). */
 export function npmLatest(): Promise<string | null> {
   return new Promise((resolve) => {
     execFile("npm", ["view", PACKAGE_NAME, "version"], { encoding: "utf8", timeout: NPM_TIMEOUT_MS }, (error, stdout) => {

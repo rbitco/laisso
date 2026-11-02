@@ -9,14 +9,14 @@ export const PR_REVIEW_PIPELINE_YAML = `# Laisso's pr-review Pipeline. Edit free
 
 stages:
   - name: review-pr
-    profile: claude-fable
-    skills: [code-review]
     artifact: file review-findings.md
     prompt: |
-      Review each Referenced PR on this Ticket with code-review; run
-      \`laisso pr list --json\` to see them. The worktree starts at the first
-      one's head commit. Write every finding, grouped by PR, with file and
-      line, to review-findings.md at the worktree root.
+      Review each Referenced PR on this Ticket; run \`laisso pr list --json\`
+      to see them. The worktree starts at the first one's head commit. Read
+      each PR's description and its diff against its base, and look for
+      bugs, missing tests, and changes that break what the description
+      promises. Write every finding, grouped by PR, with file and line, to
+      review-findings.md at the worktree root.
       Do not post anything to any PR: no review, no comment, no approval.
       Do not push. A human reads the findings and posts them.
 `;

@@ -25,11 +25,11 @@ describe("the package root", () => {
   it("is found from an installed bundle, past the package.json files of the prefix around it", async () => {
     const prefix = await layout({
       "package.json": JSON.stringify({ name: "someone-else", version: "9.9.9" }),
-      "lib/node_modules/@rbitco/laisso/package.json": laissoPackage("1.2.3"),
-      "lib/node_modules/@rbitco/laisso/dist/laisso.js": "",
-      "lib/node_modules/@rbitco/laisso/node_modules/yaml/package.json": JSON.stringify({ name: "yaml", version: "2.0.0" }),
+      "lib/node_modules/laisso/package.json": laissoPackage("1.2.3"),
+      "lib/node_modules/laisso/dist/laisso.js": "",
+      "lib/node_modules/laisso/node_modules/yaml/package.json": JSON.stringify({ name: "yaml", version: "2.0.0" }),
     });
-    const root = path.join(prefix, "lib/node_modules/@rbitco/laisso");
+    const root = path.join(prefix, "lib/node_modules/laisso");
     expect(findPackageRoot(path.join(root, "dist"))).toEqual({ root, version: "1.2.3", dashboardDir: path.join(root, "dist", "dashboard"), skillDir: path.join(root, "skills", "laisso"), checkout: false });
   });
 
@@ -39,9 +39,9 @@ describe("the package root", () => {
   });
 
   it("errors naming the package when no Laisso package.json is above the start", async () => {
-    const dir = await layout({ "package.json": JSON.stringify({ name: "laisso", version: "1.0.0" }) });
+    const dir = await layout({ "package.json": JSON.stringify({ name: "@rbitco/laisso", version: "1.0.0" }) });
     expect(() => findPackageRoot(dir)).toThrow(PackageRootNotFound);
-    expect(() => findPackageRoot(dir)).toThrow(/cannot find Laisso's package\.json \(name @rbitco\/laisso\)/);
+    expect(() => findPackageRoot(dir)).toThrow(/cannot find Laisso's package\.json \(name laisso\)/);
   });
 
   it("is this repo when run from source", () => {

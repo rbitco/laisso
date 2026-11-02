@@ -24,7 +24,7 @@ export class DashboardMissing extends Error {
     super(
       checkout
         ? `the dashboard is not built (no ${page}); run pnpm build, or pnpm start, which builds first`
-        : `the dashboard is missing (no ${page}); the install is broken; reinstall with npm i -g @rbitco/laisso`,
+        : `the dashboard is missing (no ${page}); the install is broken; reinstall with npm i -g laisso`,
     );
   }
 }

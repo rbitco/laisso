@@ -56,6 +56,11 @@ export const claudeAdapter: RunnerAdapter = {
     return { argv, cwd: request.cwd, env };
   },
 
+  interactive(prompt, profile, cwd) {
+    const mode = profile.permission ? PERMISSION_MODES[profile.permission] : "acceptEdits";
+    return { argv: ["claude", "--permission-mode", mode, ...profileArgs(profile, "--model", (level) => ["--effort", level]), prompt], cwd, env: {} };
+  },
+
   parse(stdout: string, request: Pick<RunRequest, "cwd" | "sessionId">): Outcome {
     const records = jsonLines(stdout);
     const result = records.filter((r) => r.type === "result").at(-1) as ResultRecord | undefined;

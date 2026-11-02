@@ -468,35 +468,31 @@ describe("the shipped profiles", () => {
     return laisso;
   }
 
-  it("launches a fresh home's default Pipeline with Fable for Grill, Plan and Code Review, Opus for Implement, and Sonnet for Document, all in auto", async () => {
+  it("launches a fresh home's default Pipeline on default_profile, Opus in auto, for the human plan and every headless Stage", async () => {
     const laisso = await freshHome();
     const ticket = await laisso.api<IntakeResult>("/api/tickets", { method: "POST", body: JSON.stringify({ input: "Add dark mode", repo: "app", pipeline: "default" }) });
 
-    // Grill is a human Session: Claude in auto, not the acceptEdits baseline.
+    // Plan is a human Session: Claude in auto, not the acceptEdits baseline, and no skill ahead of the preamble.
     const opened = await openTerminal(laisso, ticket.id);
-    expect(opened.session!.profile).toEqual({ name: "claude-fable", runner: "claude", model: "fable", effort: null, permission: "auto", args: [] });
+    expect(opened.session!.profile).toEqual({ name: "claude-opus", runner: "claude", model: "opus", effort: null, permission: "auto", args: [] });
     const [terminal] = await laisso.terminals();
-    expect(readFileSync(terminal!.launcher!, "utf8")).toContain(`exec 'claude' '--session-id' '${opened.session!.id}' '--permission-mode' 'auto' '--name' 'Laisso: ${ticket.id.slice(-8)} grill' '--model' 'fable' '/grilling`);
+    expect(readFileSync(terminal!.launcher!, "utf8")).toContain(`exec 'claude' '--session-id' '${opened.session!.id}' '--permission-mode' 'auto' '--name' 'Laisso: ${ticket.id.slice(-8)} plan' '--model' 'opus' 'You are working Laisso Ticket`);
 
-    // Each later Stage is reached by skipping the one before once it Flags: a prompt Ticket has no issue to transition,
-    // and the fake claude exits with nothing, so each headless Stage runs out of attempts.
+    // Each later Stage is reached by skipping the one before once it Flags: the fake claude exits with nothing, so each
+    // headless Stage runs out of attempts.
     const flaggedAt = (stage: string) => waitFor(async () => { const d = await detailOf(laisso, ticket.id); return d.stage.name === stage && d.flag && !d.session?.running ? d : null; }, `${stage} to be Flagged`);
     const skipTo = async (stage: string) => {
       const skipped = await pull(laisso, ticket.id, "skip");
-      // Grill does not advance on its own: the next Stage waits on Start.
+      // Plan does not advance on its own: the next Stage waits on Start.
       if (skipped.triggers.some((t) => t.action === "start")) await pull(laisso, ticket.id, "start");
       await checkNow(laisso);
       return flaggedAt(stage);
     };
-    await skipTo("transition-in-progress");
-    for (const stage of ["plan", "implement", "document", "code-review"]) await skipTo(stage);
+    for (const stage of ["implement", "open-pr"]) await skipTo(stage);
 
     const calls = await laisso.runner.calls();
-    expect(calls.map((c) => c.argv[c.argv.indexOf("--model") + 1])).toEqual(["fable", "fable", "opus", "opus", "sonnet", "sonnet", "fable", "fable"]);
+    expect(calls.map((c) => c.argv[c.argv.indexOf("--model") + 1])).toEqual(["opus", "opus", "opus", "opus"]);
     for (const call of calls) expect(call.argv.slice(6, 10)).toEqual(["--permission-mode", "auto", "--permission-prompts", "none"]);
-    const sessions = (await detailOf(laisso, ticket.id)).sessions;
-    expect(sessions.find((s) => s.stage === "implement")!.profile).toEqual({ name: "claude-opus", runner: "claude", model: "opus", effort: null, permission: "auto", args: [] });
-    expect(sessions.find((s) => s.stage === "document")!.profile).toMatchObject({ name: "claude-sonnet", model: "sonnet" });
   });
 });
 

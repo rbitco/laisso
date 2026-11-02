@@ -1,8 +1,9 @@
 {
-  "name": "@rbitco/laisso",
+  "name": "laisso",
   "version": "0.0.0-dev",
   "type": "module",
   "description": "Drives a Ticket through a Pipeline of Stages using a coding-agent Runner.",
+  "license": "MIT",
   "bin": {
     "laisso": "dist/laisso.js"
   },
@@ -13,7 +14,7 @@
     "skills"
   ],
   "publishConfig": {
-    "registry": "https://npm.matty.rocks/"
+    "registry": "https://registry.npmjs.org/"
   },
   "engines": {
     "node": ">=24"

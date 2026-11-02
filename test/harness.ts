@@ -21,10 +21,10 @@ const BIN = path.join(REPO_ROOT, "bin", "laisso.js");
 
 import { DEFAULT_CONFIG, type Config, type RepoConfig } from "../src/server/config.ts";
 import { parsePipeline } from "../src/pipeline/load.ts";
-import { DEFAULT_PIPELINE_YAML } from "../src/pipeline/default.ts";
+import { CLASSIC_PIPELINE_YAML } from "./fixtures/classic-pipeline.ts";
 import { findOnPath } from "../src/tools/tools.ts";
 
-const DEFAULT_PIPELINE_STATUSES = [...new Set(parsePipeline("default", DEFAULT_PIPELINE_YAML).stages.flatMap((s) => (s.kind === "action" && "status" in s ? [s.status] : [])))];
+const DEFAULT_PIPELINE_STATUSES = [...new Set(parsePipeline("default", CLASSIC_PIPELINE_YAML).stages.flatMap((s) => (s.kind === "action" && "status" in s ? [s.status] : [])))];
 
 /** What a test writes to config.yaml: any subset of the real Config. */
 /** An Action as a test writes it: params and timeout may be left to their defaults. */
@@ -333,8 +333,8 @@ export interface LaissoWithRepos {
 
 /**
  * A running Laisso whose config names one real temp git repo per entry, plus
- * any extra config and Pipelines. The default Pipeline transitions through
- * three JIRA statuses; the acli shim is seeded to accept each so a reference
+ * any extra config and Pipelines. Its default Pipeline is the classic one, unless the test gives its own; that one
+ * transitions through three JIRA statuses; the acli shim is seeded to accept each so a reference
  * intake into a JIRA repo passes the status check without every test saying so.
  */
 export async function startLaissoWithRepos(specs: Record<string, RepoSpec>, extra: LaissoConfig = {}, pipelines: Record<string, string> = {}, env?: Record<string, string>): Promise<LaissoWithRepos> {
@@ -347,7 +347,7 @@ export async function startLaissoWithRepos(specs: Record<string, RepoSpec>, extr
     config[name] = { tracker, project: spec.project ?? (tracker === "jira" ? name.toUpperCase() : `owner/${name}`), path: repos[name].path, pipeline: spec.pipeline ?? "default", ...(spec.actions ? { actions: spec.actions } : {}), ...(spec.profiles ? { profiles: spec.profiles } : {}), ...(spec.default_profile ? { default_profile: spec.default_profile } : {}) };
   }
   await writeConfig(home, { tick: 3600, repos: config, ...extra });
-  for (const [name, yaml] of Object.entries(pipelines)) {
+  for (const [name, yaml] of Object.entries({ default: CLASSIC_PIPELINE_YAML, ...pipelines })) {
     await mkdir(path.join(home, "pipelines"), { recursive: true });
     await writeFile(path.join(home, "pipelines", `${name}.yaml`), yaml);
   }

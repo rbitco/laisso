@@ -31,7 +31,7 @@ describe("the version notice", () => {
   });
 
   it("says how to upgrade, how to finish an upgrade, or nothing", () => {
-    expect(noticeText(available("1.3.0"))).toBe("v1.3.0 available: npm update -g @rbitco/laisso");
+    expect(noticeText(available("1.3.0"))).toBe("v1.3.0 available: npm update -g laisso");
     expect(noticeText(restart("1.3.0"))).toBe("v1.3.0 installed: restart laisso to use it");
     expect(noticeText(none)).toBeNull();
   });
@@ -60,7 +60,7 @@ describe("the version check", () => {
   });
 
   it("says nothing when the registry cannot be asked or the package on disk cannot be read", async () => {
-    const { versions } = check({ onDisk: () => null, latest: () => Promise.reject(new Error("getaddrinfo ENOTFOUND npm.matty.rocks")) });
+    const { versions } = check({ onDisk: () => null, latest: () => Promise.reject(new Error("getaddrinfo ENOTFOUND registry.npmjs.org")) });
     expect(await versions.check()).toEqual(none);
   });
 

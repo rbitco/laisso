@@ -13,6 +13,7 @@ import type { Pipeline, RunnerStage } from "../pipeline/load.ts";
 import { requestFor, type Command, type RunRequest, type RunnerAdapter } from "../runner/adapter.ts";
 import { adapterFor } from "../runner/adapters.ts";
 import { shellQuote } from "../macos.ts";
+import { installSetupSkill, setupCommand } from "../setup/command.ts";
 import { chooseTerminal, macosTerminal, openerFor, TerminalError, type TerminalKind } from "./openers.ts";
 
 export { TerminalError };
@@ -158,6 +159,21 @@ export class Terminal {
     writeFileSync(launcher, launcherScript(command, note), { mode: 0o755 });
     const terminal = await this.openWindow(config.terminal, launcher, request.name!, command.cwd);
     return { launcher, terminal };
+  }
+
+  /**
+   * The dashboard's Set up Laisso: `laisso setup`'s Runner in a new terminal, in the Laisso home, with the Laisso
+   * skill installed first. No Ticket and no Session row: the window is the person's.
+   */
+  async openSetup(): Promise<{ launcher: string; terminal: TerminalKind; profile: string }> {
+    const config = currentConfig(this.deps.home, this.deps.config);
+    const { command, profile } = setupCommand(this.deps.home, config);
+    installSetupSkill(this.env);
+    const launcher = path.join(this.deps.home.root, "setup.command");
+    writeFileSync(launcher, launcherScript(command), { mode: 0o755 });
+    const terminal = await this.openWindow(config.terminal, launcher, "Laisso: setup", command.cwd);
+    this.deps.log.info("setup.opened", { launcher, terminal, profile });
+    return { launcher, terminal, profile };
   }
 
   /**

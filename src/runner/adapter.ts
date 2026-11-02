@@ -97,6 +97,8 @@ export interface RunnerAdapter {
   /** Whether the Runner takes the session id Laisso chose, or assigns its own for `findSession` to recover. */
   sessionIds: "laisso" | "runner";
   command(request: RunRequest): Command;
+  /** The Runner in a terminal on `prompt` alone, outside any Ticket (`laisso setup`): a person is there, as on a human Stage. */
+  interactive(prompt: string, profile: ProfileSettings, cwd: string): Command;
   parse(stdout: string, request: Pick<RunRequest, "cwd" | "sessionId">): Outcome;
   /** The agent's own words in one complete line of headless stdout, or null when the line holds none: the Latest Message as it streams. */
   message(line: string): string | null;

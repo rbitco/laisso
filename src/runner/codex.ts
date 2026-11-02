@@ -2,7 +2,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { renderPrompt, ticketEnv, profileArgs, jsonLines, str, obj, type RunnerAdapter, type RunRequest, type Command, type Outcome } from "./adapter.ts";
-import type { Permission } from "../server/config.ts";
+import type { Permission, ProfileSettings } from "../server/config.ts";
 
 interface Item {
   type?: unknown;
@@ -33,6 +33,17 @@ const PERMISSION_FLAGS: Record<Permission, string[]> = {
 /** Network on under workspace-write (the baseline, edits, and auto's review); full has no sandbox to open. Probed on Codex 0.162. */
 const NETWORK = ["-c", "sandbox_workspace_write.network_access=true"];
 
+/** A profile's model, effort and extra args as Codex flags. */
+function codexArgs(profile: ProfileSettings): string[] {
+  return profileArgs(profile, "-m", (level) => ["-c", `model_reasoning_effort=${level}`]);
+}
+
+/** A profile's permission as Codex's sandbox flags, in place of the workspace-write baseline; network stays on unless full. */
+function sandboxFor(profile: ProfileSettings): string[] {
+  const permission = profile.permission;
+  return [...(permission ? PERMISSION_FLAGS[permission] : ["-s", "workspace-write"]), ...(permission === "full" ? [] : NETWORK)];
+}
+
 /** Codex's thread index; the name carries its schema version, so a newer Codex leaves resume finding nothing. */
 const STATE_DB = "state_5.sqlite";
 export const codexAdapter: RunnerAdapter = {
@@ -45,12 +56,11 @@ export const codexAdapter: RunnerAdapter = {
     const prompt = renderPrompt(request, (name) => `[$${name}](${path.join(skillsDir, name, "SKILL.md")})`);
     // A terminal runs under the shell's environment: the home Laisso reads threads from must be the one Codex writes.
     const env = { ...ticketEnv(request), ...(process.env.CODEX_HOME ? { CODEX_HOME: process.env.CODEX_HOME } : {}) };
-    const args = profileArgs(request.profile, "-m", (level) => ["-c", `model_reasoning_effort=${level}`]);
+    const args = codexArgs(request.profile);
     // Codex refuses a repeated -m, -s or -a, so a profile's permission is emitted alone in place of the baseline,
     // and the baseline -a never (a no-op under exec) goes with it: --dangerously-bypass-approvals-and-sandbox refuses -a.
-    const permission = request.profile.permission;
-    const sandbox = [...(permission ? PERMISSION_FLAGS[permission] : ["-s", "workspace-write"]), ...(permission === "full" ? [] : NETWORK)];
-    const approval = permission ? [] : ["-a", "never"];
+    const sandbox = sandboxFor(request.profile);
+    const approval = request.profile.permission ? [] : ["-a", "never"];
     if (request.mode === "terminal") {
       if (request.resume) return { argv: ["codex", "resume", request.runnerSessionId ?? request.sessionId, ...sandbox, ...args], cwd: request.cwd, env };
       return { argv: ["codex", ...sandbox, ...args, prompt], cwd: request.cwd, env };
@@ -58,6 +68,11 @@ export const codexAdapter: RunnerAdapter = {
     // `exec resume` takes no sandbox, approval or cwd of its own: the permission goes top-level and the cwd is the process's.
     if (request.resume) return { argv: ["codex", ...approval, ...sandbox, "exec", "resume", "--json", ...args, request.runnerSessionId ?? request.sessionId, prompt], cwd: request.cwd, env };
     return { argv: ["codex", ...approval, "exec", "--json", "-C", request.cwd, ...sandbox, ...args, prompt], cwd: request.cwd, env };
+  },
+
+  interactive(prompt, profile, cwd) {
+    const env: Record<string, string> = process.env.CODEX_HOME ? { CODEX_HOME: process.env.CODEX_HOME } : {};
+    return { argv: ["codex", ...sandboxFor(profile), ...codexArgs(profile), prompt], cwd, env };
   },
 
   parse(stdout: string): Outcome {

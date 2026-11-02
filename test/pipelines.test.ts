@@ -608,13 +608,13 @@ describe("the pr-review Pipeline", () => {
     expect(await pipelineText(again, "pr-review")).toBe(edited);
   });
 
-  it("loads with one headless Stage that runs code-review to a file Artifact, and no tracker Actions", async () => {
+  it("loads with one headless Stage that needs no skill, writes a file Artifact, and has no tracker Actions", async () => {
     const pipeline = parsePipeline("pr-review", PR_REVIEW_PIPELINE_YAML);
     expect(() => checkActions(pipeline, {})).not.toThrow();
     expect(pipeline.stages).toHaveLength(1);
     const stage = pipeline.stages[0]!;
     if (stage.kind !== "runner") throw new Error("pr-review's Stage is not a Runner Stage");
-    expect(stage).toMatchObject({ name: "review-pr", human: false, skills: ["code-review"], artifact: "file review-findings.md" });
+    expect(stage).toMatchObject({ name: "review-pr", human: false, skills: [], profile: null, artifact: "file review-findings.md" });
     expect(fileArtifact(stage.artifact!)).toBe("review-findings.md");
     // It reads the Referenced PRs and posts nothing: the human does.
     expect(stage.prompt).toContain("laisso pr list --json");

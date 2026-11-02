@@ -7,11 +7,13 @@ import { pr as prCommand } from "./pr.ts";
 import { route } from "./route.ts";
 import { doctor } from "./doctor.ts";
 import { skill } from "./skill.ts";
+import { setup } from "./setup.ts";
 
 export const DEFAULT_PORT = 7433;
 
 const USAGE = `usage:
   laisso                     start the Laisso process (dashboard, tick, Sessions)
+  laisso setup               set up repos and Pipelines with a coding agent, here in this terminal
   laisso add <ref | prompt>  intake a tracker reference or a prompt as a Ticket
   laisso add <prompt> --pr <pr> --pipeline pr-review
                             review a teammate's PR; the findings land in the worktree
@@ -35,7 +37,8 @@ options:
   --referenced     pr link: link for context only, not as the Ticket's own work
   --note <text>    route: why, for the Stage the Route goes to; else the run's last line of output
   --clear          route: drop the Route picked
-  --dry-run        skill install: print what would be written, write nothing`;
+  --dry-run        skill install: print what would be written, write nothing
+  --profile <n>    setup: the Agent Profile to run it under; default_profile otherwise`;
 
 export async function main(argv: string[]): Promise<number> {
   const { values, positionals } = parseArgs({
@@ -54,6 +57,7 @@ export async function main(argv: string[]): Promise<number> {
       note: { type: "string" },
       clear: { type: "boolean", default: false },
       "dry-run": { type: "boolean", default: false },
+      profile: { type: "string" },
       help: { type: "boolean", short: "h", default: false },
     },
   });
@@ -94,6 +98,8 @@ export async function main(argv: string[]): Promise<number> {
       return route({ portFlag, name: rest[0], note: typeof values.note === "string" ? values.note : undefined, clear: Boolean(values.clear), json: Boolean(values.json) });
     case "doctor":
       return doctor({ json: Boolean(values.json) });
+    case "setup":
+      return setup({ profile: typeof values.profile === "string" ? values.profile : undefined });
     case "skill":
       return skill({ action: rest[0], dryRun: Boolean(values["dry-run"]), json: Boolean(values.json) });
     default:

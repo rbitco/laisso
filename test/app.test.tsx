@@ -245,9 +245,9 @@ describe("the version notice", () => {
 
   it("shows in the header when Laisso has one, and follows it as it changes", async () => {
     const laisso = fakeLaisso();
-    laisso.state.version = { version: "1.2.0", notice: { kind: "available", version: "1.3.0" }, text: "v1.3.0 available: npm update -g @rbitco/laisso" };
+    laisso.state.version = { version: "1.2.0", notice: { kind: "available", version: "1.3.0" }, text: "v1.3.0 available: npm update -g laisso" };
     render(<App />);
-    expect(await screen.findByText("v1.3.0 available: npm update -g @rbitco/laisso")).toBeTruthy();
+    expect(await screen.findByText("v1.3.0 available: npm update -g laisso")).toBeTruthy();
     laisso.state.version = { version: "1.2.0", notice: { kind: "restart", version: "1.3.0" }, text: "v1.3.0 installed: restart laisso to use it" };
     send("version");
     expect(await screen.findByText("v1.3.0 installed: restart laisso to use it")).toBeTruthy();
