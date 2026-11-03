@@ -6,6 +6,11 @@ a Pipeline of Stages, such as plan, implement, open the PR and answer review,
 using Claude Code, Codex or Pi. Each Ticket gets its own git worktree. Every
 Ticket shows on a local dashboard, where you step in when a Stage needs you.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/ticket-dark.png">
+  <img alt="The Laisso dashboard showing a Ticket in its review Stage: the Pipeline track, the latest Session with the PR feedback it addressed, the Ticket's PR and its Budget." src="docs/images/ticket-light.png">
+</picture>
+
 ## Requirements
 
 - macOS. Human Stages open in Terminal.app, tmux or herdr.
