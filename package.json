@@ -4,6 +4,10 @@
   "type": "module",
   "description": "Drives a Ticket through a Pipeline of Stages using a coding-agent Runner.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rbitco/laisso.git"
+  },
   "bin": {
     "laisso": "dist/laisso.js"
   },

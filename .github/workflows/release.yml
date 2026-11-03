@@ -18,6 +18,9 @@ on:
 
 permissions:
   contents: write
+  # npm trusted publishing: npmjs trusts this workflow's OIDC token, so
+  # no npm token is stored anywhere (ADR 0015).
+  id-token: write
 
 concurrency:
   group: release
@@ -34,8 +37,9 @@ jobs:
           node-version: 24
 
       # The rbitco org allows only GitHub-owned and verified actions, so
-      # pnpm comes from npm rather than pnpm/action-setup.
-      - run: npm install --global pnpm@8
+      # pnpm comes from npm rather than pnpm/action-setup. Trusted
+      # publishing needs npm 11.5.1 or later.
+      - run: npm install --global pnpm@8 npm@^11.5.1
 
       - run: pnpm install --frozen-lockfile
 
@@ -65,17 +69,11 @@ jobs:
       # does not install and serve as $VERSION.
       - run: node scripts/smoke-test.ts "laisso-$VERSION.tgz" "$VERSION"
 
-      # NPMJS_TOKEN is an npmjs granular access token that may publish
-      # laisso.
+      # npmjs trusts rbitco/laisso's release.yml as a publisher (with
+      # publish and dist-tag allowed), and adds provenance.
       - name: Publish to npmjs
         if: github.ref_type == 'tag'
-        env:
-          NPMJS_TOKEN: ${{ secrets.NPMJS_TOKEN }}
-        run: |
-          npmrc="$RUNNER_TEMP/.npmrc"
-          echo "//registry.npmjs.org/:_authToken=${NPMJS_TOKEN}" > "$npmrc"
-          npm publish "laisso-$VERSION.tgz" --tag "$DIST_TAG" --userconfig "$npmrc"
-          rm -f "$npmrc"
+        run: npm publish "laisso-$VERSION.tgz" --tag "$DIST_TAG"
 
       - name: GitHub Release
         if: github.ref_type == 'tag'
