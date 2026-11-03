@@ -59,13 +59,13 @@ describe("installing the skill over Lasso's", () => {
   it("removes the copy Lasso stamped", () => {
     const dir = skillsDir();
     writeFileSync(path.join(dir, "lasso", ".lasso-version"), "0.13.0\n");
-    installSkill(findPackageRoot().skillDir, [{ agent: "claude", dir: path.join(dir, "laisso") }], "1.0.0");
+    installSkill(findPackageRoot().skillDir, [{ skill: "laisso", agent: "claude", dir: path.join(dir, "laisso") }], "1.0.0");
     expect([existsSync(path.join(dir, "lasso")), existsSync(path.join(dir, "laisso", "SKILL.md"))]).toEqual([false, true]);
   });
 
   it("leaves a lasso skill Lasso did not install", () => {
     const dir = skillsDir();
-    installSkill(findPackageRoot().skillDir, [{ agent: "claude", dir: path.join(dir, "laisso") }], "1.0.0");
+    installSkill(findPackageRoot().skillDir, [{ skill: "laisso", agent: "claude", dir: path.join(dir, "laisso") }], "1.0.0");
     expect(existsSync(path.join(dir, "lasso", "SKILL.md"))).toBe(true);
   });
 });

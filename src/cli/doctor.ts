@@ -65,7 +65,7 @@ const TERMINAL_NAME: Record<TerminalChoice["kind"], string> = { herdr: "a herdr 
 
 /** One agent's copy of the skill, with the fix when it is not this Laisso's. */
 function skillLine(s: SkillStatus, version: string): string {
-  const head = `laisso skill for ${s.agent} (${s.dir}): `;
+  const head = `${s.skill} skill for ${s.agent} (${s.dir}): `;
   if (s.state === "current") return `${head}current, Laisso ${version}`;
   if (s.state === "missing") return `${head}missing; run laisso skill install`;
   return `${head}from ${s.installed === null ? "an unknown version" : `Laisso ${s.installed}`}, this is Laisso ${version}; run laisso skill install`;

@@ -20,7 +20,7 @@ async function setupHome() {
 }
 
 describe("laisso setup", () => {
-  it("makes a fresh home, installs the skill, and runs default_profile's Runner in the home on the setup prompt", async () => {
+  it("makes a fresh home, installs the skills, and runs default_profile's Runner in the home on a prompt naming laisso-setup", async () => {
     const { home, userHome, setup, runner } = await setupHome();
     await rm(path.join(home, "config.yaml"));
     const result = await setup();
@@ -29,6 +29,8 @@ describe("laisso setup", () => {
 
     expect(readFileSync(path.join(home, "pipelines", "default.yaml"), "utf8")).toBe(DEFAULT_PIPELINE_YAML);
     expect(existsSync(path.join(userHome, ".claude", "skills", "laisso", "SKILL.md"))).toBe(true);
+    expect(existsSync(path.join(userHome, ".claude", "skills", "laisso-setup", "SKILL.md"))).toBe(true);
+    expect(result.stdout).toContain(`installed the laisso-setup skill for claude in ${path.join(userHome, ".claude", "skills", "laisso-setup")}`);
 
     const [call, ...more] = await runner.calls();
     expect(more).toEqual([]);
@@ -36,7 +38,7 @@ describe("laisso setup", () => {
     expect(call!.argv.slice(0, 5)).toEqual(["claude", "--permission-mode", "auto", "--model", "opus"]);
     const prompt = call!.argv.at(-1)!;
     expect(prompt).toContain(`Laisso's home is ${home}`);
-    expect(prompt).toContain(path.join(findPackageRoot().skillDir, "SKILL.md"));
+    expect(prompt).toContain(`the laisso-setup skill (${path.join(findPackageRoot().skillsDir, "laisso-setup", "SKILL.md")})`);
     expect(prompt).toContain("http://localhost:7433");
   });
 

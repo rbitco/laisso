@@ -25,7 +25,7 @@ const USAGE = `usage:
   laisso route <name> [--note "..."]  in an Action: leave the Stage by that Route if it exits 0
   laisso route --clear            in an Action: drop the Route picked, so the Ticket walks forward
   laisso doctor              list the tools Laisso needs, whether each is found and logged in
-  laisso skill install       copy the Laisso skill to where Claude Code and Codex look for skills
+  laisso skill install       copy the Laisso skills to where Claude Code and Codex look for skills
 options:
   --port <n>       port for the server, or the server to talk to
   --json           machine-readable output for client commands
