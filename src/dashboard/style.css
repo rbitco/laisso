@@ -390,6 +390,8 @@ dialog.modal::backdrop { background: rgba(0, 0, 0, 0.55); backdrop-filter: blur(
 .session .head { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
 .session .head strong { color: var(--term-bright); }
 .session .meta { color: var(--term-dim); }
+.session .feedback a { color: var(--term-ink); text-decoration-color: var(--term-dim); text-underline-offset: 3px; }
+.session .feedback a:hover { color: var(--term-bright); }
 .session .feedback { display: grid; gap: 4px; margin: 8px 0; font-size: 13px; }
 .session .feedback h4 { margin: 0; font-size: 12px; font-weight: 500; color: var(--term-dim); }
 .session .feedback .row { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
