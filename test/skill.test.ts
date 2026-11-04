@@ -11,6 +11,7 @@ import { skill } from "../src/cli/skill.ts";
 import { doctor, renderDoctor } from "../src/cli/doctor.ts";
 
 const SKILL = findPackageRoot().skillDir;
+const SETUP_SKILL = path.join(findPackageRoot().skillsDir, "laisso-setup");
 const VERSION = findPackageRoot().version;
 
 /** Every file under `dir`, relative, sorted. */
@@ -103,6 +104,29 @@ describe("the skill's examples", () => {
   });
 });
 
+describe("the laisso-setup skill", () => {
+  const text = readFileSync(path.join(SETUP_SKILL, "SKILL.md"), "utf8");
+
+  it("has frontmatter naming it and saying when to use it", () => {
+    const meta = parse(/^---\n([\s\S]*?)\n---\n/.exec(text)![1]!) as { name?: unknown; description?: unknown };
+    expect(meta.name).toBe("laisso-setup");
+    expect(meta.description).toMatch(/laisso setup/);
+  });
+
+  it("links only to files it or the laisso skill beside it has", () => {
+    for (const [, target] of text.matchAll(/\]\(([^)#\s]+)(?:#[^)]*)?\)/g)) {
+      expect(existsSync(path.join(SETUP_SKILL, target!)), `links ${target}`).toBe(true);
+    }
+  });
+
+  it("explains every section before it asks anything", () => {
+    const sections = text.split(/^### \d+\. /m).slice(1);
+    expect(sections).toHaveLength(7);
+    for (const section of sections) expect(section.split("\n").find((line) => line.startsWith("**")), section.split("\n")[0]).toMatch(/^\*\*Explain:\*\*/);
+    expect(text).toContain("Step N of 7");
+  });
+});
+
 describe("the skill on a Ticket's PRs", () => {
   const prs = readFileSync(path.join(SKILL, "prs.md"), "utf8");
   const context = readFileSync(path.join(findPackageRoot().root, "CONTEXT.md"), "utf8");
@@ -142,7 +166,7 @@ function capture(): { out: () => string; restore: () => void } {
 afterEach(() => vi.restoreAllMocks());
 
 describe("laisso skill install", () => {
-  it("copies the skill into ~/.claude/skills/laisso, stamped with the version", async () => {
+  it("copies the laisso and laisso-setup skills into ~/.claude/skills, stamped with the version", async () => {
     const home = tempHome();
     const out = capture();
     expect(await skill({ action: "install", dryRun: false, json: false, userHome: home })).toBe(0);
@@ -151,7 +175,10 @@ describe("laisso skill install", () => {
     expect(filesUnder(dir)).toEqual([...filesUnder(SKILL), VERSION_FILE].sort());
     expect(readFileSync(path.join(dir, "SKILL.md"), "utf8")).toBe(readFileSync(path.join(SKILL, "SKILL.md"), "utf8"));
     expect(readFileSync(path.join(dir, VERSION_FILE), "utf8")).toBe(`${VERSION}\n`);
-    expect(out.out()).toContain(`wrote ${dir} (claude) with the skill from Laisso ${VERSION}:`);
+    expect(out.out()).toContain(`wrote ${dir} (claude) with the laisso skill from Laisso ${VERSION}:`);
+    const setupDir = path.join(home, ".claude", "skills", "laisso-setup");
+    expect(filesUnder(setupDir)).toEqual([...filesUnder(SETUP_SKILL), VERSION_FILE].sort());
+    expect(out.out()).toContain(`wrote ${setupDir} (claude) with the laisso-setup skill from Laisso ${VERSION}:`);
     expect(existsSync(path.join(home, ".codex"))).toBe(false);
   });
 
@@ -178,6 +205,8 @@ describe("laisso skill install", () => {
     expect(report.targets.map((t) => [t.agent, t.dir])).toEqual([
       ["claude", path.join(home, ".claude", "skills", "laisso")],
       ["codex", path.join(home, ".codex", "skills", "laisso")],
+      ["claude", path.join(home, ".claude", "skills", "laisso-setup")],
+      ["codex", path.join(home, ".codex", "skills", "laisso-setup")],
     ]);
     expect(report.targets[1]!.files).toContain("SKILL.md");
     expect(readFileSync(path.join(home, ".codex", "skills", "laisso", VERSION_FILE), "utf8")).toBe(`${VERSION}\n`);
@@ -207,14 +236,16 @@ describe("the skill in laisso doctor", () => {
   it("is missing, current, or from another version, per agent", () => {
     const home = tempHome();
     mkdirSync(path.join(home, ".codex"));
-    expect(skillStatus(home, VERSION).map((s) => s.state)).toEqual(["missing", "missing"]);
+    expect(skillStatus(home, VERSION).map((s) => s.state)).toEqual(["missing", "missing", "missing", "missing"]);
     const [claude, codex] = skillTargets(home);
     installSkill(SKILL, [claude!], VERSION);
     installSkill(SKILL, [codex!], "0.1.0");
     const status = skillStatus(home, VERSION);
-    expect(status.map((s) => [s.agent, s.state, s.installed])).toEqual([
-      ["claude", "current", VERSION],
-      ["codex", "other", "0.1.0"],
+    expect(status.map((s) => [s.skill, s.agent, s.state, s.installed])).toEqual([
+      ["laisso", "claude", "current", VERSION],
+      ["laisso", "codex", "other", "0.1.0"],
+      ["laisso-setup", "claude", "missing", null],
+      ["laisso-setup", "codex", "missing", null],
     ]);
     const text = renderDoctor("/h", [], [], status, VERSION);
     expect(text).toContain(`laisso skill for claude (${claude!.dir}): current, Laisso ${VERSION}`);
@@ -237,7 +268,10 @@ describe("the skill in laisso doctor", () => {
     expect(await doctor({ json: true, env })).toBe(0);
     out.restore();
     const report = JSON.parse(out.out()) as { skill: Array<{ agent: string; state: string }> };
-    expect(report.skill).toEqual([expect.objectContaining({ agent: "claude", state: "missing", installed: null })]);
+    expect(report.skill).toEqual([
+      expect.objectContaining({ skill: "laisso", agent: "claude", state: "missing", installed: null }),
+      expect.objectContaining({ skill: "laisso-setup", agent: "claude", state: "missing", installed: null }),
+    ]);
 
     installSkill(SKILL, skillTargets(home), "0.1.0");
     out = capture();

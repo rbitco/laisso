@@ -13,9 +13,9 @@ export interface SetupOptions {
 }
 
 /**
- * `laisso setup`: make the Laisso home if it is new, install the Laisso skill,
+ * `laisso setup`: make the Laisso home if it is new, install the Laisso skills,
  * then run the profile's Runner here in this terminal, in the home, on a
- * prompt that walks the person through repos, Pipelines and the rest. Needs
+ * prompt that starts the laisso-setup skill: the walkthrough of repos, Pipelines and the rest. Needs
  * no running Laisso; answers with the Runner's exit code.
  */
 export async function setup(opts: SetupOptions): Promise<number> {
@@ -39,7 +39,7 @@ export async function setup(opts: SetupOptions): Promise<number> {
     console.error(`${bin} is not on PATH: install it, or pass --profile <name> for a profile whose Runner you have`);
     return 1;
   }
-  for (const target of installSetupSkill(env)) console.log(`installed the Laisso skill for ${target.agent} in ${target.dir}`);
+  for (const target of installSetupSkill(env)) console.log(`installed the ${target.skill} skill for ${target.agent} in ${target.dir}`);
   console.log(`setting up ${home.root} with ${bin} (profile ${profile})`);
   return new Promise((resolve, reject) => {
     const child = spawn(bin, args, { cwd: command.cwd, env: { ...env, ...command.env }, stdio: "inherit" });

@@ -5,7 +5,7 @@ import type { LaissoHome } from "../server/home.ts";
 import type { Command } from "../runner/adapter.ts";
 import { adapterFor } from "../runner/adapters.ts";
 import { findPackageRoot } from "../package-root.ts";
-import { installSkill, skillTargets, type SkillInstall } from "../skill/skill.ts";
+import { installSkills, type SkillInstall } from "../skill/skill.ts";
 import { setupPrompt } from "./prompt.ts";
 
 export class SetupError extends Error {}
@@ -27,12 +27,12 @@ export function setupCommand(home: LaissoHome, config: Config, profileName?: str
     const known = Object.keys(config.profiles).join(", ") || "none";
     throw new SetupError(name ? `no profile named ${name} in config.yaml (profiles: ${known})` : `config.yaml has no default_profile: pass --profile <${known}>`);
   }
-  const prompt = setupPrompt({ home, skillDir: findPackageRoot().skillDir, port: config.port });
+  const prompt = setupPrompt({ home, skillsDir: findPackageRoot().skillsDir, port: config.port });
   return { command: adapterFor(profile.runner).interactive(prompt, settingsFor(profile, "human"), home.root), profile: name };
 }
 
-/** Install the Laisso skill this package ships for each agent under the user's home, so Stages set up next can use it. */
+/** Install the skills this package ships for each agent under the user's home: laisso-setup for setup itself, laisso for the Stages set up next. */
 export function installSetupSkill(env: NodeJS.ProcessEnv): SkillInstall[] {
   const pkg = findPackageRoot();
-  return installSkill(pkg.skillDir, skillTargets(env.HOME || homedir()), pkg.version);
+  return installSkills(pkg.skillsDir, env.HOME || homedir(), pkg.version);
 }

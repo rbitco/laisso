@@ -30,16 +30,24 @@ laisso add "Add a dark mode toggle" --repo app
 ```
 
 `laisso setup` opens your default coding agent in this terminal, in the
-Laisso home (`~/.laisso`). It asks one question at a time, shows each change
-before writing it, and works through:
+Laisso home (`~/.laisso`), on the `laisso-setup` skill. Each section starts
+with a short explanation of what it sets up and how Laisso uses it. Then the
+agent asks one question at a time and shows each change before writing it.
+The sections are:
 
 1. which coding agents you have, and the Agent Profiles that run them,
 2. which repos Laisso should work in, suggested from your checkouts and
    `gh repo list`,
 3. a default Pipeline shaped to how you work, using only skills you already
    have installed,
-4. more Pipelines for special kinds of work, until you say stop,
-5. a final `laisso doctor` check.
+4. the tracker Actions that move issues, if your Pipeline uses them,
+5. more Pipelines for special kinds of work, until you say stop,
+6. other settings, such as concurrency and notifications,
+7. a final `laisso doctor` check.
+
+The skill stays installed, so you can run it again later from any session
+of your coding agent: ask it to set up Laisso, or run `/laisso-setup` in
+Claude Code.
 
 Pass `--profile <name>` to run setup under a different Agent Profile. The
 dashboard also offers a Set up Laisso button until a repo is added.
@@ -78,13 +86,14 @@ The full glossary is [CONTEXT.md](CONTEXT.md).
 | `laisso check [ticket]`              | run a tick now and print what changed                     |
 | `laisso pr link \| unlink \| list`   | manage the PRs linked to a Ticket                         |
 | `laisso doctor`                      | list the tools Laisso needs and whether each is ready     |
-| `laisso skill install`               | install the Laisso skill for Claude Code and Codex        |
+| `laisso skill install`               | install the Laisso skills for Claude Code and Codex       |
 
 `laisso --help` lists every option.
 
-The Laisso skill teaches a coding agent how to write `config.yaml` and
+The `laisso` skill teaches a coding agent how to write `config.yaml` and
 Pipelines and why a Ticket is Flagged, from docs that match the installed
-version. `laisso setup` installs it; after an upgrade, rerun `laisso skill
+version. The `laisso-setup` skill is the walkthrough `laisso setup` runs.
+`laisso setup` installs both; after an upgrade, rerun `laisso skill
 install`, as `laisso doctor` will say.
 
 ## Upgrading
