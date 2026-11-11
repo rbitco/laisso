@@ -8,7 +8,7 @@ import { ticketLabel, type TicketRow } from "../store/tickets.ts";
 import type { PrLinks } from "../store/links.ts";
 import type { Visits } from "../store/visits.ts";
 import { runnerOf, sessionProfile, type Sessions, type SessionRow } from "../store/sessions.ts";
-import { ticketProfile } from "./overrides.ts";
+import { chatProfile, ticketProfile } from "./overrides.ts";
 import type { Pipeline, RunnerStage } from "../pipeline/load.ts";
 import { requestFor, type Command, type RunRequest, type RunnerAdapter } from "../runner/adapter.ts";
 import { adapterFor } from "../runner/adapters.ts";
@@ -129,6 +129,30 @@ export class Terminal {
     this.deps.log.info("session.draft_opened", { session: from.id, ticket: ticket.id, stage: stage.name, launcher: opened.launcher, terminal: opened.terminal });
   }
 
+  /**
+   * Chat: a fresh terminal on the default profile in the Ticket's worktree, told the Ticket and that it works no
+   * Stage, for a human to ask about the Ticket or tend it at any time. Like an opened draft, the window is the
+   * human's: no Session row, no Flag cleared or raised, nothing stopped. `alongside` names a headless Session
+   * working the same branch, which the agent is told not to collide with.
+   */
+  async openChat(ticket: TicketRow, alongside: SessionRow | null): Promise<{ profile: string; terminal: TerminalKind }> {
+    const config = currentConfig(this.deps.home, this.deps.config);
+    const resolved = chatProfile(config, ticket);
+    if ("problem" in resolved) throw new TerminalError(resolved.problem);
+    const adapter = adapterFor(resolved.profile.runner);
+    const sessionId = randomUUID();
+    const stage = { name: ticket.stage, prompt: chatPrompt(ticket.stage, alongside), skills: [] };
+    const request: RunRequest = { ...requestFor(ticket, stage, resolved.profile, this.deps.links.links(ticket.id)), mode: "terminal", sessionId, name: `Laisso: ${ticketLabel(ticket)} chat`, limits: {} };
+    const command = adapter.command(request);
+    const dir = path.join(this.deps.home.ticketsDir, ticket.id, "sessions");
+    mkdirSync(dir, { recursive: true });
+    const launcher = path.join(dir, `chat-${sessionId}.command`);
+    writeFileSync(launcher, launcherScript(command), { mode: 0o755 });
+    const terminal = await this.openWindow(config.terminal, launcher, request.name!, command.cwd);
+    this.deps.log.info("chat.opened", { ticket: ticket.id, stage: ticket.stage, profile: resolved.name, launcher, terminal, alongside: alongside?.id ?? null });
+    return { profile: resolved.name, terminal };
+  }
+
   /** The Stage's profile as config now has it (ADR 0011: read at each open), or the Flag that says it is gone. */
   private async resolve(ticket: TicketRow, pipeline: Pipeline, stage: RunnerStage) {
     const config = currentConfig(this.deps.home, this.deps.config);
@@ -212,6 +236,15 @@ export class Terminal {
     if (found) this.deps.sessions.setRunnerSession(row.id, found);
     return found;
   }
+}
+
+/** What a Chat's agent is told after the Ticket: why it is there, and to leave a running Session's work alone. */
+export function chatPrompt(stage: string, alongside: SessionRow | null): string {
+  return [
+    `A human opened this chat to ask about this Ticket or tend to it. You are not running Stage ${stage}: Laisso keeps no record of this chat, and nothing here moves the Ticket on.`,
+    ...(alongside ? [`A headless Session of Stage ${alongside.stage} is working this branch right now. Read and answer, but do not edit files, commit or push unless the human asks you to.`] : []),
+    "Say in one line that you are ready, then wait for the human's question.",
+  ].join("\n\n");
 }
 
 /** A shell script that enters the worktree, exports the Ticket context, says anything the human should know, and becomes the Runner. */

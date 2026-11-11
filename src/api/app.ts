@@ -266,6 +266,13 @@ export function createApp(deps: AppDeps): Hono {
   trigger("takeover", (ticket) => deps.exits.takeOver(ticket));
   trigger("handback", (ticket) => deps.exits.handBack(ticket));
   trigger("draft", (ticket) => deps.exits.openDraft(ticket));
+  // Chat: the default profile in a terminal on the Ticket's worktree, at any time on an active Ticket; changes nothing.
+  trigger("chat", async (ticket) => {
+    if (ticket.state !== "active") throw new TriggerError(`Ticket ${ticket.reference ?? ticket.id} is ${ticket.state}`);
+    const alongside = deps.sessions.running(ticket.id).find((s) => s.mode === "headless") ?? null;
+    await deps.terminal.openChat(ticket, alongside);
+    return ticket;
+  });
 
   // A human's profile for one Runner Stage of one Ticket (LASSO-75): it wins over the Pipeline's choice from the
   // Stage's next Session, retries and Rounds included, until cleared. A Session already running keeps its own.

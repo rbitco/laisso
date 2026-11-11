@@ -26,6 +26,21 @@ without spending an attempt. A Review Stage polls the PR at once and opens a
 Round for any Feedback that arrived meanwhile; any other Stage starts a
 headless Session that re-enters the terminal's Runner session.
 
+## Chat
+
+Chat with <profile> opens a fresh agent in a terminal on the Ticket's
+worktree at any time while the Ticket is active: running, Flagged, holding,
+Queued or Watching. It runs the repo's `default_profile`, else the global
+one, in its human settings; Stage profiles and overrides do not apply. The
+agent is told the Ticket, its branch, its Stage and linked PRs, and that it
+works no Stage.
+
+A Chat changes nothing. Laisso keeps no Session for it, stops nothing,
+clears no Flag and spends no Budget, so it suits asking the agent about the
+work or doing upkeep in the worktree. While a headless Session is running on
+the branch, the dashboard says so and the agent is told to read and answer,
+not edit, commit or push, unless you ask it to.
+
 ## Approval steps
 
 For an approval step, give the drafting Stage `advance: false`, as the

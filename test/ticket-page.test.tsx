@@ -74,7 +74,7 @@ function ticket(id: string, over: Partial<TicketDetail> = {}): TicketDetail {
     ],
     mirrorPending: false, createdAt: T0, updatedAt: T0, url: `http://laisso/#${id}`,
     session: s, sessions: [session({ ticket: id, id: "S2", stage: "implement", outcome: "failed" }), s], pipelineDrift: "same",
-    profiles: [profile("plan", "claude-opus"), profile("implement", "claude-opus")], send: { unavailable: null, routes: [] }, markDone: null, visit: null, visits: [], arcs: [], upgrades: [],
+    profiles: [profile("plan", "claude-opus"), profile("implement", "claude-opus")], send: { unavailable: null, routes: [] }, markDone: null, visit: null, visits: [], arcs: [], upgrades: [], chat: null,
     ...over,
   };
 }
@@ -660,6 +660,29 @@ describe("the Ticket's exits", () => {
     await showPage("A");
     await userEvent.setup().click(within(triggers()).getByRole("button", { name: "Check PR now" }));
     await waitFor(() => expect(laisso.sent).toEqual([{ method: "POST", route: "/api/check-now", body: null }]));
+  });
+});
+
+describe("Chat", () => {
+  it("offers Chat with the default profile, warns of a headless Session alongside, and opens it", async () => {
+    const laisso = fakeLaisso([ticket("A", { chat: { profile: "claude-opus", alongside: "implement" } })]);
+    await showPage("A");
+    expect(document.querySelector('[data-role="chat-alongside"]')!.textContent).toBe("implement is running headless on this branch; a Chat is told to read and answer, not edit, unless you ask.");
+    await userEvent.setup().click(within(triggers()).getByRole("button", { name: "Chat with claude-opus" }));
+    await waitFor(() => expect(laisso.sent).toEqual([{ method: "POST", route: "/api/tickets/A/chat", body: {} }]));
+  });
+
+  it("shows no Chat on a closed Ticket", async () => {
+    fakeLaisso([ticket("A", { state: "done", chat: null })]);
+    await showPage("A");
+    expect(within(triggers()).queryByRole("button", { name: /^Chat/ })).toBeNull();
+  });
+
+  it("disables Chat and says why when no default profile resolves", async () => {
+    fakeLaisso([ticket("A", { chat: { profile: null, unavailable: "config.yaml has no default_profile for a Chat to open under", alongside: null } })]);
+    await showPage("A");
+    expect(within(triggers()).getByRole<HTMLButtonElement>("button", { name: "Chat" }).disabled).toBe(true);
+    expect(screen.queryByText("Chat is unavailable: config.yaml has no default_profile for a Chat to open under")).not.toBeNull();
   });
 });
 
