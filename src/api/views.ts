@@ -5,7 +5,7 @@ import { type Pipeline, type Routes, type RunnerName, type RunnerStage, type Sta
 import type { PipelineSource } from "../pipeline/files.ts";
 import type { Drift, VersionRow } from "../store/versions.ts";
 import type { ActionConfig, Config, ProfileScope, ProfileSettings, ProfileSource } from "../server/config.ts";
-import { resumeRefusal, ticketProfile } from "../session/overrides.ts";
+import { chatProfile, resumeRefusal, ticketProfile } from "../session/overrides.ts";
 import { heldRoute, startLabel } from "../route/route.ts";
 import { holdDropped, type UpgradeRow } from "../store/upgrades.ts";
 import type { BudgetView } from "../budget/budget.ts";
@@ -219,6 +219,18 @@ export interface TicketDetail extends TicketView {
   arcs: RouteArcView[];
   /** Each Version upgrade, oldest first, for its marker on the track (LASSO-201). */
   upgrades: UpgradeView[];
+  /** Chat: the default profile in a terminal, offered on any active Ticket; null on a done or Abandoned one. */
+  chat: ChatView | null;
+}
+
+/**
+ * The Chat lever: the profile it opens under, why it cannot open (no default profile), and the headless Session
+ * working the branch alongside, whose Stage the lever warns of.
+ */
+export interface ChatView {
+  profile: string | null;
+  unavailable?: string;
+  alongside: string | null;
 }
 
 /**
@@ -569,7 +581,14 @@ export function ticketDetail(ticket: TicketRow, ctx: ViewContext): TicketDetail 
   const view = ticketView(ticket, ctx);
   const upgrades = upgradeViews(ctx.upgradesFor(ticket), visits, pipeline);
   const markDone = markDoneView(view, pipeline, ctx.visitsFor(ticket));
-  return { ...view, session: sessions[0] ?? null, sessions, pipelineDrift: ctx.driftFor(ticket), profiles, send: sendView(ticket, pipeline, sessions), markDone, visits, arcs, upgrades };
+  return { ...view, session: sessions[0] ?? null, sessions, pipelineDrift: ctx.driftFor(ticket), profiles, send: sendView(ticket, pipeline, sessions), markDone, visits, arcs, upgrades, chat: chatView(ticket, ctx) };
+}
+
+function chatView(ticket: TicketRow, ctx: ViewContext): ChatView | null {
+  if (ticket.state !== "active") return null;
+  const resolved = chatProfile(ctx.profiles, ticket);
+  const alongside = ctx.sessionsFor(ticket).find((s) => s.mode === "headless" && s.ended_at === null)?.stage ?? null;
+  return "problem" in resolved ? { profile: null, unavailable: resolved.problem, alongside } : { profile: resolved.name, alongside };
 }
 
 /** The Mark done menu when the Ticket offers Mark done at an unflagged human or taken-over Stage, else null. */

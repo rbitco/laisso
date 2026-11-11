@@ -1,4 +1,4 @@
-import { currentConfig, profilesFor, resolveProfile, type Config, type ProfileScope, type ResolvedProfile } from "../server/config.ts";
+import { currentConfig, profilesFor, resolveProfile, settingsFor, type Config, type ProfileScope, type ResolvedProfile } from "../server/config.ts";
 import type { LaissoHome } from "../server/home.ts";
 import type { Logger } from "../server/log.ts";
 import { overrideFor, type Tickets, type TicketRow } from "../store/tickets.ts";
@@ -9,6 +9,19 @@ import { TriggerError, type Progress } from "./progress.ts";
 /** The profile a Stage of a Ticket runs under: the Ticket's override for it first, then the Pipeline's choice (ADR 0011). */
 export function ticketProfile(config: ProfileScope, ticket: TicketRow, pipeline: Pipeline, stage: RunnerStage): ResolvedProfile | { problem: string } {
   return resolveProfile(config, ticket.repo, pipeline, stage, overrideFor(ticket, stage.name));
+}
+
+/**
+ * The profile a Chat on the Ticket opens under: its repo's default_profile, else config's, in its human settings.
+ * Stage profiles and overrides do not reach it: a Chat belongs to no Stage.
+ */
+export function chatProfile(config: ProfileScope, ticket: Pick<TicketRow, "repo">): ResolvedProfile | { problem: string } {
+  const repoDefault = config.repos[ticket.repo]?.default_profile ?? null;
+  const name = repoDefault ?? config.default_profile;
+  if (name === null) return { problem: "config.yaml has no default_profile for a Chat to open under" };
+  const profile = profilesFor(config, ticket.repo)[name];
+  if (!profile) return { problem: `no profile named ${name} in config.yaml, which ${repoDefault ? `repo ${ticket.repo}'s default_profile` : "default_profile"} names` };
+  return { name, from: repoDefault ? "repo" : "default", profile: settingsFor(profile, "human") };
 }
 
 /**

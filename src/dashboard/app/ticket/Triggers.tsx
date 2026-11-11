@@ -111,6 +111,18 @@ export function Triggers({ ticket: t, onExtend, refresh }: { ticket: TicketDetai
       {/* Check PR now belongs to the repeating Stage: a tick there fetches Feedback and opens a Round (spec: the title bar). */}
       {t.state === "active" && t.prs.some((p) => p.role === "owned") && t.stage.repeat && lever("check", "Check PR now", false, () => void pull("check"), { role: "check-pr" })}
       {t.flag && stageProfile && t.triggers.some((x) => x.action === "retry") && lever("retry-with", "retry with…", false, retryWith, { role: "retry-with" })}
+      {/* Chat: the default profile in a terminal, at any time; it changes nothing about the Ticket. */}
+      {t.chat && lever("chat", t.chat.profile ? `Chat with ${t.chat.profile}` : "Chat", false, () => void pull("chat"), { role: "chat", unavailable: t.chat.unavailable })}
+      {t.chat?.alongside && !t.chat.unavailable && (
+        <div className="why" data-role="chat-alongside">
+          {`${t.chat.alongside} is running headless on this branch; a Chat is told to read and answer, not edit, unless you ask.`}
+        </div>
+      )}
+      {t.chat?.unavailable && (
+        <div className="why" data-role="unavailable">
+          {"Chat is unavailable: " + t.chat.unavailable}
+        </div>
+      )}
       {t.triggers
         .filter((x) => x.unavailable)
         .map((x) => (
