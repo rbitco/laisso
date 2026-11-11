@@ -5,6 +5,7 @@ import { api } from "../api.ts";
 import { useEvents } from "../events.ts";
 import { DevBadge } from "../header/DevBadge.tsx";
 import { Tick } from "../header/Tick.tsx";
+import { Logo } from "./Logo.tsx";
 import { ThemeToggle } from "./Theme.tsx";
 
 export type NavView = "ledger" | "prs" | "pipelines" | "config";
@@ -99,10 +100,8 @@ export function Nav({ on, compact, onChecked }: { on: NavView; compact: boolean;
     <nav className={"pages" + (compact ? " compact" : "")} aria-label="Pages" data-role="nav">
       <h1 className="brand">
         <a href="#" data-role="home">
+          <Logo className="logo" />
           <span className="word">LAISSO</span>
-          <span className="mark" aria-hidden="true">
-            L
-          </span>
         </a>
         <DevBadge />
       </h1>

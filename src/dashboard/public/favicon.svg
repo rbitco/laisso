@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 600">
+<style>.rope-a{stop-color:#6d4fa8}.rope-b{stop-color:#d23c2e}.rope-c{stop-color:#bd522d}.dots{fill:#141412}
+@media (prefers-color-scheme: dark){.rope-a{stop-color:#b09ae6}.rope-b{stop-color:#ef5b4c}.rope-c{stop-color:#ee7d55}.dots{fill:#f2f0ea}}</style>
+<defs><linearGradient id="rope" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="700" y2="0">
+<stop offset="0" class="rope-a"/><stop offset="0.55" class="rope-b"/><stop offset="1" class="rope-c"/>
+</linearGradient></defs>
+<path fill="url(#rope)" d="M200 0h49v49h-49zM250 0h49v49h-49zM300 0h49v49h-49zM350 0h49v49h-49zM400 0h49v49h-49zM450 0h49v49h-49zM100 50h49v49h-49zM150 50h49v49h-49zM500 50h49v49h-49zM550 50h49v49h-49zM50 100h49v49h-49zM600 100h49v49h-49zM0 150h49v49h-49zM650 150h49v49h-49zM0 200h49v49h-49zM650 200h49v49h-49zM0 250h49v49h-49zM650 250h49v49h-49zM50 300h49v49h-49zM600 300h49v49h-49zM100 350h49v49h-49zM150 350h49v49h-49zM500 350h49v49h-49zM550 350h49v49h-49zM200 400h49v49h-49zM300 400h49v49h-49zM350 400h49v49h-49zM400 400h49v49h-49zM450 400h49v49h-49zM250 450h49v49h-49zM150 500h49v49h-49zM200 500h49v49h-49zM150 550h49v49h-49zM200 550h49v49h-49z"/>
+<path class="dots" d="M200 215h52v52h-52zM320 215h52v52h-52zM440 215h52v52h-52z"/>
+</svg>
