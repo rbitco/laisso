@@ -1,8 +1,8 @@
 :root {
   --bg: #fafaf8; --side: #f3f2ee; --surface: #ffffff; --surface2: #f1f0ec; --ink: #141412; --muted: #6f6b63; --line: #e6e4de;
   --accent: #bd522d; --accent-ink: #ffffff; --accent-soft: rgba(189, 82, 45, 0.1); --pill: #f1f0ec;
-  --good: #2f7a3d; --crit: #d23c2e; --amber: #965a08; --run: #2f63b8;
-  --crit-bg: rgba(210, 60, 46, 0.1); --amber-bg: rgba(200, 130, 20, 0.13); --good-bg: rgba(47, 122, 61, 0.1); --run-bg: rgba(47, 99, 184, 0.1);
+  --good: #2f7a3d; --crit: #d23c2e; --amber: #965a08; --run: #2f63b8; --wait: #6d4fa8;
+  --crit-bg: rgba(210, 60, 46, 0.1); --amber-bg: rgba(200, 130, 20, 0.13); --good-bg: rgba(47, 122, 61, 0.1); --run-bg: rgba(47, 99, 184, 0.1); --wait-bg: rgba(109, 79, 168, 0.1);
   --term-bg: #16161a; --term-ink: #d7d5cd; --term-dim: #8f8c84; --term-bright: #f2f0ea; --term-line: #26262b; --term-pill: #24242a; --term-ok: #8fd19a;
   --shadow: 0 12px 40px rgba(20, 20, 18, 0.14);
   --sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
@@ -15,8 +15,8 @@
   :root:not([data-theme="light"]) {
     --bg: #080808; --side: #0b0b0b; --surface: #101010; --surface2: #181818; --ink: #f2f0ea; --muted: #8f8b83; --line: #212121;
     --accent: #ee7d55; --accent-ink: #160904; --accent-soft: rgba(238, 125, 85, 0.12); --pill: #181818;
-    --good: #6fc985; --crit: #ef5b4c; --amber: #e8ad52; --run: #7aa6e8;
-    --crit-bg: rgba(239, 91, 76, 0.12); --amber-bg: rgba(232, 173, 82, 0.12); --good-bg: rgba(111, 201, 133, 0.12); --run-bg: rgba(122, 166, 232, 0.12);
+    --good: #6fc985; --crit: #ef5b4c; --amber: #e8ad52; --run: #7aa6e8; --wait: #b09ae6;
+    --crit-bg: rgba(239, 91, 76, 0.12); --amber-bg: rgba(232, 173, 82, 0.12); --good-bg: rgba(111, 201, 133, 0.12); --run-bg: rgba(122, 166, 232, 0.12); --wait-bg: rgba(176, 154, 230, 0.12);
     --term-bg: #0c0c0c; --term-line: #1f1f1f; --term-pill: #1a1a1a;
     --shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
     color-scheme: dark;
@@ -25,8 +25,8 @@
 :root[data-theme="dark"] {
   --bg: #080808; --side: #0b0b0b; --surface: #101010; --surface2: #181818; --ink: #f2f0ea; --muted: #8f8b83; --line: #212121;
   --accent: #ee7d55; --accent-ink: #160904; --accent-soft: rgba(238, 125, 85, 0.12); --pill: #181818;
-  --good: #6fc985; --crit: #ef5b4c; --amber: #e8ad52; --run: #7aa6e8;
-  --crit-bg: rgba(239, 91, 76, 0.12); --amber-bg: rgba(232, 173, 82, 0.12); --good-bg: rgba(111, 201, 133, 0.12); --run-bg: rgba(122, 166, 232, 0.12);
+  --good: #6fc985; --crit: #ef5b4c; --amber: #e8ad52; --run: #7aa6e8; --wait: #b09ae6;
+  --crit-bg: rgba(239, 91, 76, 0.12); --amber-bg: rgba(232, 173, 82, 0.12); --good-bg: rgba(111, 201, 133, 0.12); --run-bg: rgba(122, 166, 232, 0.12); --wait-bg: rgba(176, 154, 230, 0.12);
   --term-bg: #0c0c0c; --term-line: #1f1f1f; --term-pill: #1a1a1a;
   --shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
   color-scheme: dark;
@@ -137,7 +137,7 @@ main { padding: 16px; }
 .pill.needs_you, .pill.holding, .pill.ready { background: var(--amber-bg); color: var(--amber); }
 .pill.running, .pill.queued { background: var(--run-bg); color: var(--run); }
 .pill.quiet, .pill.done { background: var(--good-bg); color: var(--good); }
-.pill.watching { background: var(--accent-soft); color: var(--accent); }
+.pill.watching { background: var(--wait-bg); color: var(--wait); }
 .pill.abandoned { background: var(--surface2); color: var(--muted); }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
 .dot.flagged { background: var(--crit); }
@@ -145,7 +145,7 @@ main { padding: 16px; }
 .dot.running, .dot.queued { background: var(--run); }
 .dot.running { animation: pulse var(--pulse) infinite; }
 .dot.quiet, .dot.done { background: var(--good); }
-.dot.watching { background: var(--accent); }
+.dot.watching { background: var(--wait); }
 
 /* layout: the Ledger, collapsing to a sidebar when a detail is open */
 .dwrap { display: grid; grid-template-columns: 1fr; gap: 16px; align-items: start; }
@@ -554,7 +554,7 @@ button.quiet { background: transparent; }
 .stage { --k: var(--run); position: relative; display: grid; grid-template-columns: 38px minmax(0, 1fr); gap: 12px; padding: 0; border: 0; }
 .stage.k-human { --k: var(--amber); }
 .stage.k-action { --k: var(--muted); }
-.stage.k-wait { --k: var(--accent); }
+.stage.k-wait { --k: var(--wait); }
 .k-wait .stage-fields { padding: 14px 14px 16px; }
 .station { position: relative; z-index: 1; justify-self: center; margin-top: 9px; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; border: 3.5px solid var(--k); background: var(--bg); font-size: 12px; font-weight: 700; color: var(--k); font-variant-numeric: tabular-nums; }
 .k-action .station { width: 24px; height: 24px; margin-top: 12px; border: 0; border-radius: 8px; background: var(--k); color: var(--bg); }
