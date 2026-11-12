@@ -10,7 +10,7 @@ const MAX_BYTES = 5 * 1024 * 1024;
 const KEEP = 3;
 
 /** One line per event to stdout and to a size-rotated log file. Session transcripts never go here. */
-export function createLogger(file: string, out: NodeJS.WritableStream = process.stdout): Logger {
+export function createLogger(file: string, out: { write(text: string): unknown } = process.stdout): Logger {
   const write = (level: string, event: string, fields: Record<string, unknown> = {}) => {
     const rendered = Object.entries(fields)
       .map(([k, v]) => `${k}=${render(v)}`)
