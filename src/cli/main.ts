@@ -28,6 +28,7 @@ const USAGE = `usage:
   laisso skill install       copy the Laisso skills to where Claude Code and Codex look for skills
 options:
   --port <n>       port for the server, or the server to talk to
+  --plain          laisso: plain log lines instead of the board, as when piped
   --json           machine-readable output for client commands
   --all            include done and abandoned Tickets in status
   --yes            add: accept the suggestions without asking
@@ -47,6 +48,7 @@ export async function main(argv: string[]): Promise<number> {
     strict: false,
     options: {
       port: { type: "string" },
+      plain: { type: "boolean", default: false },
       json: { type: "boolean", default: false },
       all: { type: "boolean", default: false },
       yes: { type: "boolean", short: "y", default: false },
@@ -73,7 +75,7 @@ export async function main(argv: string[]): Promise<number> {
   const [command, ...rest] = positionals;
   switch (command) {
     case undefined:
-      return serve({ portFlag });
+      return serve({ portFlag, plain: Boolean(values.plain) });
     case "add":
       return add({
         portFlag,
