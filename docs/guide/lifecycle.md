@@ -1,5 +1,20 @@
 # Shutdown, restart and end of life
 
+## The terminal while Laisso runs
+
+In a terminal, `laisso` shows a board: the logo, the address of the
+dashboard, how many Tickets are in each state, when the Tick last ran and
+is next due, and the Tickets that need you. It redraws as things change.
+
+- `l` shows the log, on the terminal's normal screen so scrollback and
+  copying work as usual; `l` or Esc goes back to the board.
+- `o` opens the dashboard in your browser.
+- `q` quits. While Sessions are running it asks first, since quitting
+  stops them (see below); Ctrl-C quits at once.
+
+Piped, or run with `--plain`, `laisso` writes the log line by line instead.
+Either way the full log is in `laisso.log` in the Laisso home.
+
 ## Ctrl-C and restart
 
 Ctrl-C stops every running headless Session by process group and records

@@ -8,6 +8,12 @@ import { ignoring } from "../review/feedback.ts";
 import type { TicketRow } from "../store/tickets.ts";
 import { acquireLock, AlreadyRunning } from "./lock.ts";
 import { createLogger } from "./log.ts";
+import { LogFeed } from "../console/feed.ts";
+import { Screen } from "../console/screen.ts";
+import { colourOf } from "../console/paint.ts";
+import type { TicketView } from "../api/views.ts";
+import type { TickStatus } from "./tick.ts";
+import { spawn } from "node:child_process";
 import { Store, StoreTooNew } from "../store/store.ts";
 import { Tickets } from "../store/tickets.ts";
 import { Visits } from "../store/visits.ts";
@@ -46,6 +52,8 @@ import { parseDuration } from "../duration.ts";
 
 export interface ServeOptions {
   portFlag?: number;
+  /** Plain log lines on stdout, as when it is not a terminal, instead of the board. */
+  plain?: boolean;
 }
 
 /** The one foreground laisso process (ADR 0008). Resolves with the exit code once it has shut down. */
@@ -67,7 +75,11 @@ export async function serve(opts: ServeOptions): Promise<number> {
   // Before config or any Pipeline is read: tracker.transition moves into config (ADR 0010), runners into profiles (ADR 0011).
   const migrated = migrateHome(home);
   const config = loadConfig(home, { port: opts.portFlag });
-  const log = createLogger(home.logFile);
+  // In a terminal the board owns the screen once Laisso is up; the log's screen copy goes through the feed so the
+  // board can hold it. Piped, or with --plain, the log goes to stdout line by line as it always has.
+  const board = !opts.plain && Boolean(process.stdout.isTTY && process.stdin.isTTY);
+  const feed = new LogFeed(process.stdout);
+  const log = createLogger(home.logFile, feed);
 
   let releaseLock: () => void;
   try {
@@ -248,9 +260,11 @@ export async function serve(opts: ServeOptions): Promise<number> {
     await tick.run("startup");
     if (!shuttingDown) tick.start();
   })();
+  let screen: Screen | null = null;
   const shutdown = (signal: string) => {
     if (shuttingDown) return;
     shuttingDown = true;
+    screen?.stop();
     log.info("shutdown", { signal });
     tick.stop();
     versionCheck.stop();
@@ -271,7 +285,35 @@ export async function serve(opts: ServeOptions): Promise<number> {
   };
   process.once("SIGINT", () => shutdown("SIGINT"));
   process.once("SIGTERM", () => shutdown("SIGTERM"));
+  if (board) {
+    // The board reads what the dashboard reads, through the same app, without a round trip over the network.
+    const read = async <T>(route: string): Promise<T> => (await app.request(route)).json() as Promise<T>;
+    screen = new Screen({
+      input: process.stdin,
+      output: process.stdout,
+      feed,
+      colour: colourOf(process.env),
+      version: pkg.version,
+      url,
+      home: home.root,
+      tickets: () => read<TicketView[]>("/api/tickets"),
+      tick: () => read<TickStatus>("/api/tick"),
+      subscribe: (changed) => changes.subscribe((change) => change.kind !== "stdout" && changed()),
+      quit: () => shutdown("quit"),
+      open: openInBrowser,
+    });
+    screen.start();
+    // Whatever ends the process, the terminal is handed back as it was found.
+    process.once("exit", () => screen?.stop());
+  }
 
   await startup;
   return exited;
+}
+
+/** Open `url` in the default browser; a failure to open is not worth stopping for. */
+function openInBrowser(url: string): void {
+  const child = spawn(process.platform === "darwin" ? "open" : "xdg-open", [url], { stdio: "ignore", detached: true });
+  child.on("error", () => undefined);
+  child.unref();
 }
