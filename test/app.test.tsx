@@ -498,7 +498,7 @@ describe("the page's views", () => {
     expect(section("nav").className).toBe("pages compact");
     expect(section("shell").className).toBe("shell compact");
     expect(within(section("nav")).getAllByRole("link").map((a) => [a.textContent, a.getAttribute("title")])).toEqual([
-      ["LAISSOL", null],
+      ["LAISSO", null],
       ["Tickets", "Tickets"],
       ["Pull Requests", "Pull Requests"],
       ["Pipelines", "Pipelines"],
