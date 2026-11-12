@@ -39,7 +39,7 @@ jobs:
       # The rbitco org allows only GitHub-owned and verified actions, so
       # pnpm comes from npm rather than pnpm/action-setup. Trusted
       # publishing needs npm 11.5.1 or later.
-      - run: npm install --global pnpm@8 npm@^11.5.1
+      - run: npm install --global pnpm@12.15.0 npm@^11.5.1
 
       - run: pnpm install --frozen-lockfile
 
