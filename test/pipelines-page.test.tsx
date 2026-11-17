@@ -32,6 +32,7 @@ interface Stored {
   problem: string | null;
   reuses?: boolean;
   parts?: boolean;
+  reusedBy?: PipelineFile["reusedBy"];
 }
 
 type Sent = { method: string; route: string; body: unknown };
@@ -41,7 +42,7 @@ function fakeLaisso(files: Record<string, Stored> = { default: { text: DEFAULT_T
   const sent: Sent[] = [];
   const state = { files, refuse: null as string | null, breaks: null as string | null, versions: {} as Record<string, LiveVersionView[]>, frozen: {} as Record<string, PipelineVersionView> };
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
-  const fileView = (name: string): PipelineFile => ({ name, file: `/p/${name}.yaml`, reuses: false, parts: false, ...state.files[name]! });
+  const fileView = (name: string): PipelineFile => ({ name, file: `/p/${name}.yaml`, reuses: false, parts: false, reusedBy: [], ...state.files[name]! });
   vi.stubGlobal("fetch", async (url: string, init: RequestInit = {}) => {
     const method = init.method ?? "GET";
     if (url === "/api/pipelines")
@@ -282,6 +283,21 @@ describe("a Pipeline's editor", () => {
     expect(tags.length).toBe(1);
     expect(tags[0]!.closest("a")!.querySelector("strong")!.textContent).toBe("parts");
     expect(screen.getByText("Pipeline settings")).toBeTruthy();
+  });
+
+  it("says which Pipelines reuse this one, each a link, and nothing when none does", async () => {
+    fakeLaisso({ default: { text: DEFAULT_TEXT, pipeline: DEFAULT, problem: null, reusedBy: [{ pipeline: "bug-fix", stages: ["plan"] }, { pipeline: "codex-review", stages: ["plan"] }] } });
+    await showPage("default");
+    const strip = document.querySelector<HTMLElement>('.info-strip[data-role="reused-by"]')!;
+    expect([...strip.querySelectorAll("a")].map((a) => [a.textContent, a.getAttribute("href")])).toEqual([
+      ["bug-fix", "#pipelines/bug-fix"],
+      ["codex-review", "#pipelines/codex-review"],
+    ]);
+    expect(within(strip).getByText("Saving here changes these Pipelines too. A save that would stop one loading asks first.")).toBeTruthy();
+    cleanup();
+    fakeLaisso();
+    await showPage("default");
+    expect(document.querySelector('.info-strip[data-role="reused-by"]')).toBeNull();
   });
 
   it("opens a Pipeline that reuses Stages as text, saying why", async () => {

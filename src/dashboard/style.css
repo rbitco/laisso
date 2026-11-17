@@ -577,6 +577,7 @@ button.quiet { background: transparent; }
 .stage-box h3 .tools button:hover:not(:disabled) { border-color: var(--line); color: var(--ink); }
 .stage-box h3 .tools button:disabled { opacity: 0.3; }
 .stage-box h3 .removed-note { display: none; color: var(--crit); font-weight: normal; font-size: 12px; }
+.stage-box h3 .reused-by { color: var(--muted); font-weight: normal; font-size: 12px; font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40%; }
 .stage-fields { display: grid; gap: 0; border-top: 1px solid var(--line); }
 .k-action .stage-fields { padding: 14px 14px 16px; }
 .fgroup { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 8px 16px; padding: 14px; border-top: 1px solid var(--line); }

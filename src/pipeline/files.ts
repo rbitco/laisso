@@ -6,7 +6,7 @@ import { applyPatch } from "../yaml-edit.ts";
 import { isPlainObject } from "../fields.ts";
 import { checkActionsAny, checkProfiles, fileReader, overlay, resolvePipeline, writesReuse, pipelineFile, listPipelines, PipelineError, NAME, type Pipeline } from "./load.ts";
 import { actionSets, anyRepoProfiles, type Config } from "../server/config.ts";
-import { breakage, WouldBreak } from "./impact.ts";
+import { breakage, reusers, WouldBreak, type Reuser } from "./impact.ts";
 
 /** A Pipeline file as read: the text as written, and what it parses to or why it does not. */
 export interface PipelineSource {
@@ -114,6 +114,11 @@ export class PipelineFiles {
     } catch (error) {
       return { name, file, text, pipeline: null, problem: error instanceof Error ? error.message : String(error), reuses: writesReuse(text) };
     }
+  }
+
+  /** The Pipelines that take Stages from this one, directly or through a chain (LASSO-220). */
+  reusedBy(name: string): Reuser[] {
+    return reusers(fileReader(this.dir), listPipelines(this.dir), name);
   }
 
   /** Refuse a change that would stop another Pipeline loading, unless confirmed (LASSO-219). */

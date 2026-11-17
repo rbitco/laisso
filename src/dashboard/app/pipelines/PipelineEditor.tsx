@@ -43,6 +43,7 @@ export function PipelineEditor({ name, onSaved }: { name: string; onSaved: () =>
           <div className="why">intake: false, so Intake never offers this Pipeline. Other Pipelines reuse its Stages with use: or include:.</div>
         </div>
       )}
+      <ReusedBy file={file} />
       <LiveVersions name={name} />
       {loaded ? (
         // Both stay drawn, so switching between them keeps what each holds.
@@ -104,6 +105,22 @@ function DeleteButton({ name }: { name: string }) {
       </button>
       {breaking && <BreakConfirm breaking={breaking} action="Delete anyway" onCancel={() => setBreaking(null)} />}
     </>
+  );
+}
+
+/** The Pipelines that take Stages from this one (LASSO-220): a save here changes them too. Nothing when none does. */
+function ReusedBy({ file }: { file: PipelineFile }) {
+  if (!file.reusedBy?.length) return null;
+  return (
+    <div className="info-strip" data-role="reused-by">
+      <h3>Reused by</h3>
+      {file.reusedBy.map((r) => (
+        <a key={r.pipeline} href={pipelineHref(r.pipeline)} title={"takes " + r.stages.join(", ")}>
+          {r.pipeline}
+        </a>
+      ))}
+      <div className="why">Saving here changes these Pipelines too. A save that would stop one loading asks first.</div>
+    </div>
   );
 }
 

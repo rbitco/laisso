@@ -168,8 +168,15 @@ function Editor({ file, params, start, onSaved }: { file: LoadedPipeline; params
       <div className="rail" data-role="stage-list">
         {draft.cards.map((card, i) => {
           const label = card.stage.name || "the new Stage";
+          // The Pipelines that copy this Stage (LASSO-220), so an edit here is known to reach them.
+          const takers = card.fresh ? [] : (file.reusedBy ?? []).filter((r) => r.stages.includes(card.stage.name)).map((r) => r.pipeline);
           const tools = (
             <>
+              {takers.length > 0 && (
+                <span className="reused-by" data-role="reused-by" title={`Reused by ${takers.join(", ")}`}>
+                  {"↗ " + takers.join(", ")}
+                </span>
+              )}
               <span className="removed-note">removed on Save</span>
               <span className="tools">
                 <button type="button" className="sm" data-role="move-up" title="run this Stage earlier" aria-label={`move ${label} up`} style={i === 0 ? { visibility: "hidden" } : undefined} onClick={() => editCards((cards) => moveStage(cards, card.id, -1))}>

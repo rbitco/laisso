@@ -637,6 +637,8 @@ describe("a save or delete that breaks a reusing Pipeline (LASSO-219)", () => {
   it("refuses text, patch and delete with 409 listing what breaks, and goes ahead confirmed", async () => {
     const laisso = await laissoWith({ work: WORK, "bug-fix": BUG_FIX });
     const file = path.join(laisso.home, "pipelines", "work.yaml");
+    expect((await laisso.api<PipelineFile>("/api/pipelines/work")).reusedBy).toEqual([{ pipeline: "bug-fix", stages: ["implement"] }]);
+    expect((await laisso.api<PipelineFile>("/api/pipelines/bug-fix")).reusedBy).toEqual([]);
     const renamed = WORK.replace("name: implement", "name: build");
     const put = await refusal(laisso, "/api/pipelines/work", { method: "PUT", body: JSON.stringify({ text: renamed }) });
     expect(put.status).toBe(409);

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { breakage, brokenLine, WouldBreak } from "../src/pipeline/impact.ts";
+import { breakage, brokenLine, reusers, WouldBreak } from "../src/pipeline/impact.ts";
 import type { ReadPipeline } from "../src/pipeline/load.ts";
 
 // Reuse impact, breakage (LASSO-219): which Pipelines a change to another would stop loading.
@@ -41,5 +41,32 @@ describe("breakage", () => {
     const error = new WouldBreak("Saving", "default", after(DEFAULT.replace("name: implement", "name: build")).slice(0, 1));
     expect(error.message).toBe("Saving default breaks 1 Pipeline: bug-fix: stage 2 (use default.implement): default has no Stage named implement");
     expect(brokenLine({ pipeline: "a", problem: "Pipeline a: reuse loop a → b → a" })).toBe("a: reuse loop a → b → a");
+  });
+});
+
+describe("reusers", () => {
+  const SOURCE = "stages:\n  - name: plan\n    prompt: p\n  - name: implement\n    prompt: i\n  - name: review\n    prompt: r\n";
+  const files = {
+    default: SOURCE,
+    "bug-fix": "stages:\n  - include: default\n    to: implement\n    skip: [ plan ]\n",
+    "codex-review": "stages:\n  - use: default.review\n    name: check\n",
+    hotfix: "stages:\n  - use: bug-fix.implement\n",
+    solo: "stages:\n  - name: x\n    prompt: x\n",
+    broken: "stages:\n  - use: default.nope\n",
+  };
+  const of = (source: string) => reusers(texts(files), Object.keys(files), source);
+
+  it("names each Pipeline that takes Stages from a source, by use, by include within from/to and skip, and through a chain", () => {
+    expect(of("default")).toEqual([
+      { pipeline: "bug-fix", stages: ["implement"] },
+      { pipeline: "codex-review", stages: ["review"] },
+      { pipeline: "hotfix", stages: ["implement"] },
+    ]);
+    expect(of("bug-fix")).toEqual([{ pipeline: "hotfix", stages: ["implement"] }]);
+  });
+
+  it("is empty for a Pipeline nothing reuses", () => {
+    expect(of("solo")).toEqual([]);
+    expect(of("hotfix")).toEqual([]);
   });
 });

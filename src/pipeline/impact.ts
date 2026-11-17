@@ -1,4 +1,4 @@
-import { overlay, PipelineError, resolvePipeline, type ReadPipeline } from "./load.ts";
+import { overlay, PipelineError, resolvePipeline, type Pipeline, type ReadPipeline, type Stage } from "./load.ts";
 
 /** A Pipeline that loads now and would not after a change, and what it would say. */
 export interface Broken {
@@ -52,4 +52,43 @@ export function brokenLine(b: Broken): string {
   if (!b.problem.startsWith(lead)) return `${b.pipeline}: ${b.problem}`;
   const rest = b.problem.slice(lead.length).replace(/^:?\s*/, "");
   return `${b.pipeline}: ${rest}`;
+}
+
+/** A Pipeline that takes Stages from a source, and which of the source's Stages, by their names there. */
+export interface Reuser {
+  pipeline: string;
+  stages: string[];
+}
+
+/**
+ * Reuse impact, reusers (LASSO-220): the Pipelines that take Stages from
+ * `source`, directly or through a chain (a `use` of a Stage that was itself
+ * copied from it), each with the source Stages it takes. Pipelines that do
+ * not load are left out: they take nothing until fixed.
+ */
+export function reusers(read: ReadPipeline, names: string[], source: string): Reuser[] {
+  const loaded = new Map<string, Pipeline>();
+  for (const name of names) {
+    try {
+      loaded.set(name, resolvePipeline(name, read));
+    } catch (error) {
+      if (!(error instanceof PipelineError)) throw error;
+    }
+  }
+  /** The source Stage a Stage came from, followed back through each Pipeline it was copied via. */
+  const takes = (stage: Stage, seen: Set<string>): string | null => {
+    const from = stage.from;
+    if (!from) return null;
+    if (from.pipeline === source) return from.stage;
+    const key = `${from.pipeline}.${from.stage}`;
+    const upstream = loaded.get(from.pipeline)?.stages.find((s) => s.name === from.stage);
+    if (!upstream || seen.has(key)) return null;
+    return takes(upstream, new Set([...seen, key]));
+  };
+  return names.flatMap((name) => {
+    const pipeline = loaded.get(name);
+    if (name === source || !pipeline) return [];
+    const stages = [...new Set(pipeline.stages.flatMap((s) => takes(s, new Set()) ?? []))];
+    return stages.length ? [{ pipeline: name, stages }] : [];
+  });
 }

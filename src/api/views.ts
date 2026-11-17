@@ -418,6 +418,8 @@ export interface PipelineFile {
   reuses: boolean;
   /** Kept as parts (intake: false). */
   parts: boolean;
+  /** The Pipelines that take Stages from this one, each with the Stages (by name here) it takes. */
+  reusedBy: Array<{ pipeline: string; stages: string[] }>;
 }
 
 /** A Version of a Pipeline that active Tickets still run, and how many. */
@@ -484,7 +486,7 @@ export function pipelineListing(source: PipelineSource): PipelineListing {
   return { name: source.name, file: source.file, profile: source.pipeline?.profile ?? null, stages, problem: source.problem, parts: source.pipeline?.intake === false };
 }
 
-export function pipelineFileView(source: PipelineSource): PipelineFile {
+export function pipelineFileView(source: PipelineSource, reusedBy: PipelineFile["reusedBy"] = []): PipelineFile {
   const pipeline = source.pipeline;
   return {
     name: source.name,
@@ -494,6 +496,7 @@ export function pipelineFileView(source: PipelineSource): PipelineFile {
     problem: source.problem,
     reuses: source.reuses,
     parts: pipeline?.intake === false,
+    reusedBy,
   };
 }
 

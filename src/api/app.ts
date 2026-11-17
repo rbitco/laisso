@@ -384,7 +384,7 @@ export function createApp(deps: AppDeps): Hono {
   app.get("/api/pipelines", (c) => c.json(pipelines.list().map(pipelineListing)));
   app.get("/api/pipelines/:name", (c) => {
     const source = pipelines.read(c.req.param("name"));
-    return source ? c.json(pipelineFileView(source)) : c.json({ error: `no Pipeline named ${c.req.param("name")}` }, 404);
+    return source ? c.json(pipelineFileView(source, pipelines.reusedBy(source.name))) : c.json({ error: `no Pipeline named ${c.req.param("name")}` }, 404);
   });
   // Versions (ADR 0009): read-only, and readable after the file is gone.
   app.get("/api/pipelines/:name/versions", (c) => c.json(deps.versions.live(c.req.param("name")).map((v): LiveVersionView => ({ version: v.version, createdAt: v.created_at, live: v.live }))));

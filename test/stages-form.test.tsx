@@ -66,9 +66,9 @@ const stage = (name: string) => screen.getByText(name, { selector: ".nm" }).clos
 const toggle = (name: string) => within(stage(name)).getAllByRole("button")[0]!;
 const saveState = () => document.querySelector(".savebar .state")!.textContent;
 
-async function showForm(pipeline: PipelineView = PIPELINE) {
+async function showForm(pipeline: PipelineView = PIPELINE, reusedBy: LoadedPipeline["reusedBy"] = []) {
   const onSaved = vi.fn();
-  const file: LoadedPipeline = { name: "default", file: "/p/default.yaml", text: "", pipeline, problem: null, reuses: false, parts: false };
+  const file: LoadedPipeline = { name: "default", file: "/p/default.yaml", text: "", pipeline, problem: null, reuses: false, parts: false, reusedBy };
   render(<StagesForm file={file} onSaved={onSaved} />);
   await screen.findByText("Pipeline settings");
   return { onSaved, user: userEvent.setup() };
@@ -437,5 +437,18 @@ describe("a field save that breaks a reusing Pipeline (LASSO-219)", () => {
     await user.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Save anyway" }));
     await waitFor(() => expect(onSaved).toHaveBeenCalled());
     expect(laisso.sent.map((x) => x.route)).toEqual(["/api/pipelines/default", "/api/pipelines/default", "/api/pipelines/default?confirm=1"]);
+  });
+});
+
+describe("a Stage other Pipelines reuse (LASSO-220)", () => {
+  it("carries a marker naming them, and Stages nobody takes carry none", async () => {
+    fakeLaisso();
+    await showForm(PIPELINE, [{ pipeline: "bug-fix", stages: ["plan", "notify"] }, { pipeline: "codex-review", stages: ["plan"] }]);
+    expect(within(stage("plan")).getByText("↗ bug-fix, codex-review")).toBeTruthy();
+    expect(within(stage("notify")).getByText("↗ bug-fix")).toBeTruthy();
+    cleanup();
+    fakeLaisso();
+    await showForm();
+    expect(document.querySelector('[data-role="reused-by"]')).toBeNull();
   });
 });
