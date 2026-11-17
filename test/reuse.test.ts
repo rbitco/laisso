@@ -245,12 +245,73 @@ stages:
     expect(names(patch({ order: ["implement"] }))).toEqual(["implement"]);
   });
 
-  it("edits own Stages in place among reuse entries, and refuses moves and new Stages until LASSO-223", () => {
+  it("edits own Stages in place among reuse entries", () => {
     const { patch } = setup();
     expect(patch({ stages: { smoke: { prompt: "Run the app." } } }).text).toBe(BUG_FIX.replace("prompt: Run it.", "prompt: Run the app."));
-    expect(() => patch({ order: ["review", "implement", "smoke"] })).toThrow("Pipeline bug-fix: Stages move by text for now; it reuses Stages from other Pipelines (implement)");
-    expect(() => patch({ order: ["implement", { name: "x", prompt: "x" }] })).toThrow(/new Stages go in by text for now/);
     expect(() => patch({ stages: { nope: { prompt: "x" } } })).toThrow("Pipeline bug-fix has no Stage named nope");
+    expect(() => patch({ order: ["implement", "implement"] })).toThrow("order names Stage implement twice");
+  });
+});
+
+describe("the entry rewriter: moves and new Stages across reuse entries (LASSO-223)", () => {
+  const FOUR = "stages:\n  - name: plan\n    prompt: Plan it.\n  - name: implement\n    prompt: Carry out the plan.\n  - name: test\n    prompt: Test it.\n  - name: review\n    prompt: Address feedback.\n";
+  const setup = (text: string) => {
+    const dir = mkdtempSync(path.join(tmpdir(), "laisso-move-"));
+    writeFileSync(path.join(dir, "four.yaml"), FOUR);
+    writeFileSync(path.join(dir, "bug-fix.yaml"), text);
+    return (p: Record<string, unknown>) => new PipelineFiles(dir, () => DEFAULT_CONFIG).patch("bug-fix", p);
+  };
+  const names = (source: { pipeline: { stages: Stage[] } | null }) => source.pipeline!.stages.map((s) => s.name);
+  const INCLUDE = "stages:\n  # The four-step flow.\n  - include: four\n    skip: [ test ]\n    change:\n      plan:\n        human: true\n      review:\n        append: Be kind.\n";
+
+  it("splits an include around a Stage added inside it, each half with its own range and changes", () => {
+    const patch = setup(INCLUDE.replace("    skip: [ test ]\n", ""));
+    const saved = patch({ order: ["plan", "implement", { name: "triage", prompt: "Triage." }, "test", "review"] });
+    expect(names(saved)).toEqual(["plan", "implement", "triage", "test", "review"]);
+    expect(saved.text).toBe(
+      "stages:\n  # The four-step flow.\n  - include: four\n    to: implement\n    change:\n      plan:\n        human: true\n  - name: triage\n    prompt: Triage.\n  - include: four\n    from: test\n    change:\n      review:\n        append: Be kind.\n",
+    );
+    expect(runner(saved.pipeline!.stages[0]!).human).toBe(true);
+  });
+
+  it("splits with skips falling in each half's own range", () => {
+    const patch = setup("stages:\n  - include: four\n    skip: [ implement ]\n");
+    const saved = patch({ order: ["plan", "test", { name: "x", prompt: "x" }, "review"] });
+    expect(names(saved)).toEqual(["plan", "test", "x", "review"]);
+    expect(saved.text).toBe("stages:\n  - include: four\n    to: test\n    skip: [ implement ]\n  - name: x\n    prompt: x\n  - use: four.review\n");
+  });
+
+  it("adds a Stage at an include's edge as an entry beside it, the include and its comment untouched", () => {
+    const patch = setup(INCLUDE);
+    const saved = patch({ order: [{ name: "triage", prompt: "Triage." }, "plan", "implement", "review"] });
+    expect(names(saved)).toEqual(["triage", "plan", "implement", "review"]);
+    expect(saved.text).toBe("stages:\n  - name: triage\n    prompt: Triage.\n" + INCLUDE.slice("stages:\n".length));
+  });
+
+  it("moves a Stage out of its include's order as a skip there and a use at its new spot, carrying its changes", () => {
+    const patch = setup(INCLUDE + "  - name: smoke\n    prompt: Run it.\n");
+    const saved = patch({ order: ["implement", "review", "smoke", "plan"] });
+    expect(names(saved)).toEqual(["implement", "review", "smoke", "plan"]);
+    expect(saved.text).toBe(
+      "stages:\n  # The four-step flow.\n  - include: four\n    skip: [ plan, test ]\n    change:\n      review:\n        append: Be kind.\n  - name: smoke\n    prompt: Run it.\n  - use: four.plan\n    human: true\n",
+    );
+  });
+
+  it("shifts an include's edge when its last Stage moves past the next entry", () => {
+    const patch = setup("stages:\n  - include: four\n  - name: smoke\n    prompt: Run it.\n");
+    const saved = patch({ order: ["plan", "implement", "test", "smoke", "review"] });
+    expect(names(saved)).toEqual(["plan", "implement", "test", "smoke", "review"]);
+    expect(saved.text).toBe("stages:\n  - include: four\n    to: test\n  - name: smoke\n    prompt: Run it.\n  - use: four.review\n");
+    // And back: the use moves whole; separate entries are never merged.
+    const back = patch({ order: ["plan", "implement", "test", "review", "smoke"] });
+    expect(names(back)).toEqual(["plan", "implement", "test", "review", "smoke"]);
+    expect(back.text).toBe("stages:\n  - include: four\n    to: test\n  - use: four.review\n  - name: smoke\n    prompt: Run it.\n");
+  });
+
+  it("moves own and use entries whole, and sets fields on Stages wherever they land", () => {
+    const patch = setup("stages:\n  - use: four.review\n    append: Be kind.\n  # ours\n  - name: smoke\n    prompt: Run it.\n");
+    const saved = patch({ order: ["smoke", "review"], stages: { review: { human: true }, smoke: { prompt: "Run the app." } } });
+    expect(saved.text).toBe("stages:\n  # ours\n  - name: smoke\n    prompt: Run the app.\n  - use: four.review\n    append: Be kind.\n    human: true\n");
   });
 });
 

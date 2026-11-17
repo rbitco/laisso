@@ -680,3 +680,17 @@ describe("a reusing Pipeline through the API (LASSO-222)", () => {
     expect(saved.reuse!.map((r) => r.skipped)).toEqual([false, false, false]);
   });
 });
+
+describe("moving and adding among reused Stages through the API (LASSO-223)", () => {
+  it("writes the file the editor's move and add give", async () => {
+    const FLOW = "stages:\n  - name: plan\n    prompt: plan.\n  - name: implement\n    prompt: implement.\n  - name: review\n    prompt: review.\n";
+    const BUG_FIX = "stages:\n  - include: flow\n    change:\n      review:\n        append: Be kind.\n  - name: smoke\n    prompt: smoke.\n";
+    const laisso = await laissoWith({ flow: FLOW, "bug-fix": BUG_FIX });
+    const patch = (body: object) => laisso.api<PipelineFile>("/api/pipelines/bug-fix", { method: "PATCH", body: JSON.stringify(body) });
+    const moved = await patch({ order: ["plan", "implement", "smoke", "review"] });
+    expect(moved.text).toBe("stages:\n  - include: flow\n    to: implement\n  - name: smoke\n    prompt: smoke.\n  - use: flow.review\n    append: Be kind.\n");
+    const added = await patch({ order: ["plan", { name: "triage", prompt: "Triage." }, "implement", "smoke", "review"] });
+    expect(added.text).toBe("stages:\n  - use: flow.plan\n  - name: triage\n    prompt: Triage.\n  - use: flow.implement\n  - name: smoke\n    prompt: smoke.\n  - use: flow.review\n    append: Be kind.\n");
+    expect(added.pipeline!.stages.map((s) => s.name)).toEqual(["plan", "triage", "implement", "smoke", "review"]);
+  });
+});

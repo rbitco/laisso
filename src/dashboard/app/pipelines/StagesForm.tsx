@@ -119,8 +119,6 @@ function Editor({ file, params, start, onSaved }: { file: LoadedPipeline; params
   // A profile drawer save brings the new config, so each button resolves against what config.yaml now says.
   const [config, setConfig] = useState(start);
   const [draft, setDraft] = useState(() => draftOf(pipeline, file.reuse));
-  // Moving and adding Stages among reuse entries is still done in the text (LASSO-223).
-  const reusing = file.reuse !== null && file.reuse !== undefined;
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [breaking, setBreaking] = useState<Breaking | null>(null);
@@ -240,16 +238,12 @@ function Editor({ file, params, start, onSaved }: { file: LoadedPipeline; params
               )}
               <span className="removed-note">{reused?.skipped ? "skipped from " + reused.origin.pipeline : goes + " on Save"}</span>
               <span className="tools">
-                {!reusing && (
-                  <>
-                    <button type="button" className="sm" data-role="move-up" title="run this Stage earlier" aria-label={`move ${label} up`} style={i === 0 ? { visibility: "hidden" } : undefined} onClick={() => editCards((cards) => moveStage(cards, card.id, -1))}>
-                      ↑
-                    </button>
-                    <button type="button" className="sm" data-role="move-down" title="run this Stage later" aria-label={`move ${label} down`} style={i === draft.cards.length - 1 ? { visibility: "hidden" } : undefined} onClick={() => editCards((cards) => moveStage(cards, card.id, 1))}>
-                      ↓
-                    </button>
-                  </>
-                )}
+                <button type="button" className="sm" data-role="move-up" title="run this Stage earlier" aria-label={`move ${label} up`} style={i === 0 ? { visibility: "hidden" } : undefined} onClick={() => editCards((cards) => moveStage(cards, card.id, -1))}>
+                  ↑
+                </button>
+                <button type="button" className="sm" data-role="move-down" title="run this Stage later" aria-label={`move ${label} down`} style={i === draft.cards.length - 1 ? { visibility: "hidden" } : undefined} onClick={() => editCards((cards) => moveStage(cards, card.id, 1))}>
+                  ↓
+                </button>
                 <button
                   type="button"
                   className="sm"
@@ -280,14 +274,14 @@ function Editor({ file, params, start, onSaved }: { file: LoadedPipeline; params
               ) : (
                 <RunnerCard {...shared} draft={card.draft} params={params} pipeline={file.name} pipelineProfile={draft.profile || null} config={config} onConfig={setConfig} onEdit={(change) => editStage(card.id, change)} />
               )}
-              {!reusing && <AddStage
+              <AddStage
                 after={label}
                 onAdd={(kind) => {
                   const next = addStage(draft.cards, card.id, kind);
                   edit((d) => ({ ...d, cards: next }));
                   setFocus({ id: next[i + 1]!.id, selector: ".stage-fields input, .stage-fields select" });
                 }}
-              />}
+              />
             </Fragment>
           );
         })}

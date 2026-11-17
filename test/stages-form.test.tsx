@@ -484,8 +484,6 @@ describe("a Pipeline that reuses Stages, in the field editor (LASSO-222)", () =>
     expect(within(plan).getByText("skipped from default")).toBeTruthy();
     expect(within(plan).getByRole("button", { name: "Keep" })).toBeTruthy();
     expect([...document.querySelectorAll(".rail .station")].map((st) => st.textContent)).toEqual(["", "1", "2", "3"]);
-    // Moving and adding among reuse entries waits for LASSO-223.
-    expect(document.querySelector('[data-role="move-up"], .add-stage')).toBeNull();
   });
 
   it("shows the source's value under each unchanged field, and Reset puts a changed one back", async () => {
@@ -535,5 +533,35 @@ describe("a Pipeline that reuses Stages, in the field editor (LASSO-222)", () =>
     await second.user.click(within(head("notify")).getByRole("button", { name: "remove notify" }));
     await save(second.user);
     await waitFor(() => expect(again.sent).toEqual([{ method: "PATCH", route: "/api/pipelines/default", body: { order: ["implement", "smoke"] } }]));
+  });
+});
+
+describe("moving and adding Stages among reused ones (LASSO-223)", () => {
+  const runnerStage = (name: string): StageFields => ({ kind: "runner", name, label: name, prompt: name + ".", skills: [], profile: null, human: false, advance: true, artifact: null, repeat: null, budget: {} });
+  const [PLAN, IMPLEMENT, REVIEW, SMOKE] = ["plan", "implement", "review", "smoke"].map(runnerStage) as [StageFields, StageFields, StageFields, StageFields];
+  const from = (stage: StageFields) => ({ stage, origin: { pipeline: "default", stage: stage.name, how: "include" as const }, source: stage, skipped: false });
+  const REUSE: NonNullable<LoadedPipeline["reuse"]> = [from(PLAN), from(IMPLEMENT), from(REVIEW), { stage: SMOKE, origin: null, source: null, skipped: false }];
+  const show = () => showForm({ profile: null, budget: {}, stages: [PLAN, IMPLEMENT, REVIEW, SMOKE] }, [], REUSE);
+
+  it("sends the new order when a reused Stage moves, its change carried by the server", async () => {
+    const laisso = fakeLaisso();
+    const { user } = await show();
+    await user.click(screen.getByRole("button", { name: "move review down" }));
+    await save(user);
+    await waitFor(() => expect(notice().textContent).toBe("saved default"));
+    expect(laisso.sent).toEqual([{ method: "PATCH", route: "/api/pipelines/default", body: { order: ["plan", "implement", "smoke", "review"] } }]);
+  });
+
+  it("sends a Stage added inside an include in its place", async () => {
+    const laisso = fakeLaisso();
+    const { user } = await show();
+    const plus = within(stage("plan").nextElementSibling as HTMLElement).getByRole("button");
+    await user.click(plus);
+    await user.click(screen.getByRole("button", { name: "+ Runner Stage" }));
+    await user.type(screen.getByRole("textbox", { name: "Name" }), "triage");
+    await user.type(screen.getByRole("textbox", { name: "Prompt" }), "Triage.");
+    await save(user);
+    await waitFor(() => expect(notice().textContent).toBe("saved default"));
+    expect(laisso.sent).toEqual([{ method: "PATCH", route: "/api/pipelines/default", body: { order: ["plan", { name: "triage", prompt: "Triage." }, "implement", "review", "smoke"] } }]);
   });
 });

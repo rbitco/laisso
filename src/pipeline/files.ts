@@ -1,7 +1,7 @@
 import { readFileSync, unlinkSync } from "node:fs";
 import { replaceFile } from "../atomic-write.ts";
 import path from "node:path";
-import { parseDocument, isMap, isScalar, isSeq, type Document } from "yaml";
+import { parseDocument, isMap, isScalar, isSeq, type Document, type Node } from "yaml";
 import { applyPatch } from "../yaml-edit.ts";
 import { isPlainObject } from "../fields.ts";
 import { checkActionsAny, checkProfiles, fileReader, overlay, resolveEntries, writesReuse, pipelineFile, listPipelines, PipelineError, NAME, type Entry, type Pipeline } from "./load.ts";
@@ -86,7 +86,7 @@ export class PipelineFiles {
     const { stages, order, ...rest } = patch;
     applyPatch(doc, rest);
     if (stages !== undefined && !isPlainObject(stages)) throw new PipelineError("stages must be a mapping of Stage name to fields");
-    if (current.entries) rewriteEntries(doc, name, current.entries, { stages, order }, applyStage);
+    if (current.entries) rewriteEntries(doc, name, current.entries, { stages, order }, { apply: applyStage, create: (d, fields) => newStage(d, fields) as Node });
     else {
       for (const [stageName, fields] of Object.entries(stages ?? {})) {
         const index = current.pipeline.stages.findIndex((s) => s.name === stageName);
