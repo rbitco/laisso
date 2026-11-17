@@ -44,7 +44,7 @@ type Sent = { method: string; route: string; body: unknown };
 /** A stand-in for Laisso's /api: config, its Actions, and every write it was sent; `refuse` makes the next write fail. */
 function fakeLaisso() {
   const sent: Sent[] = [];
-  const state = { refuse: null as string | null };
+  const state = { refuse: null as string | null, breaks: null as string | null };
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
   vi.stubGlobal("fetch", async (url: string, init: RequestInit = {}) => {
     const method = init.method ?? "GET";
@@ -54,6 +54,7 @@ function fakeLaisso() {
     const body = init.body ? JSON.parse(String(init.body)) : null;
     sent.push({ method, route: url, body });
     if (state.refuse) return json({ error: state.refuse }, 400);
+    if (state.breaks && !url.endsWith("?confirm=1")) return json({ error: state.breaks, breaks: [] }, 409);
     return json({});
   });
   return { sent, state };
@@ -417,5 +418,24 @@ describe("the Artifact picker", () => {
     await save(user);
     await waitFor(() => expect(laisso.sent).toHaveLength(1));
     expect(laisso.sent[0]!.body).toEqual({ stages: { plan: { artifact: { action: "deploy", with: { env: "prod", region: "us" } } } } });
+  });
+});
+
+describe("a field save that breaks a reusing Pipeline (LASSO-219)", () => {
+  it("asks first, listing what breaks; Cancel leaves it unsaved, Save anyway sends it confirmed", async () => {
+    const laisso = fakeLaisso();
+    laisso.state.breaks = "Saving default breaks 1 Pipeline: bug-fix: stage 1 (use default.plan): default has no Stage named plan";
+    const { user, onSaved } = await showForm();
+    await user.selectOptions(screen.getByRole("combobox", { name: "Agent Profile" }), "codex");
+    await save(user);
+    const confirm = await screen.findByRole("alertdialog");
+    expect(within(confirm).getByText(laisso.state.breaks)).toBeTruthy();
+    await user.click(within(confirm).getByRole("button", { name: "Cancel" }));
+    expect(onSaved).not.toHaveBeenCalled();
+    expect(saveState()).toBe("Unsaved changes");
+    await save(user);
+    await user.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Save anyway" }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(laisso.sent.map((x) => x.route)).toEqual(["/api/pipelines/default", "/api/pipelines/default", "/api/pipelines/default?confirm=1"]);
   });
 });

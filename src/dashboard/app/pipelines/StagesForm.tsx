@@ -5,6 +5,7 @@ import { ARTIFACTS } from "../../../pipeline/artifacts.ts";
 import { stageProfileView } from "../../metro.ts";
 import { api } from "../api.ts";
 import { showNotice } from "../notice.tsx";
+import { BreakConfirm, confirmQuery, wouldBreak, type Breaking } from "./BreakConfirm.tsx";
 import { openProfileDrawer } from "../profiles/drawer.tsx";
 import { ProfileButton } from "../profiles/ProfileButton.tsx";
 import { firstLine, RailStage, StagesHead } from "./Rail.tsx";
@@ -76,6 +77,7 @@ function Editor({ file, params, start, onSaved }: { file: LoadedPipeline; params
   const [draft, setDraft] = useState(() => draftOf(pipeline));
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [breaking, setBreaking] = useState<Breaking | null>(null);
   const [focus, setFocus] = useState<Focus | null>(null);
   const form = useRef<HTMLFormElement>(null);
 
@@ -115,13 +117,21 @@ function Editor({ file, params, start, onSaved }: { file: LoadedPipeline; params
       showNotice("nothing changed");
       return;
     }
+    await send(patch, false);
+  };
+
+  // A save that would stop other Pipelines loading asks first, and goes again confirmed (LASSO-219).
+  const send = async (patch: object, confirm: boolean) => {
+    setBreaking(null);
     setBusy(true);
     try {
-      await api<PipelineFile>("/api/pipelines/" + encodeURIComponent(file.name), { method: "PATCH", body: JSON.stringify(patch) });
+      await api<PipelineFile>("/api/pipelines/" + encodeURIComponent(file.name) + confirmQuery(confirm), { method: "PATCH", body: JSON.stringify(patch) });
       showNotice("saved " + file.name);
       onSaved();
     } catch (error) {
-      showNotice(message(error));
+      const breaks = confirm ? null : wouldBreak(error);
+      if (breaks) setBreaking({ message: breaks, go: () => void send(patch, true) });
+      else showNotice(message(error));
       setBusy(false);
     }
   };
@@ -209,6 +219,7 @@ function Editor({ file, params, start, onSaved }: { file: LoadedPipeline; params
           );
         })}
       </div>
+      {breaking && <BreakConfirm breaking={breaking} action="Save anyway" onCancel={() => setBreaking(null)} />}
       <div className="savebar">
         <button className={busy ? "primary busy" : "primary"} type="submit" disabled={busy}>
           Save changes

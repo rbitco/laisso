@@ -6,6 +6,7 @@ import { applyPatch } from "../yaml-edit.ts";
 import { isPlainObject } from "../fields.ts";
 import { checkActionsAny, checkProfiles, fileReader, overlay, resolvePipeline, writesReuse, pipelineFile, listPipelines, PipelineError, NAME, type Pipeline } from "./load.ts";
 import { actionSets, anyRepoProfiles, type Config } from "../server/config.ts";
+import { breakage, WouldBreak } from "./impact.ts";
 
 /** A Pipeline file as read: the text as written, and what it parses to or why it does not. */
 export interface PipelineSource {
@@ -57,19 +58,23 @@ export class PipelineFiles {
     return this.sourceOf(name, file, readFileSync(file, "utf8"));
   }
 
-  /** Create or replace the whole file; the text must parse first. With `create`, an existing Pipeline is left alone. */
-  write(name: string, text: unknown, opts: { create?: boolean } = {}): PipelineSource {
+  /**
+   * Create or replace the whole file; the text must parse first. With `create`, an existing Pipeline is left alone.
+   * A save that would stop another Pipeline loading is refused with WouldBreak unless `confirm` is set.
+   */
+  write(name: string, text: unknown, opts: { create?: boolean; confirm?: boolean } = {}): PipelineSource {
     checkName(name);
     if (typeof text !== "string") throw new PipelineError("text must be the whole Pipeline file");
     this.check(this.load(name, text));
     const existing = pipelineFile(this.dir, name);
     if (existing && opts.create) throw new PipelineError(`Pipeline ${name} already exists`);
+    this.guard("Saving", name, text, opts.confirm);
     const file = existing ?? path.join(this.dir, `${name}.yaml`);
     replaceFile(file, text);
     return this.sourceOf(name, file, text);
   }
 
-  patch(name: string, patch: unknown): PipelineSource {
+  patch(name: string, patch: unknown, opts: { confirm?: boolean } = {}): PipelineSource {
     const current = this.read(name);
     if (!current) throw new PipelineError(`Pipeline ${name} does not exist under ${this.dir}`);
     if (!isPlainObject(patch)) throw new PipelineError("patch must be a mapping");
@@ -93,6 +98,7 @@ export class PipelineFiles {
     if (order !== undefined) reorderStages(doc, name, current.pipeline.stages.map((s) => s.name), order);
     const text = doc.toString();
     this.check(this.load(name, text));
+    this.guard("Saving", name, text, opts.confirm);
     replaceFile(current.file, text);
     return this.sourceOf(name, current.file, text);
   }
@@ -110,6 +116,13 @@ export class PipelineFiles {
     }
   }
 
+  /** Refuse a change that would stop another Pipeline loading, unless confirmed (LASSO-219). */
+  private guard(verb: "Saving" | "Deleting", name: string, text: string | null, confirm = false): void {
+    if (confirm) return;
+    const breaks = breakage(fileReader(this.dir), listPipelines(this.dir), name, text);
+    if (breaks.length) throw new WouldBreak(verb, name, breaks);
+  }
+
   /** What parsing cannot see: each action Stage fits the Actions some repo has (see actionSets), and each profile named exists globally or in some repo. */
   private check(pipeline: Pipeline): void {
     const config = this.config();
@@ -117,9 +130,10 @@ export class PipelineFiles {
     checkProfiles(pipeline, anyRepoProfiles(config));
   }
 
-  remove(name: string): boolean {
+  remove(name: string, opts: { confirm?: boolean } = {}): boolean {
     const file = NAME.test(name) ? pipelineFile(this.dir, name) : null;
     if (!file) return false;
+    this.guard("Deleting", name, null, opts.confirm);
     unlinkSync(file);
     return true;
   }

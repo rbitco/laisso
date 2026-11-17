@@ -626,3 +626,38 @@ describe("the pr-review Pipeline", () => {
     expect(listed).toMatchObject({ problem: null, stages: [{ name: "review-pr", kind: "runner" }] });
   });
 });
+
+describe("a save or delete that breaks a reusing Pipeline (LASSO-219)", () => {
+  const BUG_FIX = "stages:\n  - use: work.implement\n";
+  const refusal = async (laisso: Laisso, route: string, init: RequestInit) => {
+    const res = await laisso.api<Response>(route, { ...init, raw: true });
+    return { status: res.status, body: (await res.json()) as { error: string; breaks?: Array<{ pipeline: string; problem: string }> } };
+  };
+
+  it("refuses text, patch and delete with 409 listing what breaks, and goes ahead confirmed", async () => {
+    const laisso = await laissoWith({ work: WORK, "bug-fix": BUG_FIX });
+    const file = path.join(laisso.home, "pipelines", "work.yaml");
+    const renamed = WORK.replace("name: implement", "name: build");
+    const put = await refusal(laisso, "/api/pipelines/work", { method: "PUT", body: JSON.stringify({ text: renamed }) });
+    expect(put.status).toBe(409);
+    expect(put.body.error).toBe("Saving work breaks 1 Pipeline: bug-fix: stage 1 (use work.implement): work has no Stage named implement");
+    expect(put.body.breaks).toEqual([{ pipeline: "bug-fix", problem: "Pipeline bug-fix stage 1 (use work.implement): work has no Stage named implement" }]);
+    expect(await readFile(file, "utf8")).toBe(WORK);
+
+    const patch = await refusal(laisso, "/api/pipelines/work", { method: "PATCH", body: JSON.stringify({ order: ["notes"] }) });
+    expect(patch.status).toBe(409);
+    expect((await refusal(laisso, "/api/pipelines/work", { method: "DELETE" })).body.error).toBe("Deleting work breaks 1 Pipeline: bug-fix: stage 1 (use work.implement): no Pipeline named work");
+    expect(await readFile(file, "utf8")).toBe(WORK);
+
+    await laisso.api("/api/pipelines/work?confirm=1", { method: "PUT", body: JSON.stringify({ text: renamed }) });
+    expect(await readFile(file, "utf8")).toBe(renamed);
+    expect((await laisso.api<PipelineFile>("/api/pipelines/bug-fix")).problem).toMatch(/work has no Stage named implement/);
+  });
+
+  it("needs no confirmation when nothing breaks", async () => {
+    const laisso = await laissoWith({ work: WORK, "bug-fix": BUG_FIX });
+    await laisso.api("/api/pipelines/work", { method: "PUT", body: JSON.stringify({ text: WORK.replace("Do the work.", "Do it well.") }) });
+    await laisso.api("/api/pipelines/work", { method: "PATCH", body: JSON.stringify({ stages: { notes: { prompt: "Notes." } } }) });
+    expect((await laisso.api<{ ok: boolean }>("/api/pipelines/bug-fix", { method: "DELETE" })).ok).toBe(true);
+  });
+});

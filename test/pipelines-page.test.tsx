@@ -39,7 +39,7 @@ type Sent = { method: string; route: string; body: unknown };
 /** A stand-in for Laisso's /api: the Pipeline files as they stand, their live Versions, and every write it was sent. */
 function fakeLaisso(files: Record<string, Stored> = { default: { text: DEFAULT_TEXT, pipeline: DEFAULT, problem: null } }) {
   const sent: Sent[] = [];
-  const state = { files, refuse: null as string | null, versions: {} as Record<string, LiveVersionView[]>, frozen: {} as Record<string, PipelineVersionView> };
+  const state = { files, refuse: null as string | null, breaks: null as string | null, versions: {} as Record<string, LiveVersionView[]>, frozen: {} as Record<string, PipelineVersionView> };
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
   const fileView = (name: string): PipelineFile => ({ name, file: `/p/${name}.yaml`, reuses: false, parts: false, ...state.files[name]! });
   vi.stubGlobal("fetch", async (url: string, init: RequestInit = {}) => {
@@ -48,7 +48,7 @@ function fakeLaisso(files: Record<string, Stored> = { default: { text: DEFAULT_T
       return json(
         Object.entries(state.files).map(([name, f]): PipelineListing => ({ name, file: `/p/${name}.yaml`, profile: null, problem: f.problem, parts: f.parts ?? false, stages: (f.pipeline?.stages ?? []).map((s) => ({ name: s.name, kind: s.kind, label: s.label, profile: null })) })),
       );
-    const m = /^\/api\/pipelines\/([^/]+)(\/versions(?:\/(\d+))?)?$/.exec(url);
+    const m = /^\/api\/pipelines\/([^/?]+)(\/versions(?:\/(\d+))?)?(?:\?.*)?$/.exec(url);
     if (!m) return json({ error: "not found" }, 404);
     const name = decodeURIComponent(m[1]!);
     if (m[3]) return state.frozen[`${name}/v${m[3]}`] ? json(state.frozen[`${name}/v${m[3]}`]) : json({ error: `no Version ${m[3]} of Pipeline ${name}` }, 404);
@@ -57,6 +57,7 @@ function fakeLaisso(files: Record<string, Stored> = { default: { text: DEFAULT_T
     const body = init.body ? JSON.parse(String(init.body)) : null;
     sent.push({ method, route: url, body });
     if (state.refuse) return json({ error: state.refuse }, 400);
+    if (state.breaks && !url.endsWith("?confirm=1")) return json({ error: state.breaks, breaks: [] }, 409);
     if (method === "DELETE") {
       delete state.files[name];
       return json({ ok: true });
@@ -210,6 +211,40 @@ describe("a Pipeline's editor", () => {
     expect(laisso.sent).toEqual([{ method: "PUT", route: "/api/pipelines/default", body: { text: DEFAULT_TEXT + "# reviewed\n" } }]);
     await waitFor(() => expect(screen.getByRole("button", { name: "Edit as text" })).toBeTruthy());
     expect((await screen.findByText("Pipeline settings")).closest("[hidden]")).toBeNull();
+  });
+
+  it("asks before a text save that breaks other Pipelines; Cancel sends nothing more, Save anyway confirms", async () => {
+    const laisso = fakeLaisso();
+    const breaks = "Saving default breaks 1 Pipeline: bug-fix: stage 3 (use default.implement): default has no Stage named implement";
+    laisso.state.breaks = breaks;
+    await showPage("default");
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Edit as text" }));
+    await user.type(screen.getByRole("textbox", { name: "default as text" }), "# x\n");
+    await user.click(screen.getByRole("button", { name: "Save text" }));
+    const confirm = await screen.findByRole("alertdialog");
+    expect(within(confirm).getByText(breaks)).toBeTruthy();
+    await user.click(within(confirm).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(laisso.sent.map((s) => s.route)).toEqual(["/api/pipelines/default"]);
+    await user.click(screen.getByRole("button", { name: "Save text" }));
+    await user.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Save anyway" }));
+    await waitFor(() => expect(notice().textContent).toBe("saved default"));
+    expect(laisso.sent.map((s) => s.route)).toEqual(["/api/pipelines/default", "/api/pipelines/default", "/api/pipelines/default?confirm=1"]);
+  });
+
+  it("asks before deleting a Pipeline others reuse, and deletes it confirmed", async () => {
+    const laisso = fakeLaisso();
+    laisso.state.breaks = "Deleting default breaks 1 Pipeline: bug-fix: stage 1 (use default.plan): no Pipeline named default";
+    await showPage("default");
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    await user.click(screen.getByRole("button", { name: "Click again to delete" }));
+    const confirm = await screen.findByRole("alertdialog");
+    expect(within(confirm).getByText(/Deleting default breaks 1 Pipeline/)).toBeTruthy();
+    await user.click(within(confirm).getByRole("button", { name: "Delete anyway" }));
+    await waitFor(() => expect(laisso.sent.at(-1)).toEqual({ method: "DELETE", route: "/api/pipelines/default?confirm=1", body: null }));
+    expect(laisso.state.files.default).toBeUndefined();
   });
 
   it("shows a refused text save and keeps the text, to fix and save again", async () => {
