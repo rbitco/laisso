@@ -56,3 +56,15 @@ describe("a Pipeline that does not load", () => {
     expect(r.stdout + r.stderr).toContain("Pipeline bug-fix stage 1 (use work.nope): work has no Stage named nope");
   });
 });
+
+describe("a Ticket on a Pipeline with copied Stages (LASSO-221)", () => {
+  it("names each copied Stage's source from its Version, and keeps it after the source file is deleted", async () => {
+    const { laisso } = await startLaissoWithRepos({ app: { pipeline: "work" } }, {}, { work: WORK, "bug-fix": "stages:\n  - name: triage\n    prompt: Triage it.\n  - use: work.implement\n" });
+    running.push(laisso);
+    const ticket = await laisso.api<IntakeResult>("/api/tickets", { method: "POST", body: JSON.stringify({ input: "Fix the crash", repo: "app", pipeline: "bug-fix" }) });
+    const sources = async () => (await laisso.api<TicketDetail>(`/api/tickets/${ticket.id}`)).stages.map((s) => [s.name, s.source ?? null]);
+    expect(await sources()).toEqual([["triage", null], ["implement", "work"]]);
+    await laisso.api("/api/pipelines/work?confirm=1", { method: "DELETE" });
+    expect(await sources()).toEqual([["triage", null], ["implement", "work"]]);
+  });
+});

@@ -110,7 +110,7 @@ export interface TicketView {
   /** The four gauges as they stand, and the Ticket layer behind them. */
   budget: BudgetView;
   /** Every Stage of the Pipeline, for the Metro track and diagram, with when a human skipped it; empty when the Pipeline does not load. */
-  stages: Array<Pick<StageView, "name" | "kind" | "label" | "human"> & { skippedAt: string | null }>;
+  stages: Array<Pick<StageView, "name" | "kind" | "label" | "human"> & { skippedAt: string | null; /** The Pipeline a copied Stage came from, as the Ticket's Version recorded it; absent for an own Stage. */ source?: string }>;
   /** How the current Stage's check Action artifact last came out (ADR 0014), or null when it has none or has not run. */
   check: ArtifactCheck | null;
   /** The current Visit: which arrival at its Stage it is and how it began, for the Ledger's "×3 ↩"; null before Visits. */
@@ -573,7 +573,7 @@ export function ticketView(ticket: TicketRow, ctx: ViewContext): TicketView {
     queue,
     triggers,
     budget,
-    stages: (pipeline?.stages ?? []).map((s) => ({ name: s.name, kind: s.kind, label: stageLabel(s), human: s.kind === "runner" && s.human, skippedAt: latestVisit(visits, s.name)?.skipped_at ?? null })),
+    stages: (pipeline?.stages ?? []).map((s) => ({ name: s.name, kind: s.kind, label: stageLabel(s), human: s.kind === "runner" && s.human, skippedAt: latestVisit(visits, s.name)?.skipped_at ?? null, ...(s.from ? { source: s.from.pipeline } : {}) })),
     check: (stage?.kind === "runner" && stage.artifactWith) || stage?.kind === "wait" ? check : null,
     visit: currentVisit(visits),
     mirrorPending: ticket.mirror_pending !== null,
