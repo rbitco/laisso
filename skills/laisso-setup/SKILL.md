@@ -149,8 +149,18 @@ that needs different Stages, such as a bug fix that skips planning or a
 docs-only change. `pr-review`, for reviewing a teammate's PR, already
 ships.
 
-**Do:** Ask whether the person wants another Pipeline. Build each one as in
-section 3, and keep asking until they say no.
+A new Pipeline need not repeat Stages another already has: it can take one
+Stage with `use: <pipeline>.<stage>`, or a run of them with `include:
+<pipeline>` (narrowed with `from`/`to`, `skip` and `change`), changing what
+differs. A Pipeline that only holds Stages for others to reuse sets
+`intake: false` so it is never offered for a Ticket. Copies are made when
+the Pipeline loads, so a later edit to the source reaches its reusers at
+their next Intake. See the laisso skill's pipelines.md, Reusing Stages.
+
+**Do:** Ask whether the person wants another Pipeline. When it shares
+Stages with one they have, suggest reusing them, show the entries, and say
+what each takes. Build the rest as in section 3, run `laisso doctor` to see
+it loads, and keep asking until they say no.
 
 ### 6. Other settings
 

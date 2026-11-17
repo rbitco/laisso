@@ -95,8 +95,17 @@ _Avoid_: cancelled, closed, dropped, deleted, paused
 **Pipeline**:
 The ordered list of Stages a Ticket follows, with each Stage's prompt. A
 prompt may be no more than a skill call. A Ticket follows exactly one
-Version of one Pipeline.
+Version of one Pipeline. A Pipeline may take some of its Stages from
+others (see Reused Stage); one kept as parts (`intake: false`) only lends
+Stages and takes no Tickets.
 _Avoid_: workflow, playbook, template, orchestration
+
+**Reused Stage**:
+A Stage a Pipeline copies from another Pipeline, one at a time with `use`
+or as a run with `include`, with its own changes laid on top. The copy is
+made when the Pipeline loads and is the reusing Pipeline's own from then
+on; it remembers its source Pipeline and Stage name only to show them.
+_Avoid_: shared Stage, linked Stage, sub-Pipeline, template, import
 
 **Version**:
 A frozen copy of a Pipeline, numbered v1, v2, and so on, taken the first

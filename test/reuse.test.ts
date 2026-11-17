@@ -164,7 +164,7 @@ describe("a Version of a reusing Pipeline", () => {
 });
 
 describe("the Pipeline files of a reusing Pipeline", () => {
-  it("load through the others, save as text, and refuse a field patch until the editor writes reuse entries", () => {
+  it("load through the others, and save as text or as a field patch", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "laisso-reuse-"));
     writeFileSync(path.join(dir, "default.yaml"), DEFAULT);
     const files = new PipelineFiles(dir, () => DEFAULT_CONFIG);

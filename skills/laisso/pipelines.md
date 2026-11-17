@@ -505,6 +505,172 @@ stages:
       with the marker, commit, push, then resolve each thread you fixed.
 ```
 
+## Reusing Stages
+
+A Pipeline can take Stages from another instead of writing them again. The
+copy is made when the Pipeline loads: the reusing Pipeline gets each Stage
+as the source has it at that moment, with its own changes laid on top, and
+from then on the copy is its own Stage. Nothing at run time points back at
+the source.
+
+A `stages` list mixes three kinds of entry, in any order:
+
+- an **own Stage**, written out as above;
+- **`use: <pipeline>.<stage>`**: one Stage of another Pipeline, with
+  changes beside it;
+- **`include: <pipeline>`**: a run of another Pipeline's Stages, in that
+  Pipeline's order.
+
+Only Stages are copied. The source's top-level `profile` and `budget` never
+come along; a copied Stage that names no profile runs under the reusing
+Pipeline's `profile`, then `default_profile`.
+
+The bug-fix example takes the default Pipeline's flow without its planning
+Stage, asks for a failing test first, adds its own smoke check and borrows
+another Pipeline's review:
+
+```yaml laisso-pipeline bug-fix
+# bug-fix.yaml
+stages:
+  - include: default
+    to: implement
+    skip: [ plan ]
+    change:
+      implement:
+        append: Write a failing test that reproduces the bug first.
+  - name: smoke
+    prompt: Run the app and check the bug is gone.
+  - use: careful.review
+    profile: claude-opus
+```
+
+### `use`
+
+| Field | Rule |
+| --- | --- |
+| `use` | required: `<pipeline>.<stage>`, the Pipeline's file name and the Stage's name there |
+| any other Stage field | changes the copy, as [Overrides](#overrides) says |
+
+### `include`
+
+| Field | Default | Rule |
+| --- | --- | --- |
+| `include` | | required: the Pipeline's name |
+| `from` | its first Stage | the first Stage to take; that Stage is taken |
+| `to` | its last Stage | the last Stage to take; that Stage is taken |
+| `skip` | `[]` | Stages in the from/to range to leave out |
+| `change` | none | a mapping of Stage name to the fields to change on that Stage, as [Overrides](#overrides) says |
+
+`from` must not come after `to`. `skip` and `change` may only name Stages
+in the range, `change` may not name a skipped Stage, and an include that
+takes no Stages is an error. Any other field on an include is an error.
+
+### Overrides
+
+Changes beside `use`, and under an include's `change`, follow the same
+rules:
+
+- `prompt` replaces the source's prompt; `append` adds text after it, on a
+  new paragraph. Give one or the other, not both.
+- `budget`, `routes` and an Action's `with` merge key by key with the
+  source's; a key set to `null` removes it.
+- Any other field (`skills`, `profile`, `human`, `advance`, `artifact`,
+  `repeat`, ...) replaces the source's; lists replace whole. `null` clears it.
+- `name` renames the copy. Routes are matched by name after copying, and a
+  rename is not followed: a Route of another Stage that goes to the old
+  name breaks.
+- A copied Stage keeps its kind: a Runner Stage takes no `action` or
+  `wait`, an action Stage no `prompt`, `skills`, `append` or `wait`, a wait
+  Stage no `prompt`, `skills`, `append` or `action`.
+
+The copy is then checked like any Stage, so a bad override fails as it
+would on an own Stage. Stage names must still be unique across the whole
+list, own and copied.
+
+### Chains and loops
+
+A source may itself reuse Stages: the copy is the Stage as the source
+Pipeline runs it, its own changes included. A Pipeline that reaches itself
+through reuse, directly or through others, does not load.
+
+### Pipelines kept as parts (`intake: false`)
+
+```yaml laisso-pipeline careful
+# careful.yaml, which bug-fix above takes its review from
+intake: false
+stages:
+  - name: review
+    prompt: Review the diff for correctness and tests.
+```
+
+A Pipeline with `intake: false` is a library of Stages: it loads and can be
+reused, but Intake never offers or suggests it, and choosing it by name
+(`laisso add --pipeline <name>`, or as a repo's `pipeline:`) is refused
+with "Pipeline <name> is kept as parts (intake: false), so it takes no
+Tickets; reuse its Stages from another Pipeline". `intake` must be `true`
+or `false`; the default is `true`.
+
+### Versions
+
+A Ticket's Version freezes the copied Stages as they were at Intake, each
+carrying where it came from. Editing, renaming or deleting the source later
+never reaches a Ticket under way; the Ticket page still names each copied
+Stage's source, even when that Pipeline is gone. A new Intake sees the
+source as it is then, so an edit to the source is an edit to every
+Pipeline that reuses it, the next time each takes a Ticket.
+
+### Editing a source Pipeline
+
+Because an edit to a source changes its reusers, a save or delete that
+would stop another Pipeline loading (a `use` naming a Stage that is gone, a
+`to` past the new end, a rename that breaks a Route) is refused with
+"Saving <name> breaks N Pipelines: ..." listing each one and why. The
+dashboard asks first and offers Save anyway or Delete anyway; through the
+API, `PUT`, `PATCH` or `DELETE /api/pipelines/<name>` answers 409 with the
+list, and the same request with `?confirm=1` goes ahead. A broken reuser
+then shows in `laisso doctor`'s Pipelines section until it is fixed.
+
+The dashboard's Pipeline page lists the Pipelines that reuse the one open,
+and each Stage card marks which of them copy it. A reusing Pipeline opens
+in the same field editor as any other: each copied Stage says where it
+came from, which fields it changes and their source values, with Reset to
+put a field back. Moving, adding and removing Stages is saved back as
+entries: a moved or removed copied Stage becomes a `skip` on its include
+(and a `use` where it lands), an include split by a new Stage becomes two
+includes with their own `from`/`to`, and a one-Stage range is written as
+`use`. Comments on the entries are kept.
+
+### When a Pipeline doesn't load
+
+Each message names the Pipeline and the entry, as `stage N (use p.s)` or
+`stage N (include p)`:
+
+| Message | Meaning |
+| --- | --- |
+| `stage N: use must name <pipeline>.<stage>, not X` | `use` lacks the dot or a side of it |
+| `stage N (use p.s): no Pipeline named p` | no `p.yaml` in `pipelines/` |
+| `stage N (use p.s): p has no Stage named s` | the source has no such Stage (renamed or removed?) |
+| `stage N (use p.s): p does not load` | fix the source first; doctor says why |
+| `stage N has both use and include` | one entry, one kind |
+| `stage N: include must name a Pipeline, not X` | `include` is not a Pipeline name |
+| `stage N (include p): X is not a field of an include; it takes from, to, skip and change` | a Stage field on an include belongs under `change` |
+| `stage N (include p): from names X, which p doesn't have` | likewise for `to`, `skip` and `change` |
+| `stage N (include p): from X comes after to Y in p` | the range is backwards |
+| `stage N (include p): skip names X, which is outside this include's from/to` | likewise for `change` |
+| `stage N (include p): change names X, which this include skips` | drop one or the other |
+| `stage N (include p): it takes no Stages` | every Stage in the range is skipped |
+| `stage N (use p.s): set prompt or append, not both` | |
+| `stage N (use p.s): action does not fit a reused runner Stage; a reused Stage keeps its kind` | |
+| `Pipeline x: two Stages named s (stage 2 use p.s, stage 4)` | rename one with `name:` |
+| `Pipeline x Stage s (from p.s): Route r goes to t, which is not a Stage of x` | a copied Route's target was skipped, left out or renamed; change `routes` to drop or retarget it |
+| `Pipeline a: reuse loop a → b → a` | a Pipeline reaches itself through reuse |
+| `Pipeline x: intake must be true or false` | |
+
+`laisso doctor` lists every Pipeline as `ok`, `ok (parts)`, or `does not
+load:` with the message, and exits 1 when any does not load. The
+dashboard's Pipelines page and Intake show the same message, and `laisso
+add` refuses a Pipeline that does not load with it.
+
 ## The default Pipeline
 
 `default.yaml` as Laisso writes it is a starter that needs no skills and no
