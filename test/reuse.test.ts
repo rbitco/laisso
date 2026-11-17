@@ -236,3 +236,14 @@ describe("include: a run of another Pipeline's Stages", () => {
     expect(entries[2]).toMatchObject({ kind: "use", source: "default", overrides: { routes: { rework: null } } });
   });
 });
+
+describe("intake: false", () => {
+  it("keeps a Pipeline as parts, still loadable and reusable; other values are refused", () => {
+    const parts = "intake: false\nstages:\n  - name: review\n    prompt: r\n";
+    expect(load({ parts }, "parts").intake).toBe(false);
+    expect("intake" in load({}, "default")).toBe(false);
+    expect(load({ parts: parts.replace("false", "true") }, "parts").intake).toBeUndefined();
+    expect(load({ parts, "bug-fix": "stages:\n  - use: parts.review\n" }).intake).toBeUndefined();
+    expect(() => load({ parts: parts.replace("false", "sometimes") }, "parts")).toThrow(new PipelineError("Pipeline parts: intake must be true or false"));
+  });
+});

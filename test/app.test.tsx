@@ -123,7 +123,7 @@ function fakeLaisso() {
     if (url === "/api/check-now") return json({ at: ago(0), changes: state.changes } satisfies TickResult);
     if (url === "/api/intake/detect" && state.intakeHeld) await state.intakeHeld;
     if (url === "/api/intake/detect") return json(body.repo ? { ...DETECTED, notes: [`branch app-7 on ${body.repo}`] } : DETECTED);
-    if (url === "/api/pipelines") return json([{ name: "default", file: "/p/default.yaml", profile: null, problem: null, stages: [] }] satisfies PipelineListing[]);
+    if (url === "/api/pipelines") return json([{ name: "default", file: "/p/default.yaml", profile: null, problem: null, parts: false, stages: [] }] satisfies PipelineListing[]);
     if (url === "/api/pipelines/default/versions/2") return json(VERSION);
     if (url === "/api/config") return json({ file: "/c/config.yaml", text: "", config: DEFAULT_CONFIG, restart: [] } satisfies ConfigFile);
     if (url === "/api/actions") return json([]);

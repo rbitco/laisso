@@ -36,6 +36,12 @@ export function PipelineEditor({ name, onSaved }: { name: string; onSaved: () =>
         )}
         <DeleteButton name={name} />
       </EditorHead>
+      {file.parts && (
+        <div className="info-strip" data-role="parts">
+          <h3>Kept as parts</h3>
+          <div className="why">intake: false, so Intake never offers this Pipeline. Other Pipelines reuse its Stages with use: or include:.</div>
+        </div>
+      )}
       <LiveVersions name={name} />
       {loaded ? (
         // Both stay drawn, so switching between them keeps what each holds.

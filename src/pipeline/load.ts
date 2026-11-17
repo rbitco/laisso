@@ -102,6 +102,8 @@ export interface Pipeline {
   profile: string | null;
   budget: { spend?: number };
   stages: Stage[];
+  /** false keeps it as parts (LASSO-217): reusable and editable, but never offered at Intake. Left out when true, so Versions are unchanged. */
+  intake?: false;
 }
 
 export class PipelineError extends Error {}
@@ -306,7 +308,7 @@ export function loadPipeline(dir: string, name: string): Pipeline {
   return resolvePipeline(name, read);
 }
 
-const PIPELINE_FIELDS = new Set(["profile", "budget", "stages"]);
+const PIPELINE_FIELDS = new Set(["profile", "budget", "stages", "intake"]);
 const RUNNER_STAGE_FIELDS = new Set(["name", "prompt", "skills", "profile", "human", "advance", "artifact", "repeat", "budget", "routes", "agentRoutes"]);
 const ACTION_STAGE_FIELDS = new Set(["action", "name", "with", "routes"]);
 const WAIT_STAGE_FIELDS = new Set(["name", "wait", "routes", "budget", "advance"]);
@@ -407,7 +409,10 @@ function parseOwn(name: string, text: string, ctx: Resolving): { pipeline: Pipel
     if ((STAGE_BUDGET_KEYS as readonly string[]).includes(key)) throw new PipelineError(`${where}: budget.${key} belongs to a Stage, not the Pipeline`);
     throw new PipelineError(`${where}: unknown field budget.${key}`);
   }
-  return { pipeline: { name, profile, budget: { spend: budget.spend === undefined ? undefined : money(budget.spend, `${where}: budget.spend`, fail) }, stages }, entries };
+  if (doc.intake !== undefined && typeof doc.intake !== "boolean") throw new PipelineError(`${where}: intake must be true or false`);
+  const pipeline: Pipeline = { name, profile, budget: { spend: budget.spend === undefined ? undefined : money(budget.spend, `${where}: budget.spend`, fail) }, stages };
+  if (doc.intake === false) pipeline.intake = false;
+  return { pipeline, entries };
 }
 
 function parseStage(pipeline: string, entry: unknown, index: number, at?: string): Stage {

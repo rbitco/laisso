@@ -31,6 +31,7 @@ interface Stored {
   pipeline: PipelineView | null;
   problem: string | null;
   reuses?: boolean;
+  parts?: boolean;
 }
 
 type Sent = { method: string; route: string; body: unknown };
@@ -40,12 +41,12 @@ function fakeLaisso(files: Record<string, Stored> = { default: { text: DEFAULT_T
   const sent: Sent[] = [];
   const state = { files, refuse: null as string | null, versions: {} as Record<string, LiveVersionView[]>, frozen: {} as Record<string, PipelineVersionView> };
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
-  const fileView = (name: string): PipelineFile => ({ name, file: `/p/${name}.yaml`, reuses: false, ...state.files[name]! });
+  const fileView = (name: string): PipelineFile => ({ name, file: `/p/${name}.yaml`, reuses: false, parts: false, ...state.files[name]! });
   vi.stubGlobal("fetch", async (url: string, init: RequestInit = {}) => {
     const method = init.method ?? "GET";
     if (url === "/api/pipelines")
       return json(
-        Object.entries(state.files).map(([name, f]): PipelineListing => ({ name, file: `/p/${name}.yaml`, profile: null, problem: f.problem, stages: (f.pipeline?.stages ?? []).map((s) => ({ name: s.name, kind: s.kind, label: s.label, profile: null })) })),
+        Object.entries(state.files).map(([name, f]): PipelineListing => ({ name, file: `/p/${name}.yaml`, profile: null, problem: f.problem, parts: f.parts ?? false, stages: (f.pipeline?.stages ?? []).map((s) => ({ name: s.name, kind: s.kind, label: s.label, profile: null })) })),
       );
     const m = /^\/api\/pipelines\/([^/]+)(\/versions(?:\/(\d+))?)?$/.exec(url);
     if (!m) return json({ error: "not found" }, 404);
@@ -236,6 +237,16 @@ describe("a Pipeline's editor", () => {
     expect(area.closest("[hidden]")).toBeNull();
     expect(screen.queryByRole("button", { name: "Edit as text" })).toBeNull();
     expect(screen.queryByText("Pipeline settings")).toBeNull();
+  });
+
+  it("labels a Pipeline kept as parts in the list and its editor, and still edits it", async () => {
+    fakeLaisso({ default: { text: DEFAULT_TEXT, pipeline: DEFAULT, problem: null }, parts: { text: "intake: false\n" + DEFAULT_TEXT, pipeline: DEFAULT, problem: null, parts: true } });
+    await showPage("parts");
+    await screen.findByText("Kept as parts");
+    const tags = document.querySelectorAll('.plist [data-role="parts"]');
+    expect(tags.length).toBe(1);
+    expect(tags[0]!.closest("a")!.querySelector("strong")!.textContent).toBe("parts");
+    expect(screen.getByText("Pipeline settings")).toBeTruthy();
   });
 
   it("opens a Pipeline that reuses Stages as text, saying why", async () => {

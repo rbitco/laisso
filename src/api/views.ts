@@ -404,6 +404,8 @@ export interface PipelineListing {
   /** Each Stage, with the profile a Runner Stage names (null when it inherits, and for an action Stage). */
   stages: Array<{ name: string; kind: Stage["kind"]; label: string; profile: string | null }>;
   problem: string | null;
+  /** Kept as parts (intake: false): reused by other Pipelines, never offered at Intake. */
+  parts: boolean;
 }
 
 export interface PipelineFile {
@@ -414,6 +416,8 @@ export interface PipelineFile {
   problem: string | null;
   /** It takes Stages from other Pipelines, so the dashboard edits it as text for now. */
   reuses: boolean;
+  /** Kept as parts (intake: false). */
+  parts: boolean;
 }
 
 /** A Version of a Pipeline that active Tickets still run, and how many. */
@@ -477,7 +481,7 @@ export function actionListings(config: Config): ActionListing[] {
 
 export function pipelineListing(source: PipelineSource): PipelineListing {
   const stages = (source.pipeline?.stages ?? []).map((s) => ({ name: s.name, kind: s.kind, label: stageLabel(s), profile: s.kind === "runner" ? s.profile : null }));
-  return { name: source.name, file: source.file, profile: source.pipeline?.profile ?? null, stages, problem: source.problem };
+  return { name: source.name, file: source.file, profile: source.pipeline?.profile ?? null, stages, problem: source.problem, parts: source.pipeline?.intake === false };
 }
 
 export function pipelineFileView(source: PipelineSource): PipelineFile {
@@ -489,6 +493,7 @@ export function pipelineFileView(source: PipelineSource): PipelineFile {
     pipeline: pipeline ? pipelineFields(pipeline) : null,
     problem: source.problem,
     reuses: source.reuses,
+    parts: pipeline?.intake === false,
   };
 }
 
