@@ -130,10 +130,42 @@ export function pipelineFile(dir: string, name: string): string | null {
   return null;
 }
 
+/**
+ * How the loader reads a Pipeline's text by name: the file under the Laisso
+ * home, a shipped Pipeline, or a proposed edit laid over either. null when
+ * there is no Pipeline of that name.
+ */
+export type ReadPipeline = (name: string) => string | null;
+
+/** Read Pipelines from the files under `dir`. */
+export function fileReader(dir: string): ReadPipeline {
+  return (name) => {
+    if (!NAME.test(name)) return null;
+    const file = pipelineFile(dir, name);
+    return file ? readFileSync(file, "utf8") : null;
+  };
+}
+
+/** `read` with one Pipeline's text replaced, or (null) that Pipeline deleted. */
+export function overlay(read: ReadPipeline, name: string, text: string | null): ReadPipeline {
+  return (n) => (n === name ? text : read(n));
+}
+
+/**
+ * The one way to load a Pipeline: by name, through `read`. Every caller
+ * comes here, so what a Pipeline's file may take from another (reuse) is
+ * resolved in one place.
+ */
+export function resolvePipeline(name: string, read: ReadPipeline): Pipeline {
+  const text = read(name);
+  if (text === null) throw new PipelineError(`no Pipeline named ${name}`);
+  return parseOwn(name, text);
+}
+
 export function loadPipeline(dir: string, name: string): Pipeline {
-  const file = pipelineFile(dir, name);
-  if (!file) throw new PipelineError(`Pipeline ${name} does not exist under ${dir}`);
-  return parsePipeline(name, readFileSync(file, "utf8"));
+  const read = fileReader(dir);
+  if (read(name) === null) throw new PipelineError(`Pipeline ${name} does not exist under ${dir}`);
+  return resolvePipeline(name, read);
 }
 
 const PIPELINE_FIELDS = new Set(["profile", "budget", "stages"]);
@@ -142,7 +174,12 @@ const ACTION_STAGE_FIELDS = new Set(["action", "name", "with", "routes"]);
 const WAIT_STAGE_FIELDS = new Set(["name", "wait", "routes", "budget", "advance"]);
 const ROUTE_FIELDS = new Set(["to", "when", "append", "replace", "budget", "advance"]);
 
+/** One Pipeline's text, loaded as though it were the only Pipeline there is. */
 export function parsePipeline(name: string, text: string): Pipeline {
+  return resolvePipeline(name, (n) => (n === name ? text : null));
+}
+
+function parseOwn(name: string, text: string): Pipeline {
   let raw: unknown;
   try {
     raw = parse(text);

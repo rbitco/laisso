@@ -4,7 +4,7 @@ import path from "node:path";
 import { parseDocument, isMap, isScalar, isSeq, type Document } from "yaml";
 import { applyPatch } from "../yaml-edit.ts";
 import { isPlainObject } from "../fields.ts";
-import { checkActionsAny, checkProfiles, parsePipeline, pipelineFile, listPipelines, PipelineError, NAME, type Pipeline } from "./load.ts";
+import { checkActionsAny, checkProfiles, fileReader, overlay, resolvePipeline, pipelineFile, listPipelines, PipelineError, NAME, type Pipeline } from "./load.ts";
 import { actionSets, anyRepoProfiles, type Config } from "../server/config.ts";
 
 /** A Pipeline file as read: the text as written, and what it parses to or why it does not. */
@@ -44,7 +44,7 @@ export class PipelineFiles {
   list(): PipelineSource[] {
     return listPipelines(this.dir).flatMap((name) => {
       const file = pipelineFile(this.dir, name);
-      return file ? [sourceOf(name, file, readFileSync(file, "utf8"))] : [];
+      return file ? [this.sourceOf(name, file, readFileSync(file, "utf8"))] : [];
     });
   }
 
@@ -52,19 +52,19 @@ export class PipelineFiles {
   read(name: string): PipelineSource | null {
     const file = NAME.test(name) ? pipelineFile(this.dir, name) : null;
     if (!file) return null;
-    return sourceOf(name, file, readFileSync(file, "utf8"));
+    return this.sourceOf(name, file, readFileSync(file, "utf8"));
   }
 
   /** Create or replace the whole file; the text must parse first. With `create`, an existing Pipeline is left alone. */
   write(name: string, text: unknown, opts: { create?: boolean } = {}): PipelineSource {
     checkName(name);
     if (typeof text !== "string") throw new PipelineError("text must be the whole Pipeline file");
-    this.check(parsePipeline(name, text));
+    this.check(this.load(name, text));
     const existing = pipelineFile(this.dir, name);
     if (existing && opts.create) throw new PipelineError(`Pipeline ${name} already exists`);
     const file = existing ?? path.join(this.dir, `${name}.yaml`);
     replaceFile(file, text);
-    return sourceOf(name, file, text);
+    return this.sourceOf(name, file, text);
   }
 
   patch(name: string, patch: unknown): PipelineSource {
@@ -89,9 +89,22 @@ export class PipelineFiles {
     }
     if (order !== undefined) reorderStages(doc, name, current.pipeline.stages.map((s) => s.name), order);
     const text = doc.toString();
-    this.check(parsePipeline(name, text));
+    this.check(this.load(name, text));
     replaceFile(current.file, text);
-    return sourceOf(name, current.file, text);
+    return this.sourceOf(name, current.file, text);
+  }
+
+  /** The Pipeline `name` would be with `text` as its file, the other Pipelines as they are. */
+  private load(name: string, text: string): Pipeline {
+    return resolvePipeline(name, overlay(fileReader(this.dir), name, text));
+  }
+
+  private sourceOf(name: string, file: string, text: string): PipelineSource {
+    try {
+      return { name, file, text, pipeline: this.load(name, text), problem: null };
+    } catch (error) {
+      return { name, file, text, pipeline: null, problem: error instanceof Error ? error.message : String(error) };
+    }
   }
 
   /** What parsing cannot see: each action Stage fits the Actions some repo has (see actionSets), and each profile named exists globally or in some repo. */
@@ -166,12 +179,4 @@ function flowWith(node: unknown): void {
 
 function checkName(name: string): void {
   if (!NAME.test(name)) throw new PipelineError("Pipeline name must be lowercase letters, digits, and hyphens");
-}
-
-function sourceOf(name: string, file: string, text: string): PipelineSource {
-  try {
-    return { name, file, text, pipeline: parsePipeline(name, text), problem: null };
-  } catch (error) {
-    return { name, file, text, pipeline: null, problem: error instanceof Error ? error.message : String(error) };
-  }
 }

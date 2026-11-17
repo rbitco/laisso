@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
 import { isMap, isScalar, isSeq, parseDocument, Scalar, type Document, type Pair, type YAMLMap } from "yaml";
 import { writeLike } from "../yaml-edit.ts";
-import { listPipelines, parsePipeline, pipelineFile, RUNNERS } from "../pipeline/load.ts";
+import { listPipelines, loadPipeline, pipelineFile, RUNNERS } from "../pipeline/load.ts";
 import { replaceFile } from "../atomic-write.ts";
 import { DEFAULT_CONFIG } from "./config.ts";
 import type { LaissoHome } from "./home.ts";
@@ -329,7 +329,7 @@ function versionWithProfiles(name: string, definition: StoredPipeline, profiles:
     const inheriting = as(null);
     const file = pipelineFile(pipelinesDir, name);
     try {
-      if (file && JSON.stringify(parsePipeline(name, readFileSync(file, "utf8"))) === JSON.stringify(inheriting)) return inheriting;
+      if (file && JSON.stringify(loadPipeline(pipelinesDir, name)) === JSON.stringify(inheriting)) return inheriting;
     } catch {
       // A file that does not load is the drift's to report.
     }
