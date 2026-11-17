@@ -412,6 +412,8 @@ export interface PipelineFile {
   text: string;
   pipeline: PipelineView | null;
   problem: string | null;
+  /** It takes Stages from other Pipelines, so the dashboard edits it as text for now. */
+  reuses: boolean;
 }
 
 /** A Version of a Pipeline that active Tickets still run, and how many. */
@@ -486,6 +488,7 @@ export function pipelineFileView(source: PipelineSource): PipelineFile {
     text: source.text,
     pipeline: pipeline ? pipelineFields(pipeline) : null,
     problem: source.problem,
+    reuses: source.reuses,
   };
 }
 

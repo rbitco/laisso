@@ -4,7 +4,7 @@ import path from "node:path";
 import { parseDocument, isMap, isScalar, isSeq, type Document } from "yaml";
 import { applyPatch } from "../yaml-edit.ts";
 import { isPlainObject } from "../fields.ts";
-import { checkActionsAny, checkProfiles, fileReader, overlay, resolvePipeline, pipelineFile, listPipelines, PipelineError, NAME, type Pipeline } from "./load.ts";
+import { checkActionsAny, checkProfiles, fileReader, overlay, resolvePipeline, writesReuse, pipelineFile, listPipelines, PipelineError, NAME, type Pipeline } from "./load.ts";
 import { actionSets, anyRepoProfiles, type Config } from "../server/config.ts";
 
 /** A Pipeline file as read: the text as written, and what it parses to or why it does not. */
@@ -14,6 +14,8 @@ export interface PipelineSource {
   text: string;
   pipeline: Pipeline | null;
   problem: string | null;
+  /** It takes Stages from other Pipelines; until the editor writes reuse entries (LASSO-222), it is edited as text. */
+  reuses: boolean;
 }
 
 /**
@@ -72,6 +74,7 @@ export class PipelineFiles {
     if (!current) throw new PipelineError(`Pipeline ${name} does not exist under ${this.dir}`);
     if (!isPlainObject(patch)) throw new PipelineError("patch must be a mapping");
     if (!current.pipeline) throw new PipelineError(`Pipeline ${name} cannot be patched until it loads (${current.problem}); replace its text instead`);
+    if (current.reuses) throw new PipelineError(`Pipeline ${name} reuses Stages from other Pipelines; edit it as text`);
     const doc = parseDocument(current.text);
     const { stages, order, ...rest } = patch;
     applyPatch(doc, rest);
@@ -101,9 +104,9 @@ export class PipelineFiles {
 
   private sourceOf(name: string, file: string, text: string): PipelineSource {
     try {
-      return { name, file, text, pipeline: this.load(name, text), problem: null };
+      return { name, file, text, pipeline: this.load(name, text), problem: null, reuses: writesReuse(text) };
     } catch (error) {
-      return { name, file, text, pipeline: null, problem: error instanceof Error ? error.message : String(error) };
+      return { name, file, text, pipeline: null, problem: error instanceof Error ? error.message : String(error), reuses: writesReuse(text) };
     }
   }
 

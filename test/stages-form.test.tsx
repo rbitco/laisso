@@ -67,7 +67,7 @@ const saveState = () => document.querySelector(".savebar .state")!.textContent;
 
 async function showForm(pipeline: PipelineView = PIPELINE) {
   const onSaved = vi.fn();
-  const file: LoadedPipeline = { name: "default", file: "/p/default.yaml", text: "", pipeline, problem: null };
+  const file: LoadedPipeline = { name: "default", file: "/p/default.yaml", text: "", pipeline, problem: null, reuses: false };
   render(<StagesForm file={file} onSaved={onSaved} />);
   await screen.findByText("Pipeline settings");
   return { onSaved, user: userEvent.setup() };

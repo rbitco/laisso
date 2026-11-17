@@ -5,8 +5,10 @@ import { hyphenate } from "../intake/slug.ts";
 import { count, duration, isPlainObject, mapping, money, text, type Fail } from "../fields.ts";
 import { ACTION_NAME, PROFILE_NAME, type ActionConfig, type ProfileConfig } from "../server/config.ts";
 import { ARTIFACTS } from "./artifacts.ts";
+import { applyOverrides, rawStage, useRef, type Origin } from "./reuse.ts";
 
 export { ARTIFACTS };
+export type { Origin };
 
 export const RUNNERS = ["claude", "codex", "pi"] as const;
 export type RunnerName = (typeof RUNNERS)[number];
@@ -57,6 +59,8 @@ export interface RunnerStage {
   routes?: Routes;
   /** Its agent may pick one of its Routes with `laisso route` (LASSO-193); set only when written, and only with Routes. */
   agentRoutes?: true;
+  /** Where a copied Stage came from; absent on a Stage the Pipeline writes itself. */
+  from?: Origin;
 }
 
 /** A Stage that runs an Action defined in config by name, with the params it supplies (ADR 0010). */
@@ -66,6 +70,8 @@ export interface ActionStage {
   action: string;
   with: Record<string, string>;
   routes?: Routes;
+  /** Where a copied Stage came from; absent on a Stage the Pipeline writes itself. */
+  from?: Origin;
 }
 
 /**
@@ -84,6 +90,8 @@ export interface WaitStage {
   /** How long it may Watch before it Flags budget.wall_time; no limit when absent. */
   budget: { wallTime?: string };
   routes?: Routes;
+  /** Where a copied Stage came from; absent on a Stage the Pipeline writes itself. */
+  from?: Origin;
 }
 
 export type Stage = RunnerStage | ActionStage | WaitStage;
@@ -157,9 +165,88 @@ export function overlay(read: ReadPipeline, name: string, text: string | null): 
  * resolved in one place.
  */
 export function resolvePipeline(name: string, read: ReadPipeline): Pipeline {
-  const text = read(name);
+  return resolveIn(name, { read, done: new Map(), stack: [] });
+}
+
+/** A reuse loop, reported by the Pipeline it starts and ends at; each Pipeline in it passes it on unchanged. */
+class ReuseLoop extends PipelineError {
+  readonly cycle: string[];
+  constructor(cycle: string[]) {
+    super(`Pipeline ${cycle[0]}: reuse loop ${cycle.join(" → ")}`);
+    this.cycle = cycle;
+  }
+}
+
+/** One load: what has been resolved so far, and the Pipelines being resolved now, outermost first. */
+interface Resolving {
+  read: ReadPipeline;
+  done: Map<string, Pipeline | PipelineError>;
+  stack: string[];
+}
+
+function resolveIn(name: string, ctx: Resolving): Pipeline {
+  const known = ctx.done.get(name);
+  if (known instanceof PipelineError) throw known;
+  if (known) return known;
+  const text = ctx.read(name);
   if (text === null) throw new PipelineError(`no Pipeline named ${name}`);
-  return parseOwn(name, text);
+  ctx.stack.push(name);
+  try {
+    const pipeline = parseOwn(name, text, ctx);
+    ctx.done.set(name, pipeline);
+    return pipeline;
+  } catch (error) {
+    if (error instanceof PipelineError && !(error instanceof ReuseLoop)) ctx.done.set(name, error);
+    throw error;
+  } finally {
+    ctx.stack.pop();
+  }
+}
+
+/**
+ * The Pipeline a reuse entry takes from, resolved first, so a chain copies
+ * Stages as their own Pipeline runs them.
+ */
+function sourceOf(name: string, from: string, entry: string, ctx: Resolving): Pipeline {
+  const at = `Pipeline ${name} ${entry}`;
+  if (ctx.stack.includes(from)) throw new ReuseLoop([...ctx.stack.slice(ctx.stack.indexOf(from)), from]);
+  if (ctx.read(from) === null) throw new PipelineError(`${at}: no Pipeline named ${from}`);
+  try {
+    return resolveIn(from, ctx);
+  } catch (error) {
+    if (error instanceof ReuseLoop && error.cycle.includes(name)) throw error;
+    if (error instanceof PipelineError) throw new PipelineError(`${at}: ${from} does not load`);
+    throw error;
+  }
+}
+
+/** A Stage of the expanded list, with how the duplicate check names it. */
+interface Placed {
+  stage: Stage;
+  /** `stage 3`, or `stage 3 use default.review` for a copied one. */
+  label: string;
+}
+
+/** `use: <pipeline>.<stage>` with overrides beside it: one copied Stage. */
+function expandUse(name: string, s: Record<string, unknown>, index: number, ctx: Resolving): Placed[] {
+  const ref = useRef(s.use);
+  const where = `Pipeline ${name} stage ${index + 1}`;
+  if (!ref || !NAME.test(ref.pipeline)) throw new PipelineError(`${where}: use must name <pipeline>.<stage>, not ${String(s.use)}`);
+  const entry = `use ${ref.pipeline}.${ref.stage}`;
+  const at = `${where} (${entry})`;
+  const source = sourceOf(name, ref.pipeline, `stage ${index + 1} (${entry})`, ctx);
+  const original = source.stages.find((st) => st.name === ref.stage);
+  if (!original) throw new PipelineError(`${at}: ${ref.pipeline} has no Stage named ${ref.stage}`);
+  const { use: _use, ...overrides } = s;
+  const stage = copyStage(original, overrides, at, { pipeline: ref.pipeline, stage: ref.stage, how: "use" }, name);
+  return [{ stage, label: `stage ${index + 1} ${entry}` }];
+}
+
+/** A source Stage with overrides laid on it, parsed and checked as the reusing Pipeline's own, carrying its origin. */
+function copyStage(original: Stage, overrides: Record<string, unknown>, at: string, origin: Origin, pipeline: string): Stage {
+  const raw = applyOverrides(rawStage(original, defaultActionName), original.kind, overrides, (message) => new PipelineError(`${at}: ${message}`));
+  const { from: _from, ...stage } = parseStage(pipeline, raw, 0, at);
+  return { ...stage, from: origin } as Stage;
 }
 
 export function loadPipeline(dir: string, name: string): Pipeline {
@@ -174,12 +261,22 @@ const ACTION_STAGE_FIELDS = new Set(["action", "name", "with", "routes"]);
 const WAIT_STAGE_FIELDS = new Set(["name", "wait", "routes", "budget", "advance"]);
 const ROUTE_FIELDS = new Set(["to", "when", "append", "replace", "budget", "advance"]);
 
+/** Whether a Pipeline's text has reuse entries (`use` or `include`) among its stages; false for text that does not parse. */
+export function writesReuse(text: string): boolean {
+  try {
+    const doc = parse(text) as { stages?: unknown } | null;
+    return Array.isArray(doc?.stages) && doc.stages.some((e) => isPlainObject(e) && (e.use !== undefined || e.include !== undefined));
+  } catch {
+    return false;
+  }
+}
+
 /** One Pipeline's text, loaded as though it were the only Pipeline there is. */
 export function parsePipeline(name: string, text: string): Pipeline {
   return resolvePipeline(name, (n) => (n === name ? text : null));
 }
 
-function parseOwn(name: string, text: string): Pipeline {
+function parseOwn(name: string, text: string, ctx: Resolving): Pipeline {
   let raw: unknown;
   try {
     raw = parse(text);
@@ -197,15 +294,25 @@ function parseOwn(name: string, text: string): Pipeline {
   const profile = asProfile(doc.profile, where);
   const stagesRaw = Array.isArray(doc.stages) ? doc.stages : null;
   if (!stagesRaw || stagesRaw.length === 0) throw new PipelineError(`${where} has no stages`);
-  const stages = stagesRaw.map((entry, i) => parseStage(name, entry, i));
-  const names = new Set<string>();
-  for (const stage of stages) {
-    if (names.has(stage.name)) throw new PipelineError(`${where} has two Stages named ${stage.name}`);
-    names.add(stage.name);
+  const placed = stagesRaw.flatMap((entry, i): Placed[] => {
+    if (isPlainObject(entry) && entry.use !== undefined) return expandUse(name, entry, i, ctx);
+    return [{ stage: parseStage(name, entry, i), label: `stage ${i + 1}` }];
+  });
+  const stages = placed.map((p) => p.stage);
+  const seen = new Map<string, Placed>();
+  for (const p of placed) {
+    const first = seen.get(p.stage.name);
+    if (first) {
+      if (!first.stage.from && !p.stage.from) throw new PipelineError(`${where} has two Stages named ${p.stage.name}`);
+      throw new PipelineError(`${where}: two Stages named ${p.stage.name} (${first.label}, ${p.label})`);
+    }
+    seen.set(p.stage.name, p);
   }
   for (const stage of stages) {
     for (const [route, { to }] of Object.entries(stage.routes ?? {})) {
-      if (!names.has(to)) throw new PipelineError(`${where} Stage ${stage.name}: Route ${route} goes to ${to}, which is not a Stage of this Pipeline`);
+      if (seen.has(to)) continue;
+      if (stage.from) throw new PipelineError(`${where} Stage ${stage.name} (from ${stage.from.pipeline}.${stage.from.stage}): Route ${route} goes to ${to}, which is not a Stage of ${name}`);
+      throw new PipelineError(`${where} Stage ${stage.name}: Route ${route} goes to ${to}, which is not a Stage of this Pipeline`);
     }
   }
   const budget = mapping(doc.budget, `${where}: budget`, fail);
@@ -217,10 +324,10 @@ function parseOwn(name: string, text: string): Pipeline {
   return { name, profile, budget: { spend: budget.spend === undefined ? undefined : money(budget.spend, `${where}: budget.spend`, fail) }, stages };
 }
 
-function parseStage(pipeline: string, entry: unknown, index: number): Stage {
-  if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new PipelineError(`Pipeline ${pipeline} stage ${index + 1} is not a mapping`);
+function parseStage(pipeline: string, entry: unknown, index: number, at?: string): Stage {
+  const where = at ?? `Pipeline ${pipeline} stage ${index + 1}`;
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new PipelineError(`${where} is not a mapping`);
   const s = entry as Record<string, unknown>;
-  const where = `Pipeline ${pipeline} stage ${index + 1}`;
   if (s.wait !== undefined) return parseWaitStage(s, where);
   const isAction = typeof s.action === "string";
   const isRunner = s.prompt !== undefined || s.skills !== undefined;

@@ -30,6 +30,7 @@ interface Stored {
   text: string;
   pipeline: PipelineView | null;
   problem: string | null;
+  reuses?: boolean;
 }
 
 type Sent = { method: string; route: string; body: unknown };
@@ -39,7 +40,7 @@ function fakeLaisso(files: Record<string, Stored> = { default: { text: DEFAULT_T
   const sent: Sent[] = [];
   const state = { files, refuse: null as string | null, versions: {} as Record<string, LiveVersionView[]>, frozen: {} as Record<string, PipelineVersionView> };
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
-  const fileView = (name: string): PipelineFile => ({ name, file: `/p/${name}.yaml`, ...state.files[name]! });
+  const fileView = (name: string): PipelineFile => ({ name, file: `/p/${name}.yaml`, reuses: false, ...state.files[name]! });
   vi.stubGlobal("fetch", async (url: string, init: RequestInit = {}) => {
     const method = init.method ?? "GET";
     if (url === "/api/pipelines")
@@ -234,6 +235,15 @@ describe("a Pipeline's editor", () => {
     expect(area.value).toBe("stages: [");
     expect(area.closest("[hidden]")).toBeNull();
     expect(screen.queryByRole("button", { name: "Edit as text" })).toBeNull();
+    expect(screen.queryByText("Pipeline settings")).toBeNull();
+  });
+
+  it("opens a Pipeline that reuses Stages as text, saying why", async () => {
+    fakeLaisso({ "bug-fix": { text: "stages:\n  - use: default.plan\n", pipeline: DEFAULT, problem: null, reuses: true } });
+    await showPage("bug-fix");
+    await screen.findByText("This Pipeline reuses Stages from other Pipelines, so it opens as text for now.");
+    const area = screen.getByRole("textbox", { name: "bug-fix as text" }) as HTMLTextAreaElement;
+    expect(area.closest("[hidden]")).toBeNull();
     expect(screen.queryByText("Pipeline settings")).toBeNull();
   });
 });
