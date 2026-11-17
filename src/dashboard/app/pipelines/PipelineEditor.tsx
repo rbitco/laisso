@@ -25,8 +25,7 @@ export function PipelineEditor({ name, onSaved }: { name: string; onSaved: () =>
 
   if (error) return <p className="notice">{error}</p>;
   if (!file) return null;
-  // A Pipeline that reuses Stages opens as text until the Stage editor can write reuse entries (LASSO-222).
-  const loaded = file.pipeline && !file.reuses ? (file as LoadedPipeline) : null;
+  const loaded = file.pipeline ? (file as LoadedPipeline) : null;
   return (
     <div className="ed" data-role="pipeline-editor">
       <EditorHead title={file.name} file={file.file}>
@@ -49,10 +48,6 @@ export function PipelineEditor({ name, onSaved }: { name: string; onSaved: () =>
         // Both stay drawn, so switching between them keeps what each holds.
         <div hidden={asText}>
           <StagesForm file={loaded} onSaved={onSaved} />
-        </div>
-      ) : file.pipeline ? (
-        <div className="card" data-role="reuse-text-only">
-          <div className="why">This Pipeline reuses Stages from other Pipelines, so it opens as text for now.</div>
         </div>
       ) : (
         <div className="card problem">

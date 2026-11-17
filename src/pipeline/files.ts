@@ -4,7 +4,8 @@ import path from "node:path";
 import { parseDocument, isMap, isScalar, isSeq, type Document } from "yaml";
 import { applyPatch } from "../yaml-edit.ts";
 import { isPlainObject } from "../fields.ts";
-import { checkActionsAny, checkProfiles, fileReader, overlay, resolvePipeline, writesReuse, pipelineFile, listPipelines, PipelineError, NAME, type Pipeline } from "./load.ts";
+import { checkActionsAny, checkProfiles, fileReader, overlay, resolveEntries, writesReuse, pipelineFile, listPipelines, PipelineError, NAME, type Entry, type Pipeline } from "./load.ts";
+import { rewriteEntries } from "./rewrite.ts";
 import { actionSets, anyRepoProfiles, type Config } from "../server/config.ts";
 import { breakage, reusers, WouldBreak, type Reuser } from "./impact.ts";
 
@@ -15,8 +16,10 @@ export interface PipelineSource {
   text: string;
   pipeline: Pipeline | null;
   problem: string | null;
-  /** It takes Stages from other Pipelines; until the editor writes reuse entries (LASSO-222), it is edited as text. */
+  /** It takes Stages from other Pipelines. */
   reuses: boolean;
+  /** Its stages as written, when it reuses and loads; the editor edits these through the expanded list (LASSO-222). */
+  entries: Entry[] | null;
 }
 
 /**
@@ -65,7 +68,7 @@ export class PipelineFiles {
   write(name: string, text: unknown, opts: { create?: boolean; confirm?: boolean } = {}): PipelineSource {
     checkName(name);
     if (typeof text !== "string") throw new PipelineError("text must be the whole Pipeline file");
-    this.check(this.load(name, text));
+    this.check(this.load(name, text).pipeline);
     const existing = pipelineFile(this.dir, name);
     if (existing && opts.create) throw new PipelineError(`Pipeline ${name} already exists`);
     this.guard("Saving", name, text, opts.confirm);
@@ -79,40 +82,39 @@ export class PipelineFiles {
     if (!current) throw new PipelineError(`Pipeline ${name} does not exist under ${this.dir}`);
     if (!isPlainObject(patch)) throw new PipelineError("patch must be a mapping");
     if (!current.pipeline) throw new PipelineError(`Pipeline ${name} cannot be patched until it loads (${current.problem}); replace its text instead`);
-    if (current.reuses) throw new PipelineError(`Pipeline ${name} reuses Stages from other Pipelines; edit it as text`);
     const doc = parseDocument(current.text);
     const { stages, order, ...rest } = patch;
     applyPatch(doc, rest);
-    if (stages !== undefined) {
-      if (!isPlainObject(stages)) throw new PipelineError("stages must be a mapping of Stage name to fields");
-      for (const [stageName, fields] of Object.entries(stages)) {
+    if (stages !== undefined && !isPlainObject(stages)) throw new PipelineError("stages must be a mapping of Stage name to fields");
+    if (current.entries) rewriteEntries(doc, name, current.entries, { stages, order }, applyStage);
+    else {
+      for (const [stageName, fields] of Object.entries(stages ?? {})) {
         const index = current.pipeline.stages.findIndex((s) => s.name === stageName);
         if (index < 0) throw new PipelineError(`Pipeline ${name} has no Stage named ${stageName}`);
         if (!isPlainObject(fields)) throw new PipelineError(`Stage ${stageName}: fields must be a mapping`);
-        // A check Action `{ action, with }`, as an artifact or a wait Stage's wait, replaces what was there whole, not key by key.
-        const whole = Object.entries(fields).filter(([key, value]) => (key === "artifact" || key === "wait") && isPlainObject(value));
-        for (const [key, value] of whole) doc.setIn(["stages", index, key], artifactNode(doc, value as Record<string, unknown>));
-        applyPatch(doc, Object.fromEntries(Object.entries(fields).filter(([key]) => !whole.some(([k]) => k === key))), ["stages", index]);
+        applyStage(doc, index, fields);
       }
+      if (order !== undefined) reorderStages(doc, name, current.pipeline.stages.map((s) => s.name), order);
     }
-    if (order !== undefined) reorderStages(doc, name, current.pipeline.stages.map((s) => s.name), order);
     const text = doc.toString();
-    this.check(this.load(name, text));
+    this.check(this.load(name, text).pipeline);
     this.guard("Saving", name, text, opts.confirm);
     replaceFile(current.file, text);
     return this.sourceOf(name, current.file, text);
   }
 
-  /** The Pipeline `name` would be with `text` as its file, the other Pipelines as they are. */
-  private load(name: string, text: string): Pipeline {
-    return resolvePipeline(name, overlay(fileReader(this.dir), name, text));
+  /** The Pipeline `name` would be with `text` as its file, the other Pipelines as they are, with its stages as written. */
+  private load(name: string, text: string): { pipeline: Pipeline; entries: Entry[] } {
+    return resolveEntries(name, overlay(fileReader(this.dir), name, text));
   }
 
   private sourceOf(name: string, file: string, text: string): PipelineSource {
+    const reuses = writesReuse(text);
     try {
-      return { name, file, text, pipeline: this.load(name, text), problem: null, reuses: writesReuse(text) };
+      const { pipeline, entries } = this.load(name, text);
+      return { name, file, text, pipeline, problem: null, reuses, entries: reuses ? entries : null };
     } catch (error) {
-      return { name, file, text, pipeline: null, problem: error instanceof Error ? error.message : String(error), reuses: writesReuse(text) };
+      return { name, file, text, pipeline: null, problem: error instanceof Error ? error.message : String(error), reuses, entries: null };
     }
   }
 
@@ -142,6 +144,13 @@ export class PipelineFiles {
     unlinkSync(file);
     return true;
   }
+}
+
+/** An own Stage's fields at its place in `stages`; a check Action `{ action, with }`, as an artifact or a wait Stage's wait, replaces what was there whole, not key by key. */
+function applyStage(doc: Document, index: number, fields: Record<string, unknown>): void {
+  const whole = Object.entries(fields).filter(([key, value]) => (key === "artifact" || key === "wait") && isPlainObject(value));
+  for (const [key, value] of whole) doc.setIn(["stages", index, key], artifactNode(doc, value as Record<string, unknown>));
+  applyPatch(doc, Object.fromEntries(Object.entries(fields).filter(([key]) => !whole.some(([k]) => k === key))), ["stages", index]);
 }
 
 /**

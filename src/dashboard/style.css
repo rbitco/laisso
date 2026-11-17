@@ -451,7 +451,8 @@ dd .drift, .bar .drift { color: var(--amber); }
 [data-role="pipeline-version"] a, [data-role="live-versions"] a { color: var(--accent); }
 .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px 14px; align-items: end; }
 .fields label, .fields .check { display: grid; gap: 5px; font-size: 12.5px; color: var(--muted); }
-.fields label.wide { grid-column: 1 / -1; }
+.fields label.wide, .fields .noted.wide { grid-column: 1 / -1; }
+.fields .noted { display: grid; gap: 3px; align-content: end; }
 .fields .check { display: flex; align-items: flex-start; gap: 8px; color: var(--ink); font-size: 13px; line-height: 1.35; }
 .fields .check input { margin: 2px 0 0; accent-color: var(--accent); }
 .fields input, .fields select, .fields textarea { padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: inherit; font: inherit; min-width: 0; }
@@ -577,6 +578,12 @@ button.quiet { background: transparent; }
 .stage-box h3 .tools button:hover:not(:disabled) { border-color: var(--line); color: var(--ink); }
 .stage-box h3 .tools button:disabled { opacity: 0.3; }
 .stage-box h3 .removed-note { display: none; color: var(--crit); font-weight: normal; font-size: 12px; }
+.stage-box h3 .reuse-tag { font-size: 11px; font-weight: normal; padding: 1px 7px; border-radius: 999px; background: var(--wait-bg); color: var(--wait); white-space: nowrap; }
+.stage-box h3 .reuse-changed { font-size: 11px; font-weight: normal; padding: 1px 7px; border-radius: 999px; background: var(--amber-bg); color: var(--amber); white-space: nowrap; }
+.reuse-note { display: block; font-size: 11.5px; font-weight: normal; color: var(--muted); font-style: italic; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reuse-note.changed { font-style: normal; color: var(--amber); display: flex; gap: 8px; align-items: center; }
+.stage.skipped .stage-box { opacity: 0.55; }
+.stage.skipped .stage-box h3 .nm { text-decoration: line-through; }
 .stage-box h3 .reused-by { color: var(--muted); font-weight: normal; font-size: 12px; font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40%; }
 .stage-fields { display: grid; gap: 0; border-top: 1px solid var(--line); }
 .k-action .stage-fields { padding: 14px 14px 16px; }

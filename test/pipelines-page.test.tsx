@@ -33,6 +33,7 @@ interface Stored {
   reuses?: boolean;
   parts?: boolean;
   reusedBy?: PipelineFile["reusedBy"];
+  reuse?: PipelineFile["reuse"];
 }
 
 type Sent = { method: string; route: string; body: unknown };
@@ -42,7 +43,7 @@ function fakeLaisso(files: Record<string, Stored> = { default: { text: DEFAULT_T
   const sent: Sent[] = [];
   const state = { files, refuse: null as string | null, breaks: null as string | null, versions: {} as Record<string, LiveVersionView[]>, frozen: {} as Record<string, PipelineVersionView> };
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
-  const fileView = (name: string): PipelineFile => ({ name, file: `/p/${name}.yaml`, reuses: false, parts: false, reusedBy: [], ...state.files[name]! });
+  const fileView = (name: string): PipelineFile => ({ name, file: `/p/${name}.yaml`, reuses: false, reuse: null, parts: false, reusedBy: [], ...state.files[name]! });
   vi.stubGlobal("fetch", async (url: string, init: RequestInit = {}) => {
     const method = init.method ?? "GET";
     if (url === "/api/pipelines")
@@ -300,13 +301,13 @@ describe("a Pipeline's editor", () => {
     expect(document.querySelector('.info-strip[data-role="reused-by"]')).toBeNull();
   });
 
-  it("opens a Pipeline that reuses Stages as text, saying why", async () => {
-    fakeLaisso({ "bug-fix": { text: "stages:\n  - use: default.plan\n", pipeline: DEFAULT, problem: null, reuses: true } });
+  it("opens a Pipeline that reuses Stages in the field editor, its copied Stages tagged", async () => {
+    const plan = { ...DEFAULT.stages[0]! };
+    fakeLaisso({ "bug-fix": { text: "stages:\n  - use: default.plan\n", pipeline: { ...DEFAULT, stages: [plan] }, problem: null, reuses: true, reuse: [{ stage: plan, origin: { pipeline: "default", stage: "plan", how: "use" }, source: plan, skipped: false }] } });
     await showPage("bug-fix");
-    await screen.findByText("This Pipeline reuses Stages from other Pipelines, so it opens as text for now.");
-    const area = screen.getByRole("textbox", { name: "bug-fix as text" }) as HTMLTextAreaElement;
-    expect(area.closest("[hidden]")).toBeNull();
-    expect(screen.queryByText("Pipeline settings")).toBeNull();
+    expect((await screen.findByText("Pipeline settings")).closest("[hidden]")).toBeNull();
+    expect(screen.getByText("use default")).toBeTruthy();
+    expect(document.querySelector('[data-role="reuse-text-only"]')).toBeNull();
   });
 });
 

@@ -3,6 +3,7 @@ import { checkOf, latestVisit, type ArrivedBy, type ArtifactCheck, type ChosenBy
 import { runnerOf, type SessionProfile, type SessionRow } from "../store/sessions.ts";
 import { type Pipeline, type Routes, type RunnerName, type RunnerStage, type Stage } from "../pipeline/load.ts";
 import type { PipelineSource } from "../pipeline/files.ts";
+import { rowsOf } from "../pipeline/rewrite.ts";
 import type { Drift, VersionRow } from "../store/versions.ts";
 import type { ActionConfig, Config, ProfileScope, ProfileSettings, ProfileSource } from "../server/config.ts";
 import { chatProfile, resumeRefusal, ticketProfile } from "../session/overrides.ts";
@@ -396,6 +397,17 @@ export type StageFields =
   | { kind: "action"; name: string; label: string; action: string; with: Record<string, string>; routes?: Routes }
   | { kind: "wait"; name: string; label: string; wait: string; waitWith: Record<string, string>; advance: boolean; budget: { wallTime?: string }; routes?: Routes };
 
+/** A Stage of a reusing Pipeline as the editor lists it: where it came from, and the source's own fields for the hints. */
+export interface ReuseRow {
+  stage: StageFields;
+  /** Null for an own Stage. */
+  origin: { pipeline: string; stage: string; how: "use" | "include" } | null;
+  /** The source Stage's fields, before this Pipeline's changes; null for an own Stage. */
+  source: StageFields | null;
+  /** Skipped by its include: shown greyed, kept again with Keep. */
+  skipped: boolean;
+}
+
 export interface PipelineListing {
   name: string;
   file: string;
@@ -414,8 +426,10 @@ export interface PipelineFile {
   text: string;
   pipeline: PipelineView | null;
   problem: string | null;
-  /** It takes Stages from other Pipelines, so the dashboard edits it as text for now. */
+  /** It takes Stages from other Pipelines. */
   reuses: boolean;
+  /** For a reusing Pipeline that loads, each line of the editor's list: every Stage, and each one an include skips (LASSO-222). Null otherwise. */
+  reuse: ReuseRow[] | null;
   /** Kept as parts (intake: false). */
   parts: boolean;
   /** The Pipelines that take Stages from this one, each with the Stages (by name here) it takes. */
@@ -495,6 +509,14 @@ export function pipelineFileView(source: PipelineSource, reusedBy: PipelineFile[
     pipeline: pipeline ? pipelineFields(pipeline) : null,
     problem: source.problem,
     reuses: source.reuses,
+    reuse: source.entries
+      ? rowsOf(source.entries).map((r) => ({
+          stage: stageFields(r.stage),
+          origin: r.how !== "own" && r.original ? { pipeline: r.source!, stage: r.original.name, how: r.how } : null,
+          source: r.original ? stageFields(r.original) : null,
+          skipped: r.skipped,
+        }))
+      : null,
     parts: pipeline?.intake === false,
     reusedBy,
   };

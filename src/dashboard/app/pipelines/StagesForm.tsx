@@ -9,7 +9,7 @@ import { BreakConfirm, confirmQuery, wouldBreak, type Breaking } from "./BreakCo
 import { openProfileDrawer } from "../profiles/drawer.tsx";
 import { ProfileButton } from "../profiles/ProfileButton.tsx";
 import { firstLine, RailStage, StagesHead } from "./Rail.tsx";
-import { actionKeys, addStage, artifactKeys, checkAction, FieldError, moveStage, paramsOf, pipelinePatch, removeStage, stageTitle, type ActionDraft, type Card, type Params, type PipelineDraft, type RunnerDraft, draftOf } from "./stages.ts";
+import { actionKeys, addStage, artifactKeys, changedFields, checkAction, FieldError, moveStage, paramsOf, pipelinePatch, removeStage, resetField, sourceValue, stageTitle, type ActionDraft, type Card, type Params, type PipelineDraft, type RunnerDraft, draftOf } from "./stages.ts";
 
 /** A Pipeline file that loads, as the Stage editor takes it. */
 export type LoadedPipeline = PipelineFile & { pipeline: PipelineView };
@@ -42,19 +42,63 @@ export function StagesForm({ file, onSaved }: { file: LoadedPipeline; onSaved: (
   return <Editor file={file} params={loaded.params} start={loaded.config} onSaved={onSaved} />;
 }
 
-const Field = ({ label, wide, children }: { label: string; wide?: boolean; children: ReactNode }) => (
-  <label className={wide ? "wide" : ""}>
-    {label}
-    {children}
-  </label>
-);
+// A note goes beside the label, not in it, so it stays out of the field's name.
+const Field = ({ label, wide, note, children }: { label: string; wide?: boolean; note?: ReactNode; children: ReactNode }) => {
+  const field = (
+    <label className={wide && !note ? "wide" : ""}>
+      {label}
+      {children}
+    </label>
+  );
+  return note ? (
+    <div className={wide ? "noted wide" : "noted"}>
+      {field}
+      {note}
+    </div>
+  ) : (
+    field
+  );
+};
 
-const Check = ({ label, name, on, onChange }: { label: string; name: string; on: boolean; onChange: (on: boolean) => void }) => (
-  <label className="check wide">
-    <input type="checkbox" name={name} checked={on} onChange={(ev) => onChange(ev.target.checked)} />
-    {label}
-  </label>
-);
+const Check = ({ label, name, on, note, onChange }: { label: string; name: string; on: boolean; note?: ReactNode; onChange: (on: boolean) => void }) => {
+  const check = (
+    <label className="check wide">
+      <input type="checkbox" name={name} checked={on} onChange={(ev) => onChange(ev.target.checked)} />
+      {label}
+    </label>
+  );
+  return note ? (
+    <div className="noted wide">
+      {check}
+      {note}
+    </div>
+  ) : (
+    check
+  );
+};
+
+/**
+ * Under each field of a copied Stage (LASSO-222): the source's value until it is changed, then "changed" with a
+ * Reset that puts the source's value back, which the save writes as no override at all.
+ */
+function hintsFor(card: Card, changed: string[], onEdit: (change: Partial<RunnerDraft> | Partial<ActionDraft>) => void): Hint {
+  const reused = card.reused;
+  if (!reused) return () => null;
+  const from = reused.origin.pipeline;
+  return (field) =>
+    changed.includes(field) ? (
+      <span className="reuse-note changed" data-role="changed">
+        changed
+        <button type="button" className="sm quiet" data-role="reset" onClick={() => onEdit(resetField(card, field))}>
+          {"Reset to " + from}
+        </button>
+      </span>
+    ) : (
+      <span className="reuse-note" data-role="inherited">{`from ${from}: ${sourceValue(card, field)}`}</span>
+    );
+}
+
+type Hint = (field: string) => ReactNode;
 
 const Group = ({ title, children }: { title: string; children: ReactNode }) => (
   <div className="fgroup">
@@ -74,7 +118,9 @@ function Editor({ file, params, start, onSaved }: { file: LoadedPipeline; params
   const pipeline = file.pipeline;
   // A profile drawer save brings the new config, so each button resolves against what config.yaml now says.
   const [config, setConfig] = useState(start);
-  const [draft, setDraft] = useState(() => draftOf(pipeline));
+  const [draft, setDraft] = useState(() => draftOf(pipeline, file.reuse));
+  // Moving and adding Stages among reuse entries is still done in the text (LASSO-223).
+  const reusing = file.reuse !== null && file.reuse !== undefined;
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [breaking, setBreaking] = useState<Breaking | null>(null);
@@ -170,31 +216,50 @@ function Editor({ file, params, start, onSaved }: { file: LoadedPipeline; params
           const label = card.stage.name || "the new Stage";
           // The Pipelines that copy this Stage (LASSO-220), so an edit here is known to reach them.
           const takers = card.fresh ? [] : (file.reusedBy ?? []).filter((r) => r.stages.includes(card.stage.name)).map((r) => r.pipeline);
+          const reused = card.reused;
+          const changed = changedFields(card, params);
+          // ✕ skips a Stage in its include, removes a use entry, or removes an own Stage (LASSO-222).
+          const goes = reused?.origin.how === "include" ? "skipped" : "removed";
+          const removeTitle = card.removed ? (reused?.skipped ? "copy this Stage again" : "keep this Stage") : kept === 1 ? "a Pipeline keeps at least one Stage" : card.fresh ? "drop this new Stage" : reused?.origin.how === "include" ? `skip this Stage of ${reused.origin.pipeline} on Save` : reused ? "remove this use on Save" : "remove this Stage on Save";
           const tools = (
             <>
+              {reused && (
+                <span className="reuse-tag" data-role="reuse-tag" title={`${reused.origin.how} ${reused.origin.pipeline}.${reused.origin.stage}`}>
+                  {(reused.origin.how === "use" ? "use " : "from ") + reused.origin.pipeline}
+                </span>
+              )}
+              {changed.length > 0 && !card.removed && (
+                <span className="reuse-changed" data-role="changed-count">
+                  {changed.length + " changed"}
+                </span>
+              )}
               {takers.length > 0 && (
                 <span className="reused-by" data-role="reused-by" title={`Reused by ${takers.join(", ")}`}>
                   {"↗ " + takers.join(", ")}
                 </span>
               )}
-              <span className="removed-note">removed on Save</span>
+              <span className="removed-note">{reused?.skipped ? "skipped from " + reused.origin.pipeline : goes + " on Save"}</span>
               <span className="tools">
-                <button type="button" className="sm" data-role="move-up" title="run this Stage earlier" aria-label={`move ${label} up`} style={i === 0 ? { visibility: "hidden" } : undefined} onClick={() => editCards((cards) => moveStage(cards, card.id, -1))}>
-                  ↑
-                </button>
-                <button type="button" className="sm" data-role="move-down" title="run this Stage later" aria-label={`move ${label} down`} style={i === draft.cards.length - 1 ? { visibility: "hidden" } : undefined} onClick={() => editCards((cards) => moveStage(cards, card.id, 1))}>
-                  ↓
-                </button>
+                {!reusing && (
+                  <>
+                    <button type="button" className="sm" data-role="move-up" title="run this Stage earlier" aria-label={`move ${label} up`} style={i === 0 ? { visibility: "hidden" } : undefined} onClick={() => editCards((cards) => moveStage(cards, card.id, -1))}>
+                      ↑
+                    </button>
+                    <button type="button" className="sm" data-role="move-down" title="run this Stage later" aria-label={`move ${label} down`} style={i === draft.cards.length - 1 ? { visibility: "hidden" } : undefined} onClick={() => editCards((cards) => moveStage(cards, card.id, 1))}>
+                      ↓
+                    </button>
+                  </>
+                )}
                 <button
                   type="button"
                   className="sm"
                   data-role="remove-stage"
                   aria-label={card.removed ? undefined : `remove ${label}`}
-                  title={card.removed ? "keep this Stage" : kept === 1 ? "a Pipeline keeps at least one Stage" : card.fresh ? "drop this new Stage" : "remove this Stage on Save"}
+                  title={removeTitle}
                   disabled={!card.removed && kept === 1}
                   onClick={() => editCards((cards) => removeStage(cards, card.id))}
                 >
-                  {card.removed ? "Undo" : "✕"}
+                  {card.removed ? (reused?.skipped ? "Keep" : "Undo") : "✕"}
                 </button>
               </span>
             </>
@@ -203,6 +268,7 @@ function Editor({ file, params, start, onSaved }: { file: LoadedPipeline; params
             card,
             station: card.removed ? "" : String(++station),
             tools,
+            hint: hintsFor(card, changed, (change) => editStage(card.id, change)),
             onToggle: () => setOpen((c) => (c.id === card.id ? !c.open : c.open)),
           };
           return (
@@ -214,14 +280,14 @@ function Editor({ file, params, start, onSaved }: { file: LoadedPipeline; params
               ) : (
                 <RunnerCard {...shared} draft={card.draft} params={params} pipeline={file.name} pipelineProfile={draft.profile || null} config={config} onConfig={setConfig} onEdit={(change) => editStage(card.id, change)} />
               )}
-              <AddStage
+              {!reusing && <AddStage
                 after={label}
                 onAdd={(kind) => {
                   const next = addStage(draft.cards, card.id, kind);
                   edit((d) => ({ ...d, cards: next }));
                   setFocus({ id: next[i + 1]!.id, selector: ".stage-fields input, .stage-fields select" });
                 }}
-              />
+              />}
             </Fragment>
           );
         })}
@@ -272,10 +338,12 @@ interface CardProps {
   card: Card;
   station: string;
   tools: ReactNode;
+  /** What shows under a field: for a copied Stage, the source's value or that it changed. */
+  hint: Hint;
   onToggle: () => void;
 }
 
-const stageClass = (card: Card) => [card.fresh && "fresh", card.removed && "removed"].filter(Boolean).join(" ");
+const stageClass = (card: Card) => [card.fresh && "fresh", card.removed && "removed", card.reused && "reused", card.removed && card.reused?.skipped && "skipped"].filter(Boolean).join(" ");
 
 /** A wait Stage, shown as written: the form moves and removes it, and its fields are edited as text (LASSO-195). */
 function WaitCard({ card, station, tools, onToggle }: CardProps) {
@@ -292,7 +360,7 @@ function WaitCard({ card, station, tools, onToggle }: CardProps) {
 }
 
 /** An Action Stage: the Action picked from config, and one field per param it takes. */
-function ActionCard({ card, station, tools, onToggle, draft, params, onEdit }: CardProps & { draft: ActionDraft; params: Params; onEdit: (change: Partial<ActionDraft>) => void }) {
+function ActionCard({ card, station, tools, hint, onToggle, draft, params, onEdit }: CardProps & { draft: ActionDraft; params: Params; onEdit: (change: Partial<ActionDraft>) => void }) {
   const s = card.stage;
   if (s.kind !== "action") throw new Error("an Action card needs an Action Stage");
   // A Stage naming an Action config lacks keeps it pickable, and its own params.
@@ -303,7 +371,7 @@ function ActionCard({ card, station, tools, onToggle, draft, params, onEdit }: C
   return (
     <RailStage kind="action" station={station} name={stageTitle(card)} summary={summary} peek="" open={card.open} onToggle={onToggle} className={stageClass(card)} role="action-stage" tools={tools}>
       <div className="fields">
-        <Field label="Action">
+        <Field label="Action" note={hint("action")}>
           <select name="action" value={draft.action} onChange={(ev) => onEdit({ action: ev.target.value })}>
             {!s.action && <option value="">pick one</option>}
             {names.map((name) => (
@@ -314,7 +382,7 @@ function ActionCard({ card, station, tools, onToggle, draft, params, onEdit }: C
           </select>
         </Field>
         {keys.map((key) => (
-          <Field key={key} label={key}>
+          <Field key={key} label={key} note={hint("with." + key)}>
             <input name={key} value={draft.with[key] ?? ""} placeholder="required" onChange={(ev) => onEdit({ with: { ...draft.with, [key]: ev.target.value } })} />
           </Field>
         ))}
@@ -336,7 +404,7 @@ interface RunnerCardProps extends CardProps {
 }
 
 /** A Runner or Human Stage: its task, how it runs, when it is done, and its limits. */
-function RunnerCard({ card, station, tools, onToggle, draft, params, pipeline, pipelineProfile, config, onConfig, onEdit }: RunnerCardProps) {
+function RunnerCard({ card, station, tools, hint, onToggle, draft, params, pipeline, pipelineProfile, config, onConfig, onEdit }: RunnerCardProps) {
   const byDefault = (v: number | string | undefined) => (v === undefined ? "default" : `default (${v})`);
   // The closed card's line: who runs it, what it leaves behind, and anything unusual about how it moves on.
   const v = stageProfileView(draft.profile, pipelineProfile, config);
@@ -349,27 +417,27 @@ function RunnerCard({ card, station, tools, onToggle, draft, params, pipeline, p
   return (
     <RailStage kind={draft.human ? "human" : "runner"} station={station} name={stageTitle(card)} summary={bits.join(", ")} peek={firstLine(draft.prompt)} open={card.open} onToggle={onToggle} className={stageClass(card)} tools={tools}>
       <Group title="Task">
-        <Field label="Name">{text("name", "implement")}</Field>
-        <Field label="Skills">{text("skills", "grilling, to-spec")}</Field>
-        <Field label="Prompt" wide>
+        <Field label="Name" note={hint("name")}>{text("name", "implement")}</Field>
+        <Field label="Skills" note={hint("skills")}>{text("skills", "grilling, to-spec")}</Field>
+        <Field label="Prompt" wide note={hint("prompt")}>
           <textarea name="prompt" placeholder="What the agent should do in this Stage" value={draft.prompt} onChange={(ev) => onEdit({ prompt: ev.target.value })} />
         </Field>
       </Group>
       <Group title="Runs as">
-        <Field label="Agent Profile" wide>
+        <Field label="Agent Profile" wide note={hint("profile")}>
           <StageProfileButton card={card} draft={draft} pipeline={pipeline} pipelineProfile={pipelineProfile} config={config} onConfig={onConfig} onPick={(profile) => onEdit({ profile })} />
         </Field>
-        <Check label="Human Stage: opens a terminal for you to work in" name="human" on={draft.human} onChange={(human) => onEdit({ human })} />
+        <Check label="Human Stage: opens a terminal for you to work in" name="human" on={draft.human} note={hint("human")} onChange={(human) => onEdit({ human })} />
       </Group>
       <Group title="Done when">
-        <ArtifactPicker card={card} draft={draft} params={params} onEdit={onEdit} />
-        <Check label="Move to the next Stage on its own" name="advance" on={draft.advance} onChange={(advance) => onEdit({ advance })} />
-        <Check label="Repeat on Feedback until the artifact is met" name="repeat" on={draft.repeat} onChange={(repeat) => onEdit({ repeat })} />
+        <ArtifactPicker card={card} draft={draft} params={params} note={hint("artifact")} onEdit={onEdit} />
+        <Check label="Move to the next Stage on its own" name="advance" on={draft.advance} note={hint("advance")} onChange={(advance) => onEdit({ advance })} />
+        <Check label="Repeat on Feedback until the artifact is met" name="repeat" on={draft.repeat} note={hint("repeat")} onChange={(repeat) => onEdit({ repeat })} />
       </Group>
       <Group title="Limits">
-        <Field label="Feedback rounds">{text("rounds", byDefault(config.budget.rounds))}</Field>
-        <Field label="Attempts">{text("attempts", byDefault(config.budget.attempts))}</Field>
-        <Field label="Time per Session">{text("wallTime", byDefault(config.budget.wallTime))}</Field>
+        <Field label="Feedback rounds" note={hint("rounds")}>{text("rounds", byDefault(config.budget.rounds))}</Field>
+        <Field label="Attempts" note={hint("attempts")}>{text("attempts", byDefault(config.budget.attempts))}</Field>
+        <Field label="Time per Session" note={hint("wallTime")}>{text("wallTime", byDefault(config.budget.wallTime))}</Field>
       </Group>
     </RailStage>
   );
@@ -384,7 +452,7 @@ function artifactSummary(draft: RunnerDraft): string {
  * A Runner Stage's Artifact: the built-ins, a file, or one of config's Actions as a check, with a field per param
  * it takes. An Artifact the Stage was saved with that the picker lacks stays pickable.
  */
-function ArtifactPicker({ card, draft, params, onEdit }: { card: Card; draft: RunnerDraft; params: Params; onEdit: (change: Partial<RunnerDraft>) => void }) {
+function ArtifactPicker({ card, draft, params, note, onEdit }: { card: Card; draft: RunnerDraft; params: Params; note?: ReactNode; onEdit: (change: Partial<RunnerDraft>) => void }) {
   const s = card.stage;
   if (s.kind !== "runner") throw new Error("an Artifact picker needs a Runner Stage");
   const actions = Object.keys(params).sort().map((name) => "action " + name);
@@ -394,7 +462,7 @@ function ArtifactPicker({ card, draft, params, onEdit }: { card: Card; draft: Ru
   const keys = artifactKeys(s, draft.artifact, params);
   return (
     <>
-      <Field label="Artifact" wide>
+      <Field label="Artifact" wide note={note}>
         <select name="artifact" value={draft.artifact} onChange={(ev) => onEdit({ artifact: ev.target.value })}>
           <option value="">none</option>
           {extra && <option value={extra}>{checkAction(extra) ? extra + " (not in config.yaml)" : extra}</option>}

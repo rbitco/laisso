@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, cleanup, waitFor, within } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { DEFAULT_CONFIG, type Config } from "../src/server/config.ts";
-import type { ActionListing, ConfigFile, PipelineView } from "../src/api/views.ts";
+import type { ActionListing, ConfigFile, PipelineView, StageFields } from "../src/api/views.ts";
 import { StagesForm, type LoadedPipeline } from "../src/dashboard/app/pipelines/StagesForm.tsx";
 import { closeProfileDrawer, ProfileDrawerHost } from "../src/dashboard/app/profiles/drawer.tsx";
 import { Notice, showNotice } from "../src/dashboard/app/notice.tsx";
@@ -66,9 +66,9 @@ const stage = (name: string) => screen.getByText(name, { selector: ".nm" }).clos
 const toggle = (name: string) => within(stage(name)).getAllByRole("button")[0]!;
 const saveState = () => document.querySelector(".savebar .state")!.textContent;
 
-async function showForm(pipeline: PipelineView = PIPELINE, reusedBy: LoadedPipeline["reusedBy"] = []) {
+async function showForm(pipeline: PipelineView = PIPELINE, reusedBy: LoadedPipeline["reusedBy"] = [], reuse: LoadedPipeline["reuse"] = null) {
   const onSaved = vi.fn();
-  const file: LoadedPipeline = { name: "default", file: "/p/default.yaml", text: "", pipeline, problem: null, reuses: false, parts: false, reusedBy };
+  const file: LoadedPipeline = { name: "default", file: "/p/default.yaml", text: "", pipeline, problem: null, reuses: reuse !== null, reuse, parts: false, reusedBy };
   render(<StagesForm file={file} onSaved={onSaved} />);
   await screen.findByText("Pipeline settings");
   return { onSaved, user: userEvent.setup() };
@@ -450,5 +450,90 @@ describe("a Stage other Pipelines reuse (LASSO-220)", () => {
     fakeLaisso();
     await showForm();
     expect(document.querySelector('[data-role="reused-by"]')).toBeNull();
+  });
+});
+
+describe("a Pipeline that reuses Stages, in the field editor (LASSO-222)", () => {
+  const runnerStage = (name: string, prompt: string, extra: Partial<Extract<StageFields, { kind: "runner" }>> = {}): StageFields => ({ kind: "runner", name, label: name, prompt, skills: [], profile: null, human: false, advance: true, artifact: null, repeat: null, budget: {}, ...extra });
+  const PLAN = runnerStage("plan", "Plan it.", { human: true });
+  const IMPLEMENT = runnerStage("implement", "Carry it out.", { budget: { rounds: 3 } });
+  const NOTIFY: StageFields = { kind: "action", name: "notify", label: "Review", action: "transition", with: { status: "Review" } };
+  const SMOKE = runnerStage("smoke", "Run it.");
+  const changedImplement = { ...IMPLEMENT, prompt: "Carry it out.\n\nTest first." } as StageFields;
+  const REUSE: NonNullable<LoadedPipeline["reuse"]> = [
+    { stage: PLAN, origin: { pipeline: "default", stage: "plan", how: "include" }, source: PLAN, skipped: true },
+    { stage: changedImplement, origin: { pipeline: "default", stage: "implement", how: "include" }, source: IMPLEMENT, skipped: false },
+    { stage: SMOKE, origin: null, source: null, skipped: false },
+    { stage: NOTIFY, origin: { pipeline: "default", stage: "notify", how: "use" }, source: NOTIFY, skipped: false },
+  ];
+  const BUG_FIX: PipelineView = { profile: null, budget: {}, stages: [changedImplement, SMOKE, NOTIFY] };
+  const show = () => showForm(BUG_FIX, [], REUSE);
+  const head = (name: string) => stage(name).querySelector("h3")!;
+
+  it("tags each copied Stage with its source and how many fields it changes, and shows a skipped one greyed with Keep", async () => {
+    fakeLaisso();
+    await show();
+    expect(within(head("implement")).getByText("from default")).toBeTruthy();
+    expect(within(head("implement")).getByText("1 changed")).toBeTruthy();
+    expect(within(head("notify")).getByText("use default")).toBeTruthy();
+    expect(within(head("notify")).queryByText(/changed/)).toBeNull();
+    expect(head("smoke").querySelector('[data-role="reuse-tag"]')).toBeNull();
+    const plan = stage("plan");
+    expect(plan.className).toContain("skipped");
+    expect(plan.querySelector(".station")!.textContent).toBe("");
+    expect(within(plan).getByText("skipped from default")).toBeTruthy();
+    expect(within(plan).getByRole("button", { name: "Keep" })).toBeTruthy();
+    expect([...document.querySelectorAll(".rail .station")].map((st) => st.textContent)).toEqual(["", "1", "2", "3"]);
+    // Moving and adding among reuse entries waits for LASSO-223.
+    expect(document.querySelector('[data-role="move-up"], .add-stage')).toBeNull();
+  });
+
+  it("shows the source's value under each unchanged field, and Reset puts a changed one back", async () => {
+    const laisso = fakeLaisso();
+    const { user } = await show();
+    await user.click(toggle("implement"));
+    const implement = stage("implement");
+    const note = (label: string) => within(implement).getByRole("textbox", { name: label }).closest(".noted")!.querySelector(".reuse-note")!;
+    expect(note("Feedback rounds").textContent).toBe("from default: 3");
+    expect(note("Skills").textContent).toBe("from default: none");
+    expect(note("Prompt").textContent).toBe("changedReset to default");
+    await user.clear(within(implement).getByRole("textbox", { name: "Feedback rounds" }));
+    await user.type(within(implement).getByRole("textbox", { name: "Feedback rounds" }), "5");
+    expect(within(head("implement")).getByText("2 changed")).toBeTruthy();
+    await user.click(within(note("Prompt") as HTMLElement).getByRole("button", { name: "Reset to default" }));
+    expect((within(implement).getByRole("textbox", { name: "Prompt" }) as HTMLTextAreaElement).value).toBe("Carry it out.");
+    expect(note("Prompt").textContent).toBe("from default: Carry it out.");
+    await user.click(toggle("notify"));
+    await user.clear(within(stage("notify")).getByRole("textbox", { name: "status" }));
+    await user.type(within(stage("notify")).getByRole("textbox", { name: "status" }), "Done");
+    expect(within(stage("notify")).getByRole("textbox", { name: "status" }).closest(".noted")!.querySelector(".reuse-note")!.textContent).toBe("changedReset to default");
+    await save(user);
+    await waitFor(() => expect(notice().textContent).toBe("saved default"));
+    expect(laisso.sent).toEqual([{ method: "PATCH", route: "/api/pipelines/default", body: { stages: { implement: { prompt: "Carry it out.", budget: { rounds: 5 } }, notify: { with: { status: "Done" } } } } }]);
+  });
+
+  it("✕ skips an included Stage, removes a use or an own Stage, and Keep copies a skipped one again", async () => {
+    const laisso = fakeLaisso();
+    const { user } = await show();
+    const remove = (name: string) => within(head(name)).getByRole("button", { name: "remove " + name });
+    expect(remove("implement").title).toBe("skip this Stage of default on Save");
+    expect(within(head("notify")).getByRole("button", { name: "remove notify" }).title).toBe("remove this use on Save");
+    expect(remove("smoke").title).toBe("remove this Stage on Save");
+    await user.click(remove("implement"));
+    expect(within(head("implement")).getByText("skipped on Save")).toBeTruthy();
+    await user.click(remove("smoke"));
+    expect(within(head("smoke")).getByText("removed on Save")).toBeTruthy();
+    await user.click(within(stage("plan")).getByRole("button", { name: "Keep" }));
+    expect(stage("plan").className).not.toContain("removed");
+    await save(user);
+    await waitFor(() => expect(notice().textContent).toBe("saved default"));
+    expect(laisso.sent).toEqual([{ method: "PATCH", route: "/api/pipelines/default", body: { order: ["plan", "notify"] } }]);
+    cleanup();
+    render(<Overlays />);
+    const again = fakeLaisso();
+    const second = await show();
+    await second.user.click(within(head("notify")).getByRole("button", { name: "remove notify" }));
+    await save(second.user);
+    await waitFor(() => expect(again.sent).toEqual([{ method: "PATCH", route: "/api/pipelines/default", body: { order: ["implement", "smoke"] } }]));
   });
 });

@@ -173,7 +173,84 @@ describe("the Pipeline files of a reusing Pipeline", () => {
     expect(saved.pipeline!.stages[0]!.from).toEqual({ pipeline: "default", stage: "plan", how: "use" });
     expect(files.read("default")!.reuses).toBe(false);
     expect(() => files.write("bad", "stages:\n  - use: default.nope\n")).toThrow(/default has no Stage named nope/);
-    expect(() => files.patch("bug-fix", { profile: "codex" })).toThrow(/reuses Stages from other Pipelines; edit it as text/);
+    expect(files.patch("bug-fix", { budget: { spend: 2 } }).pipeline!.budget).toEqual({ spend: 2 });
+  });
+});
+
+describe("the entry rewriter: edits to the expanded list written as entries (LASSO-222)", () => {
+  const FLOW = "stages:\n  - name: plan\n    prompt: Plan it.\n  - name: implement\n    prompt: Carry out the plan.\n    budget: { rounds: 3, attempts: 2 }\n  - name: review\n    prompt: Address feedback.\n    artifact: pr-merged\n";
+  const BUG_FIX = `# Bug fixes reuse the flow.
+stages:
+  - include: flow
+    to: implement
+    skip: [ plan ]
+    change:
+      implement:
+        append: Write a failing test first.
+  # Our own check.
+  - name: smoke
+    prompt: Run it.
+  - use: flow.review
+    skills: [ code-review ]
+`;
+  const setup = (text = BUG_FIX) => {
+    const dir = mkdtempSync(path.join(tmpdir(), "laisso-rewrite-"));
+    writeFileSync(path.join(dir, "flow.yaml"), FLOW);
+    writeFileSync(path.join(dir, "bug-fix.yaml"), text);
+    const files = new PipelineFiles(dir, () => DEFAULT_CONFIG);
+    const patch = (p: Record<string, unknown>) => files.patch("bug-fix", p);
+    return { files, patch };
+  };
+  const names = (source: { pipeline: { stages: Stage[] } | null }) => source.pipeline!.stages.map((s) => s.name);
+
+  it("carries the entries of a reusing Pipeline, and none for one that reuses nothing", () => {
+    const { files } = setup();
+    expect(files.read("bug-fix")!.entries!.map((e) => e.kind)).toEqual(["include", "own", "use"]);
+    expect(files.read("flow")!.entries).toBeNull();
+  });
+
+  it("sets a field on an included Stage under change, and on a use entry beside use", () => {
+    const { patch } = setup();
+    const saved = patch({ stages: { implement: { budget: { rounds: 5 } }, review: { prompt: "Review it.", human: true } } });
+    expect(saved.text).toBe(BUG_FIX.replace("        append: Write a failing test first.\n", "        append: Write a failing test first.\n        budget: { rounds: 5 }\n").replace("    skills: [ code-review ]\n", "    skills: [ code-review ]\n    prompt: Review it.\n    human: true\n"));
+    expect(runner(saved.pipeline!.stages.find((s) => s.name === "implement")!).budget).toEqual({ rounds: 5, attempts: 2 });
+  });
+
+  it("replaces an append when the prompt is set, and resets a field set back to the source's value", () => {
+    const { patch } = setup();
+    expect(patch({ stages: { implement: { prompt: "Just do it." } } }).text).toContain("      implement:\n        prompt: Just do it.\n  # Our own check.");
+    // Back to the source's prompt: the change goes, and the include with it.
+    const reset = patch({ stages: { implement: { prompt: "Carry out the plan." }, review: { skills: null } } });
+    expect(reset.text).toBe(BUG_FIX.replace("    change:\n      implement:\n        append: Write a failing test first.\n", "").replace("    skills: [ code-review ]\n", ""));
+  });
+
+  it("skips an included Stage left out of the order, dropping its change, and keeps a skipped one named in it", () => {
+    const { patch } = setup();
+    const skipped = patch({ order: ["smoke", "review"] });
+    expect(names(skipped)).toEqual(["smoke", "review"]);
+    expect(skipped.text).toBe(BUG_FIX.replace("  - include: flow\n    to: implement\n    skip: [ plan ]\n    change:\n      implement:\n        append: Write a failing test first.\n", ""));
+    const { patch: again } = setup();
+    const kept = again({ order: ["plan", "smoke", "review"] });
+    expect(names(kept)).toEqual(["plan", "smoke", "review"]);
+    expect(kept.text).toContain("  - include: flow\n    to: implement\n    skip: [ implement ]\n  # Our own check.");
+    const { patch: third } = setup();
+    expect(names(third({ order: ["plan", "implement", "smoke", "review"] }))).toEqual(["plan", "implement", "smoke", "review"]);
+  });
+
+  it("removes a use entry or an own Stage left out of the order, keeping the comments of the rest", () => {
+    const { patch } = setup();
+    const saved = patch({ order: ["implement", "review"] });
+    expect(names(saved)).toEqual(["implement", "review"]);
+    expect(saved.text).toBe(BUG_FIX.replace("  # Our own check.\n  - name: smoke\n    prompt: Run it.\n", ""));
+    expect(names(patch({ order: ["implement"] }))).toEqual(["implement"]);
+  });
+
+  it("edits own Stages in place among reuse entries, and refuses moves and new Stages until LASSO-223", () => {
+    const { patch } = setup();
+    expect(patch({ stages: { smoke: { prompt: "Run the app." } } }).text).toBe(BUG_FIX.replace("prompt: Run it.", "prompt: Run the app."));
+    expect(() => patch({ order: ["review", "implement", "smoke"] })).toThrow("Pipeline bug-fix: Stages move by text for now; it reuses Stages from other Pipelines (implement)");
+    expect(() => patch({ order: ["implement", { name: "x", prompt: "x" }] })).toThrow(/new Stages go in by text for now/);
+    expect(() => patch({ stages: { nope: { prompt: "x" } } })).toThrow("Pipeline bug-fix has no Stage named nope");
   });
 });
 

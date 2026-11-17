@@ -663,3 +663,20 @@ describe("a save or delete that breaks a reusing Pipeline (LASSO-219)", () => {
     expect((await laisso.api<{ ok: boolean }>("/api/pipelines/bug-fix", { method: "DELETE" })).ok).toBe(true);
   });
 });
+
+describe("a reusing Pipeline through the API (LASSO-222)", () => {
+  it("lists its rows with origins and skipped ones, and a field patch writes the entries", async () => {
+    const BUG_FIX = "stages:\n  - include: work\n    skip: [ notes ]\n  # triage first\n  - name: triage\n    prompt: Triage.\n";
+    const laisso = await laissoWith({ work: WORK, "bug-fix": BUG_FIX });
+    const file = await laisso.api<PipelineFile>("/api/pipelines/bug-fix");
+    expect(file.reuse!.map((r) => [r.stage.name, r.origin?.how ?? "own", r.skipped])).toEqual([
+      ["implement", "include", false],
+      ["notes", "include", true],
+      ["triage", "own", false],
+    ]);
+    expect((await laisso.api<PipelineFile>("/api/pipelines/work")).reuse).toBeNull();
+    const saved = await laisso.api<PipelineFile>("/api/pipelines/bug-fix", { method: "PATCH", body: JSON.stringify({ stages: { implement: { budget: { attempts: 3 } }, triage: { prompt: "Triage it." } }, order: ["implement", "notes", "triage"] }) });
+    expect(saved.text).toBe("stages:\n  - include: work\n    change:\n      implement:\n        budget: { attempts: 3 }\n  # triage first\n  - name: triage\n    prompt: Triage it.\n");
+    expect(saved.reuse!.map((r) => r.skipped)).toEqual([false, false, false]);
+  });
+});
