@@ -49,14 +49,19 @@ export function suggestRepo(config: Config, kind: IntakeKind, reference: string 
   return { suggestion: matches.length === 1 ? matches[0]! : null, choices: matches.length ? matches : choices };
 }
 
-export function detect(config: Config, input: string, pipelines: string[], repo?: string): Detection {
+/**
+ * `broken` names the Pipelines that do not load (LASSO-218): still listed, so
+ * the picker can say why, but never suggested, not even as a repo's default.
+ */
+export function detect(config: Config, input: string, pipelines: string[], repo?: string, broken: string[] = []): Detection {
   const { kind, reference } = detectKind(input);
   const repoChoice = suggestRepo(config, kind, reference);
-  const fallback = pipelines.includes("default") ? "default" : (pipelines[0] ?? "default");
+  const loads = pipelines.filter((p) => !broken.includes(p));
+  const fallback = loads.includes("default") ? "default" : (loads[0] ?? "default");
   const byRepo: Record<string, string> = {};
   for (const name of repoChoice.choices) {
     const wanted = config.repos[name]!.pipeline;
-    byRepo[name] = pipelines.includes(wanted) ? wanted : fallback;
+    byRepo[name] = loads.includes(wanted) ? wanted : fallback;
   }
   const chosenRepo = repo ?? repoChoice.suggestion;
   return {

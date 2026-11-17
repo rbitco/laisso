@@ -5,6 +5,7 @@ import path from "node:path";
 import { Store } from "../src/store/store.ts";
 import { PipelineFiles } from "../src/pipeline/files.ts";
 import { DEFAULT_CONFIG } from "../src/server/config.ts";
+import { detect } from "../src/intake/detect.ts";
 import { PipelineVersions } from "../src/store/versions.ts";
 import type { TicketRow } from "../src/store/tickets.ts";
 import { loadPipeline, resolveEntries, resolvePipeline, overlay, PipelineError, type ReadPipeline, type Stage } from "../src/pipeline/load.ts";
@@ -245,5 +246,13 @@ describe("intake: false", () => {
     expect(load({ parts: parts.replace("false", "true") }, "parts").intake).toBeUndefined();
     expect(load({ parts, "bug-fix": "stages:\n  - use: parts.review\n" }).intake).toBeUndefined();
     expect(() => load({ parts: parts.replace("false", "sometimes") }, "parts")).toThrow(new PipelineError("Pipeline parts: intake must be true or false"));
+  });
+});
+
+describe("Intake detection with a Pipeline that does not load", () => {
+  it("lists it but never suggests it, not even as a repo's default", () => {
+    const config = { ...DEFAULT_CONFIG, repos: { app: { path: "/a", tracker: "jira" as const, project: "APP", pipeline: "bug-fix", actions: {}, profiles: {}, default_profile: null } } };
+    const d = detect(config, "Fix it", ["bug-fix", "default"], "app", ["bug-fix"]);
+    expect(d.pipeline).toEqual({ suggestion: "default", choices: ["bug-fix", "default"], byRepo: { app: "default" } });
   });
 });

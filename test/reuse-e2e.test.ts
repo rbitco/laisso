@@ -46,3 +46,13 @@ describe("a Pipeline kept as parts", () => {
     expect(ok.code).toBe(0);
   });
 });
+
+describe("a Pipeline that does not load", () => {
+  it("is refused by laisso add with the loader's message", async () => {
+    const { laisso } = await startLaissoWithRepos({ app: { pipeline: "work" } }, {}, { work: WORK, "bug-fix": "stages:\n  - use: work.nope\n" });
+    running.push(laisso);
+    const r = await runCli(["add", "Fix it", "--yes", "--pipeline", "bug-fix"], laisso);
+    expect(r.code).not.toBe(0);
+    expect(r.stdout + r.stderr).toContain("Pipeline bug-fix stage 1 (use work.nope): work has no Stage named nope");
+  });
+});

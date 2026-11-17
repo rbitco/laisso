@@ -52,6 +52,8 @@ interface Option {
   /** Drawn beside the name: a Pipeline's line of Stages. */
   figure?: ReactNode;
   tag?: string | null;
+  /** Shown but not choosable, as a Pipeline that does not load. */
+  disabled?: boolean;
 }
 
 /**
@@ -66,8 +68,8 @@ function Picker({ name, label, options, value, disabled, onChange, empty, childr
       {options.length === 0 && <p className="opts-empty">{empty}</p>}
       <div className="opts" role="radiogroup" aria-label={label} hidden={options.length === 0}>
         {options.map((o) => (
-          <label key={o.value} className={o.value === value ? "opt on" : "opt"}>
-            <input type="radio" name={name} value={o.value} checked={o.value === value} onChange={() => onChange(o.value)} />
+          <label key={o.value} className={o.value === value ? "opt on" : o.disabled ? "opt off" : "opt"}>
+            <input type="radio" name={name} value={o.value} checked={o.value === value} disabled={o.disabled} onChange={() => onChange(o.value)} />
             <span className="opt-head">
               <span className="opt-name">{o.value}</span>
               {o.figure}
@@ -235,6 +237,8 @@ export function ConfirmIntake({ detected, onCancel, onAdded }: { detected: Detec
           options={d.pipeline.choices.map((p) => {
             const listing = pipelines[p];
             const own = repo ? d.pipeline.byRepo[repo] : null;
+            // A Pipeline that does not load is shown with its problem, and cannot be chosen.
+            if (listing?.problem) return { value: p, disabled: true, tag: p === own ? "repo default" : "does not load", detail: listing.problem };
             return {
               value: p,
               figure: listing && <span className="opt-line" dangerouslySetInnerHTML={{ __html: pipelineLine(listing.stages) }} />,
