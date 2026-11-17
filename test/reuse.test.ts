@@ -7,7 +7,7 @@ import { PipelineFiles } from "../src/pipeline/files.ts";
 import { DEFAULT_CONFIG } from "../src/server/config.ts";
 import { PipelineVersions } from "../src/store/versions.ts";
 import type { TicketRow } from "../src/store/tickets.ts";
-import { loadPipeline, resolvePipeline, overlay, PipelineError, type ReadPipeline, type Stage } from "../src/pipeline/load.ts";
+import { loadPipeline, resolveEntries, resolvePipeline, overlay, PipelineError, type ReadPipeline, type Stage } from "../src/pipeline/load.ts";
 
 // The resolver seam (LASSO-214..216): Pipelines loaded by name from in-memory texts.
 export const texts =
@@ -173,5 +173,66 @@ describe("the Pipeline files of a reusing Pipeline", () => {
     expect(files.read("default")!.reuses).toBe(false);
     expect(() => files.write("bad", "stages:\n  - use: default.nope\n")).toThrow(/default has no Stage named nope/);
     expect(() => files.patch("bug-fix", { profile: "codex" })).toThrow(/reuses Stages from other Pipelines; edit it as text/);
+  });
+});
+
+describe("include: a run of another Pipeline's Stages", () => {
+  const names = (files: Record<string, string>, name = "bug-fix") => load(files, name).stages.map((s) => s.name);
+
+  it("expands to the same Stages as the source, each with its origin, and takes none of its settings", () => {
+    const p = load({ "bug-fix": "stages:\n  - include: default\n" });
+    const source = load({}, "default");
+    expect(p.stages.map(({ from: _f, ...rest }) => rest)).toEqual(source.stages);
+    expect(p.stages.every((s) => s.from?.pipeline === "default" && s.from.how === "include")).toBe(true);
+    expect(p.profile).toBeNull();
+    expect(load({ "bug-fix": "budget: { spend: 2 }\nstages:\n  - include: default\n" }).budget).toEqual({ spend: 2 });
+  });
+
+  it("narrows with from and to, each taking the Stage it names, and mixes with own Stages and use in order", () => {
+    expect(names({ "bug-fix": "stages:\n  - include: default\n    to: implement\n  - name: smoke-test\n    prompt: s\n  - include: default\n    from: transition-in-progress\n" })).toEqual([
+      "plan", "implement", "smoke-test", "transition-in-progress", "review",
+    ]);
+    expect(names({ "bug-fix": "stages:\n  - use: default.plan\n  - include: default\n    from: implement\n    to: implement\n" })).toEqual(["plan", "implement"]);
+  });
+
+  it("skips Stages and changes others with use's rules", () => {
+    const p = load({ "bug-fix": "stages:\n  - include: default\n    skip: [ plan, transition-in-progress ]\n    change:\n      implement: { profile: codex, append: Write a failing test first., routes: { replan: null } }\n" });
+    expect(p.stages.map((s) => s.name)).toEqual(["implement", "review"]);
+    expect(runner(p.stages[0]!)).toMatchObject({ profile: "codex", prompt: "Carry out the plan.\n\nWrite a failing test first." });
+    expect(p.stages[0]!.routes).toBeUndefined();
+  });
+
+  it("refuses names the source lacks, a change to a skipped or excluded Stage, and a bad range", () => {
+    const refused = (body: string) => () => load({ "bug-fix": `stages:\n  - include: default\n${body}` });
+    expect(refused("    skip: [ plan2 ]\n")).toThrow(new PipelineError("Pipeline bug-fix stage 1 (include default): skip names plan2, which default doesn't have"));
+    expect(refused("    skip: [ plan ]\n    change: { plan: { human: false } }\n")).toThrow(new PipelineError("Pipeline bug-fix stage 1 (include default): change names plan, which this include skips"));
+    expect(refused("    from: nope\n")).toThrow(new PipelineError("Pipeline bug-fix stage 1 (include default): from names nope, which default doesn't have"));
+    expect(refused("    to: nope\n")).toThrow(new PipelineError("Pipeline bug-fix stage 1 (include default): to names nope, which default doesn't have"));
+    expect(refused("    to: plan\n    change: { review: { prompt: x } }\n")).toThrow(new PipelineError("Pipeline bug-fix stage 1 (include default): change names review, which is outside this include's from/to"));
+    expect(refused("    from: review\n    to: plan\n")).toThrow(/from review comes after to plan in default/);
+    expect(refused("    only: [ plan ]\n")).toThrow(/only is not a field of an include/);
+    expect(() => load({ "bug-fix": "stages:\n  - include: nope\n" })).toThrow(new PipelineError("Pipeline bug-fix stage 1 (include nope): no Pipeline named nope"));
+  });
+
+  it("still resolves Routes by name across the expanded list", () => {
+    expect(() => load({ "bug-fix": "stages:\n  - include: default\n    skip: [ implement ]\n" })).toThrow(
+      new PipelineError("Pipeline bug-fix Stage review (from default.review): Route rework goes to implement, which is not a Stage of bug-fix"),
+    );
+  });
+
+  it("lists the entries as written, with a row per Stage in range and skipped rows in place", () => {
+    const { pipeline, entries } = resolveEntries("bug-fix", texts({ default: DEFAULT, "bug-fix": "stages:\n  - include: default\n    to: transition-in-progress\n    skip: [ plan ]\n    change: { implement: { profile: codex, routes: { replan: null } } }\n  - name: smoke\n    prompt: s\n  - use: default.review\n    routes: { rework: null }\n" }));
+    expect(pipeline.stages.map((s) => s.name)).toEqual(["implement", "transition-in-progress", "smoke", "review"]);
+    expect(entries.map((e) => e.kind)).toEqual(["include", "own", "use"]);
+    const include = entries[0]!;
+    if (include.kind !== "include") throw new Error("not an include");
+    expect(include).toMatchObject({ index: 0, source: "default", from: null, to: "transition-in-progress" });
+    expect(include.rows.map((r) => [r.name, r.stage?.name ?? null, r.changes])).toEqual([
+      ["plan", null, {}],
+      ["implement", "implement", { profile: "codex", routes: { replan: null } }],
+      ["transition-in-progress", "transition-in-progress", {}],
+    ]);
+    expect(runner(include.rows[1]!.original).profile).toBeNull();
+    expect(entries[2]).toMatchObject({ kind: "use", source: "default", overrides: { routes: { rework: null } } });
   });
 });

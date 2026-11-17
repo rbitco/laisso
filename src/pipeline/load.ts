@@ -192,7 +192,7 @@ function resolveIn(name: string, ctx: Resolving): Pipeline {
   if (text === null) throw new PipelineError(`no Pipeline named ${name}`);
   ctx.stack.push(name);
   try {
-    const pipeline = parseOwn(name, text, ctx);
+    const { pipeline } = parseOwn(name, text, ctx);
     ctx.done.set(name, pipeline);
     return pipeline;
   } catch (error) {
@@ -228,7 +228,7 @@ interface Placed {
 }
 
 /** `use: <pipeline>.<stage>` with overrides beside it: one copied Stage. */
-function expandUse(name: string, s: Record<string, unknown>, index: number, ctx: Resolving): Placed[] {
+function expandUse(name: string, s: Record<string, unknown>, index: number, ctx: Resolving, entries: Entry[]): Placed[] {
   const ref = useRef(s.use);
   const where = `Pipeline ${name} stage ${index + 1}`;
   if (!ref || !NAME.test(ref.pipeline)) throw new PipelineError(`${where}: use must name <pipeline>.<stage>, not ${String(s.use)}`);
@@ -239,7 +239,58 @@ function expandUse(name: string, s: Record<string, unknown>, index: number, ctx:
   if (!original) throw new PipelineError(`${at}: ${ref.pipeline} has no Stage named ${ref.stage}`);
   const { use: _use, ...overrides } = s;
   const stage = copyStage(original, overrides, at, { pipeline: ref.pipeline, stage: ref.stage, how: "use" }, name);
+  entries.push({ kind: "use", index, source: ref.pipeline, original, overrides, stage });
   return [{ stage, label: `stage ${index + 1} ${entry}` }];
+}
+
+const INCLUDE_FIELDS = new Set(["include", "from", "to", "skip", "change"]);
+
+/**
+ * `include: <pipeline>` copies a run of its Stages in order: `from` and `to`
+ * (each taking the Stage it names) narrow it, `skip` leaves Stages out, and
+ * `change` overrides a Stage's fields as `use` does. Only Stages are copied,
+ * never the source's profile or spend.
+ */
+function expandInclude(name: string, s: Record<string, unknown>, index: number, ctx: Resolving, entries: Entry[]): Placed[] {
+  const where = `Pipeline ${name} stage ${index + 1}`;
+  if (typeof s.include !== "string" || !NAME.test(s.include)) throw new PipelineError(`${where}: include must name a Pipeline, not ${String(s.include)}`);
+  const from = s.include;
+  const entry = `include ${from}`;
+  const at = `${where} (${entry})`;
+  const failAt = (message: string) => new PipelineError(`${at}: ${message}`);
+  for (const key of Object.keys(s)) if (!INCLUDE_FIELDS.has(key)) throw failAt(`${key} is not a field of an include; it takes from, to, skip and change`);
+  const source = sourceOf(name, from, `stage ${index + 1} (${entry})`, ctx);
+  const names = source.stages.map((st) => st.name);
+  const named = (field: string, value: unknown): string => {
+    if (typeof value !== "string") throw failAt(`${field} must name a Stage of ${from}`);
+    if (!names.includes(value)) throw failAt(`${field} names ${value}, which ${from} doesn't have`);
+    return value;
+  };
+  const first = s.from === undefined ? 0 : names.indexOf(named("from", s.from));
+  const last = s.to === undefined ? names.length - 1 : names.indexOf(named("to", s.to));
+  if (first > last) throw failAt(`from ${names[first]} comes after to ${names[last]} in ${from}`);
+  const inRange = (stage: string) => names.indexOf(stage) >= first && names.indexOf(stage) <= last;
+  if (s.skip !== undefined && (!Array.isArray(s.skip) || !s.skip.every((x) => typeof x === "string"))) throw failAt("skip must be a list of Stage names");
+  const skip = (s.skip ?? []) as string[];
+  for (const stage of skip) {
+    named("skip", stage);
+    if (!inRange(stage)) throw failAt(`skip names ${stage}, which is outside this include's from/to`);
+  }
+  const change = mapping(s.change, `${at}: change`, fail);
+  for (const [stage, fields] of Object.entries(change)) {
+    named("change", stage);
+    if (skip.includes(stage)) throw failAt(`change names ${stage}, which this include skips`);
+    if (!inRange(stage)) throw failAt(`change names ${stage}, which is outside this include's from/to`);
+    if (!isPlainObject(fields)) throw failAt(`change.${stage} must be a mapping of fields`);
+  }
+  const rows: IncludeRow[] = source.stages.slice(first, last + 1).map((original) => {
+    const changes = (change[original.name] as Record<string, unknown> | undefined) ?? {};
+    const stage = skip.includes(original.name) ? null : copyStage(original, changes, at, { pipeline: from, stage: original.name, how: "include" }, name);
+    return { name: original.name, original, changes, stage };
+  });
+  if (rows.every((r) => r.stage === null)) throw failAt("it takes no Stages");
+  entries.push({ kind: "include", index, source: from, from: s.from === undefined ? null : String(s.from), to: s.to === undefined ? null : String(s.to), rows });
+  return rows.flatMap((r) => (r.stage ? [{ stage: r.stage, label: `stage ${index + 1} ${entry}` }] : []));
 }
 
 /** A source Stage with overrides laid on it, parsed and checked as the reusing Pipeline's own, carrying its origin. */
@@ -276,7 +327,37 @@ export function parsePipeline(name: string, text: string): Pipeline {
   return resolvePipeline(name, (n) => (n === name ? text : null));
 }
 
-function parseOwn(name: string, text: string, ctx: Resolving): Pipeline {
+/**
+ * A Pipeline's stages as written (LASSO-216): its own Stages, each `use`, and
+ * each `include` with a row per source Stage in its range, the Stage it
+ * expands to or null where it is skipped. Copied Stages keep the source
+ * Stage they were made from, so an editor can show what each field would be
+ * without the entry's changes.
+ */
+export type Entry =
+  | { kind: "own"; index: number; stage: Stage }
+  | { kind: "use"; index: number; source: string; original: Stage; overrides: Record<string, unknown>; stage: Stage }
+  | { kind: "include"; index: number; source: string; from: string | null; to: string | null; rows: IncludeRow[] };
+
+export interface IncludeRow {
+  /** The Stage's name in the source. */
+  name: string;
+  original: Stage;
+  /** What `change` writes for it; empty when nothing. */
+  changes: Record<string, unknown>;
+  /** The Stage it expands to, or null when the include skips it. */
+  stage: Stage | null;
+}
+
+/** A Pipeline loaded by name with its stages as written beside it; for the editor. */
+export function resolveEntries(name: string, read: ReadPipeline): { pipeline: Pipeline; entries: Entry[] } {
+  const text = read(name);
+  if (text === null) throw new PipelineError(`no Pipeline named ${name}`);
+  const ctx: Resolving = { read, done: new Map(), stack: [name] };
+  return parseOwn(name, text, ctx);
+}
+
+function parseOwn(name: string, text: string, ctx: Resolving): { pipeline: Pipeline; entries: Entry[] } {
   let raw: unknown;
   try {
     raw = parse(text);
@@ -294,9 +375,14 @@ function parseOwn(name: string, text: string, ctx: Resolving): Pipeline {
   const profile = asProfile(doc.profile, where);
   const stagesRaw = Array.isArray(doc.stages) ? doc.stages : null;
   if (!stagesRaw || stagesRaw.length === 0) throw new PipelineError(`${where} has no stages`);
+  const entries: Entry[] = [];
   const placed = stagesRaw.flatMap((entry, i): Placed[] => {
-    if (isPlainObject(entry) && entry.use !== undefined) return expandUse(name, entry, i, ctx);
-    return [{ stage: parseStage(name, entry, i), label: `stage ${i + 1}` }];
+    if (isPlainObject(entry) && entry.use !== undefined && entry.include !== undefined) throw new PipelineError(`${where} stage ${i + 1} has both use and include`);
+    if (isPlainObject(entry) && entry.use !== undefined) return expandUse(name, entry, i, ctx, entries);
+    if (isPlainObject(entry) && entry.include !== undefined) return expandInclude(name, entry, i, ctx, entries);
+    const stage = parseStage(name, entry, i);
+    entries.push({ kind: "own", index: i, stage });
+    return [{ stage, label: `stage ${i + 1}` }];
   });
   const stages = placed.map((p) => p.stage);
   const seen = new Map<string, Placed>();
@@ -321,7 +407,7 @@ function parseOwn(name: string, text: string, ctx: Resolving): Pipeline {
     if ((STAGE_BUDGET_KEYS as readonly string[]).includes(key)) throw new PipelineError(`${where}: budget.${key} belongs to a Stage, not the Pipeline`);
     throw new PipelineError(`${where}: unknown field budget.${key}`);
   }
-  return { name, profile, budget: { spend: budget.spend === undefined ? undefined : money(budget.spend, `${where}: budget.spend`, fail) }, stages };
+  return { pipeline: { name, profile, budget: { spend: budget.spend === undefined ? undefined : money(budget.spend, `${where}: budget.spend`, fail) }, stages }, entries };
 }
 
 function parseStage(pipeline: string, entry: unknown, index: number, at?: string): Stage {
