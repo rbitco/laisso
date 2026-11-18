@@ -30,7 +30,13 @@ runs itself, such as moving the tracker issue to a status, or a wait on a
 check Action until it is met. The default
 Pipeline's Stages are Grill, Plan, Implement, Document, Review, but a
 Pipeline may name any ordered list of Stages.
-_Avoid_: step, phase, state, node
+_Avoid_: step, state, node
+
+**Phase**:
+A named, unbroken run of a Pipeline's Stages, used only to show a long
+Pipeline in fewer pieces. It changes how Stages are displayed and nothing
+about how a Ticket moves through them.
+_Avoid_: group, section, stage group, milestone
 
 **Action**:
 A named shell command, defined in Laisso's config globally or per repo, that
