@@ -34,8 +34,9 @@ _Avoid_: step, state, node
 
 **Phase**:
 A named, unbroken run of a Pipeline's Stages, used only to show a long
-Pipeline in fewer pieces. It changes how Stages are displayed and nothing
-about how a Ticket moves through them.
+Pipeline in fewer pieces. In a Pipeline with Phases, every Stage belongs
+to exactly one. It changes how Stages are displayed and nothing about how
+a Ticket moves through them.
 _Avoid_: group, section, stage group, milestone
 
 **Action**:
