@@ -91,7 +91,9 @@ _Avoid_: pending, waiting, blocked, backlogged
 
 **Ledger**:
 The dashboard's list of active Tickets, ordered so that whatever needs
-Attention comes first. Done and Abandoned Tickets sit behind a toggle.
+Attention comes first. A filter hides Tickets by their displayed state;
+by default it hides Done and Abandoned, and the Ledger says what it is not
+showing.
 
 **Abandoned**:
 A Ticket a human has dropped before its Pipeline finished. It leaves Laisso's
