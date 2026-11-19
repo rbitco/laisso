@@ -106,7 +106,7 @@ function fakeLaisso() {
     const method = init.method ?? "GET";
     const body = init.body ? JSON.parse(String(init.body)) : null;
     sent.push({ method, route: url, body });
-    if (url === "/api/tickets" || url === "/api/tickets?all=1") {
+    if (url === "/api/tickets" || url.startsWith("/api/tickets?ended=")) {
       if (method === "GET") return json(state.tickets);
       if (state.intakeHeld) await state.intakeHeld;
       return json({ ...ticket("N"), branch: "app-7-fix", branchExisted: state.branchExisted } satisfies IntakeResult);
@@ -556,12 +556,90 @@ describe("the page's views", () => {
     expect(location.hash).toBe("");
   });
 
-  it("lists done and Abandoned Tickets when Show done and Abandoned is ticked", async () => {
+});
+
+describe("the Ledger's state filter", () => {
+  // Node's own localStorage shadows jsdom's and is absent without a file, so these tests bring a store of their own.
+  let kept: Map<string, string>;
+  beforeEach(() => {
+    kept = new Map();
+    vi.stubGlobal("localStorage", { getItem: (k: string) => kept.get(k) ?? null, setItem: (k: string, v: string) => void kept.set(k, String(v)), removeItem: (k: string) => void kept.delete(k) });
+  });
+
+  const button = () => screen.getByRole("button", { name: /states/ });
+  const notShowing = () => document.querySelector('[data-role="not-showing"]')?.textContent ?? "";
+  const ids = () => [...document.querySelectorAll<HTMLElement>('[data-role="ledger"] article.ticket')].map((r) => r.dataset.id);
+
+  it("replaces the Show done and Abandoned checkbox, hiding Done and Abandoned and saying so", async () => {
+    fakeLaisso();
+    render(<App />);
+    await screen.findByText("Ticket A");
+    expect(screen.queryByRole("checkbox", { name: "Show done and Abandoned" })).toBeNull();
+    expect(button().textContent).toBe("8 of 10 states ▾");
+    expect(notShowing()).toBe("Not showing Done and Abandoned");
+  });
+
+  it("groups a checkbox per state, counts the active ones, and hides a state's Tickets when unticked", async () => {
+    const laisso = fakeLaisso();
+    laisso.state.tickets = [ticket("A"), { ...ticket("B"), display: { state: "running", label: "Running", why: "" } }];
+    render(<App />);
+    await screen.findByText("Ticket A");
+    const user = userEvent.setup();
+    await user.click(button());
+    const menu = screen.getByRole("group", { name: "States shown" });
+    expect([...menu.querySelectorAll("legend")].map((l) => l.textContent)).toEqual(["Attention", "Working", "Waiting", "Ended"]);
+    const counted = (state: string) => menu.querySelector(`[data-state="${state}"] .count`)?.textContent ?? null;
+    expect([counted("quiet"), counted("running"), counted("flagged"), counted("done")]).toEqual(["1", "1", "0", null]);
+    expect(within(menu).getByRole<HTMLInputElement>("checkbox", { name: "Done" }).checked).toBe(false);
+    await user.click(within(menu).getByRole("checkbox", { name: "Quiet" }));
+    expect(ids()).toEqual(["B"]);
+    expect(button().textContent).toBe("7 of 10 states ▾");
+    expect(notShowing()).toBe("Not showing 1 Quiet, Done and Abandoned");
+    expect(kept.get("laisso.ledgerHidden")).toBe('["quiet","done","abandoned"]');
+  });
+
+  it("reads Done Tickets alone once Done is ticked, and Show all and Reset set every box", async () => {
     const laisso = fakeLaisso();
     render(<App />);
     await screen.findByText("Ticket A");
-    await userEvent.setup().click(screen.getByRole("checkbox", { name: "Show done and Abandoned" }));
-    await waitFor(() => expect(laisso.gets("/api/tickets?all=1")).toBe(1));
+    const user = userEvent.setup();
+    await user.click(button());
+    await user.click(screen.getByRole("checkbox", { name: "Done" }));
+    await waitFor(() => expect(laisso.gets("/api/tickets?ended=done")).toBe(1));
+    expect(notShowing()).toBe("Not showing Abandoned");
+    await user.click(screen.getByRole("button", { name: "Show all" }));
+    expect(button().textContent).toBe("All states ▾");
+    expect(notShowing()).toBe("");
+    await user.click(screen.getByRole("button", { name: "Reset" }));
+    expect(button().textContent).toBe("8 of 10 states ▾");
+  });
+
+  it("closes on Escape and on a click outside", async () => {
+    fakeLaisso();
+    render(<App />);
+    await screen.findByText("Ticket A");
+    const user = userEvent.setup();
+    await user.click(button());
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("group", { name: "States shown" })).toBeNull();
+    await user.click(button());
+    await user.click(screen.getByText("Ticket A"));
+    expect(screen.queryByRole("group", { name: "States shown" })).toBeNull();
+  });
+
+  it("keeps the choice for the next visit, and the open Ticket's sidebar follows it", async () => {
+    const laisso = fakeLaisso();
+    laisso.state.tickets = [ticket("A"), { ...ticket("B"), display: { state: "running", label: "Running", why: "" } }];
+    kept.set("laisso.ledgerHidden", '["quiet"]');
+    render(<App />);
+    await screen.findByText("Ticket B");
+    expect(ids()).toEqual(["B"]);
+    expect(button().textContent).toBe("9 of 10 states ▾");
+    // Done and Abandoned are shown, so both are read.
+    expect(laisso.gets("/api/tickets?ended=done,abandoned")).toBeGreaterThan(0);
+    go("#B");
+    await waitFor(() => expect(document.querySelectorAll('[data-role="side"] [data-id]').length).toBeGreaterThan(0));
+    expect([...document.querySelectorAll<HTMLElement>('[data-role="side"] [data-id]')].map((r) => r.dataset.id)).toEqual(["B"]);
   });
 });
 

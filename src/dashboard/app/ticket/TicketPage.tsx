@@ -17,6 +17,7 @@ import { SessionPane, sessionLabel, worktreeGone } from "./SessionPane.tsx";
 import { shownSession, type Shown } from "./selection.ts";
 import { StageProfiles } from "./StageProfiles.tsx";
 import { listTickets, message, readTicket } from "./ticket.ts";
+import { endedShown, isShown, type Hidden } from "../ledger/filter.ts";
 import { Triggers } from "./Triggers.tsx";
 import { UpgradeLever } from "./Upgrade.tsx";
 
@@ -27,8 +28,8 @@ export interface TicketPageProps {
   select: Selection;
   /** Bumped each time the page is shown, so it reads everything afresh. */
   visit: number;
-  /** Whether the sidebar lists done and Abandoned Tickets too. */
-  all: boolean;
+  /** The displayed states the Ledger's filter leaves out; the sidebar leaves them out too. */
+  hidden: Hidden;
   /** Where the sidebar of Tickets goes, beside the page. */
   side: HTMLElement | null;
   /** Called once each visit's Ticket is first drawn, so the app can swap the page in. */
@@ -44,21 +45,21 @@ const GATHER_MS = 100;
  * has overtaken is dropped, so a slow answer for an earlier Ticket never draws over a later one. A "ticket" event
  * for the Ticket shown re-reads both; for any other, the sidebar alone.
  */
-export function TicketPage({ id, select, visit, all, side, onShown }: TicketPageProps) {
+export function TicketPage({ id, select, visit, hidden, side, onShown }: TicketPageProps) {
   const [shown, setShown] = useState<{ detail: TicketDetail; list: TicketView[]; visit: number } | null>(null);
   // Every read asks for the latest Ticket, so a refresh from a page being left reads the one replacing it.
-  const latest = useRef({ id, visit, all, onShown });
-  latest.current = { id, visit, all, onShown };
+  const latest = useRef({ id, visit, hidden, onShown });
+  latest.current = { id, visit, hidden, onShown };
   const detailReads = useRef(0);
   const listReads = useRef(0);
 
   const read = useCallback(async () => {
     const mine = ++detailReads.current;
     const mineList = ++listReads.current;
-    const { id, visit, all } = latest.current;
+    const { id, visit, hidden } = latest.current;
     let detail: TicketDetail, list: TicketView[];
     try {
-      [detail, list] = await Promise.all([readTicket(id), listTickets(all)]);
+      [detail, list] = await Promise.all([readTicket(id), listTickets(endedShown(hidden))]);
     } catch (error) {
       if (mine !== detailReads.current) return;
       showNotice(message(error));
@@ -71,7 +72,7 @@ export function TicketPage({ id, select, visit, all, side, onShown }: TicketPage
   const readList = useCallback(async () => {
     const mine = ++listReads.current;
     try {
-      const list = await listTickets(latest.current.all);
+      const list = await listTickets(endedShown(latest.current.hidden));
       if (mine === listReads.current) setShown((was) => was && { ...was, list });
     } catch (error) {
       showNotice(message(error));
@@ -110,7 +111,7 @@ export function TicketPage({ id, select, visit, all, side, onShown }: TicketPage
   return (
     <>
       <TicketBody key={shown.detail.id} ticket={shown.detail} select={select} refresh={read} />
-      {side && createPortal(<Sidebar list={shown.list} current={shown.detail.id} />, side)}
+      {side && createPortal(<Sidebar list={shown.list.filter((t) => t.id === shown.detail.id || isShown(t, hidden))} current={shown.detail.id} />, side)}
     </>
   );
 }

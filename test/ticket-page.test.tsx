@@ -7,6 +7,7 @@ import type { BudgetView } from "../src/budget/budget.ts";
 import type { ConfigFile, PipelineListing, PrView, RouteArcView, RouteRecordView, SessionView, StageProfileView, TicketDetail, UpgradeView } from "../src/api/views.ts";
 import type { UpgradePlan } from "../src/session/upgrade.ts";
 import { TicketPage } from "../src/dashboard/app/ticket/TicketPage.tsx";
+import { DEFAULT_HIDDEN } from "../src/dashboard/app/ledger/filter.ts";
 import { closeProfileDrawer, ProfileDrawerHost } from "../src/dashboard/app/profiles/drawer.tsx";
 import { events } from "../src/dashboard/app/events.ts";
 import { usePlace } from "../src/dashboard/app/route.ts";
@@ -104,7 +105,7 @@ function fakeLaisso(tickets: TicketDetail[]) {
     reads.push(method + " " + url);
     if (route === "/api/config") return json({ file: "/c.yaml", text: "", config: CONFIG, restart: [] } satisfies ConfigFile);
     if (route === "/api/pipelines") return json([] satisfies PipelineListing[]);
-    if (route === "/api/tickets") return json(Object.values(state.tickets).filter((t) => query === "all=1" || t.state === "active"));
+    if (route === "/api/tickets") return json(Object.values(state.tickets).filter((t) => t.state === "active" || new URLSearchParams(query).get("ended")?.split(",").includes(t.state)));
     const body = init.body ? JSON.parse(String(init.body)) : null;
     if (method !== "GET") sent.push({ method, route: url, body });
     if (route === "/api/check-now") return json({ changes: [] });
@@ -139,14 +140,14 @@ function fakeLaisso(tickets: TicketDetail[]) {
 
 let visit = 0;
 let side: HTMLElement;
-const page = (id: string, all = false) => <TicketPage id={id} select={null} visit={++visit} all={all} side={side} onShown={() => {}} />;
+const page = (id: string) => <TicketPage id={id} select={null} visit={++visit} hidden={DEFAULT_HIDDEN} side={side} onShown={() => {}} />;
 
 /** The page as the app shows it, following the hash, so a Stage or Session chosen on it moves the selection. */
 function Routed() {
   const { place } = usePlace();
   const route = place.route;
   if (route.view !== "detail") return null;
-  return <TicketPage id={route.id} select={route.select} visit={place.visit} all={false} side={side} onShown={() => {}} />;
+  return <TicketPage id={route.id} select={route.select} visit={place.visit} hidden={DEFAULT_HIDDEN} side={side} onShown={() => {}} />;
 }
 
 async function showRouted(hash: string) {

@@ -5,6 +5,7 @@ import { userEvent } from "@testing-library/user-event";
 import type { BudgetView } from "../src/budget/budget.ts";
 import type { PrView, TicketView } from "../src/api/views.ts";
 import { Ledger } from "../src/dashboard/app/ledger/Ledger.tsx";
+import { DEFAULT_HIDDEN } from "../src/dashboard/app/ledger/filter.ts";
 import { Notice, showNotice } from "../src/dashboard/app/notice.tsx";
 import { events } from "../src/dashboard/app/events.ts";
 
@@ -57,7 +58,10 @@ function fakeLaisso(tickets: TicketView[]) {
     sent.push({ method, route: url });
     if (state.refuse[url]) return json({ error: state.refuse[url] }, 409);
     if (url === "/api/tickets") return json(state.tickets.filter((t) => t.state === "active"));
-    if (url === "/api/tickets?all=1") return json(state.tickets);
+    if (url.startsWith("/api/tickets?ended=")) {
+      const ended = url.slice("/api/tickets?ended=".length).split(",");
+      return json(state.tickets.filter((t) => t.state === "active" || ended.includes(t.state)));
+    }
     if (url === "/api/config") return json({ config: { repos: state.repos } });
     if (url === "/api/setup") return json({ terminal: "terminal-app", profile: "claude-opus", launcher: "/h/setup.command" });
     return json({ changes: [] });
@@ -84,7 +88,7 @@ afterEach(() => {
 describe("the Ledger", () => {
   it("shows each Ticket in the API's order: pill, reference over repo, title over why, the track and Stage, rings, last activity, and the quick action", async () => {
     fakeLaisso([flagged(), review()]);
-    render(<Ledger all={false} visit={1} />);
+    render(<Ledger hidden={DEFAULT_HIDDEN} visit={1} />);
     await screen.findByText("Ticket A");
     expect(rows().map((r) => r.dataset.id)).toEqual(["A", "B"]);
     const a = row("A");
@@ -115,7 +119,7 @@ describe("the Ledger", () => {
       view("C", { visit: { number: 1, arrivedBy: "route", route: "ahead", chosenBy: "agent" } }),
       view("D", { visit: { number: 1, arrivedBy: "walk", route: null, chosenBy: null } }),
     ]);
-    render(<Ledger all={false} visit={1} />);
+    render(<Ledger hidden={DEFAULT_HIDDEN} visit={1} />);
     await screen.findByText("Ticket A");
     expect(role(row("A"), "stage-text").textContent).toBe("implement ×3 ↩ · 2/2");
     // A human's send is not a Route: the count, without ↩.
@@ -126,7 +130,7 @@ describe("the Ledger", () => {
 
   it("shows a named Ticket by its name, with the name and reference on hover", async () => {
     fakeLaisso([view("A", { name: "Dark mode", label: "Dark mode" })]);
-    render(<Ledger all={false} visit={1} />);
+    render(<Ledger hidden={DEFAULT_HIDDEN} visit={1} />);
     await screen.findByText("Ticket A");
     const ref = role(row("A"), "ref");
     expect(ref.textContent).toBe("Dark mode");
@@ -134,29 +138,51 @@ describe("the Ledger", () => {
     expect(role(row("A"), "ref").nextElementSibling!.textContent).toBe("app");
   });
 
-  it("lists done and Abandoned Tickets, greyed, only with all, and says so when there are none", async () => {
+  it("lists done and Abandoned Tickets, greyed, only while the filter shows them, and says so when there are none", async () => {
     const laisso = fakeLaisso([flagged(), done()]);
-    const view = render(<Ledger all={false} visit={1} />);
+    const view = render(<Ledger hidden={DEFAULT_HIDDEN} visit={1} />);
     await screen.findByText("Ticket A");
     expect(rows().map((r) => r.dataset.id)).toEqual(["A"]);
-    view.rerender(<Ledger all={true} visit={1} />);
+    expect(laisso.sent.at(-1)!.route).toBe("/api/tickets");
+    view.rerender(<Ledger hidden={new Set()} visit={1} />);
     await screen.findByText("Ticket C");
-    expect(laisso.sent.at(-1)!.route).toBe("/api/tickets?all=1");
+    expect(laisso.sent.at(-1)!.route).toBe("/api/tickets?ended=done,abandoned");
     expect(rows().map((r) => [r.dataset.id, r.className])).toEqual([
       ["A", "ticket"],
       ["C", "ticket ended"],
     ]);
     laisso.state.tickets = [];
-    view.rerender(<Ledger all={true} visit={2} />);
+    view.rerender(<Ledger hidden={new Set()} visit={2} />);
     await screen.findByText("No Tickets yet. Paste a reference or a prompt above to start one.");
-    view.rerender(<Ledger all={false} visit={2} />);
+    view.rerender(<Ledger hidden={DEFAULT_HIDDEN} visit={2} />);
     await screen.findByText("No active Tickets. Paste a reference or a prompt above to start one.");
+  });
+
+  it("hides the Tickets in each hidden state without reading again, and tells what it read", async () => {
+    const laisso = fakeLaisso([flagged(), review(), view("D", { display: { state: "running", label: "Running", why: "" } })]);
+    const read: string[][] = [];
+    const ledger = render(<Ledger hidden={DEFAULT_HIDDEN} visit={1} onRead={(t) => read.push(t.map((x) => x.id))} />);
+    await screen.findByText("Ticket A");
+    expect(rows().map((r) => r.dataset.id)).toEqual(["A", "B", "D"]);
+    const reads = laisso.reads();
+    ledger.rerender(<Ledger hidden={new Set(["quiet", "done", "abandoned"])} visit={1} />);
+    expect(rows().map((r) => r.dataset.id)).toEqual(["A", "D"]);
+    expect(laisso.reads()).toBe(reads);
+    expect(read).toEqual([["A", "B", "D"]]);
+  });
+
+  it("says every Ticket is hidden when the filter leaves none, in place of the empty line", async () => {
+    fakeLaisso([review()]);
+    render(<Ledger hidden={new Set(["quiet", "done", "abandoned"])} visit={1} />);
+    await screen.findByText("Every Ticket is hidden by the filter.");
+    expect(rows()).toEqual([]);
+    expect(screen.queryByText(/No active Tickets/)).toBeNull();
   });
 
   it("offers Set up Laisso in place of the empty line while there are no repos, and says where it opened", async () => {
     const laisso = fakeLaisso([]);
     laisso.state.repos = {};
-    render(<Ledger all={false} visit={1} />);
+    render(<Ledger hidden={DEFAULT_HIDDEN} visit={1} />);
     await userEvent.click(await screen.findByRole("button", { name: "Set up Laisso" }));
     expect(laisso.sent).toContainEqual({ method: "POST", route: "/api/setup" });
     await screen.findByText(/Opened in Terminal with profile claude-opus/);
@@ -170,7 +196,7 @@ describe("the Ledger", () => {
       view("B", { prs: [pr(4, { state: "CLOSED" }), pr(5, { feedback: 2 }), pr(6, { checks: "failing" }), pr(7, { checks: "running" }), pr(8, { checks: "none" })] }),
       view("C"),
     ]);
-    render(<Ledger all={false} visit={1} />);
+    render(<Ledger hidden={DEFAULT_HIDDEN} visit={1} />);
     await screen.findByText("Ticket A");
     const chips = (id: string) => [...row(id).querySelectorAll<HTMLAnchorElement>('[data-role="pr-chip"]')];
     expect(chips("A").map((c) => [c.textContent, c.getAttribute("href"), c.getAttribute("title")])).toEqual([
@@ -191,14 +217,14 @@ describe("the Ledger", () => {
 
   it("opens a Ticket on a click of its row", async () => {
     fakeLaisso([flagged()]);
-    render(<Ledger all={false} visit={1} />);
+    render(<Ledger hidden={DEFAULT_HIDDEN} visit={1} />);
     await userEvent.setup().click(await screen.findByText("Ticket A"));
     expect(location.hash).toBe("#A");
   });
 
   it("reads again once after a burst of ticket events, and moves last activity each second", async () => {
     const laisso = fakeLaisso([flagged()]);
-    render(<Ledger all={false} visit={1} />);
+    render(<Ledger hidden={DEFAULT_HIDDEN} visit={1} />);
     await screen.findByText("Ticket A");
     expect(laisso.reads()).toBe(1);
     laisso.state.tickets = [view("A", { title: "Renamed" })];
@@ -216,7 +242,7 @@ describe("the Ledger", () => {
 describe("a Ledger row's quick action", () => {
   it("pulls the trigger without opening the Ticket, then reads the Ledger again", async () => {
     const laisso = fakeLaisso([flagged(), review()]);
-    render(<Ledger all={false} visit={1} />);
+    render(<Ledger hidden={DEFAULT_HIDDEN} visit={1} />);
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "Retry" }));
     await user.click(screen.getByRole("button", { name: "Check PR now" }));
@@ -228,7 +254,7 @@ describe("a Ledger row's quick action", () => {
   it("shows a refusal and can be pulled again", async () => {
     const laisso = fakeLaisso([flagged()]);
     laisso.state.refuse["/api/tickets/A/retry"] = "attempts exhausted: extend first";
-    render(<Ledger all={false} visit={1} />);
+    render(<Ledger hidden={DEFAULT_HIDDEN} visit={1} />);
     const user = userEvent.setup();
     const retry = await screen.findByRole("button", { name: "Retry" });
     await user.click(retry);

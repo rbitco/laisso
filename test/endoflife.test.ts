@@ -73,6 +73,10 @@ describe("end of life", () => {
     expect(existsSync(dir)).toBe(true);
     expect(await laisso.api<TicketView[]>("/api/tickets")).toEqual([]);
     expect((await laisso.api<TicketView[]>("/api/tickets?all=1")).map((t) => [t.id, t.display.state])).toEqual([[ticket.id, "done"]]);
+    // The Ledger asks for only the ended states its filter shows.
+    expect((await laisso.api<TicketView[]>("/api/tickets?ended=done")).map((t) => t.id)).toEqual([ticket.id]);
+    expect(await laisso.api<TicketView[]>("/api/tickets?ended=abandoned")).toEqual([]);
+    expect(await laisso.api<TicketView[]>("/api/tickets?ended=")).toEqual([]);
   });
 
   it("Abandon commits and pushes uncommitted work, removes the worktree, keeps the branch, and closes the open PR with a marked comment", async () => {
@@ -182,6 +186,10 @@ describe("end of life", () => {
     expect(second).toMatchObject({ branch: first.branch, branchExisted: true, state: "active" });
     expect(repos.app.git(["log", "-1", "--format=%s"], second.worktree)).toBe("work");
     expect((await laisso.api<TicketView[]>("/api/tickets?all=1")).map((t) => [t.id, t.state])).toEqual([[second.id, "active"], [first.id, "abandoned"]]);
+    // The Ledger asks for only the ended states its filter shows; anything else in the list is ignored.
+    expect((await laisso.api<TicketView[]>("/api/tickets?ended=abandoned")).map((t) => t.id)).toEqual([second.id, first.id]);
+    expect((await laisso.api<TicketView[]>("/api/tickets?ended=done,abandoned,active")).map((t) => t.id)).toEqual([second.id, first.id]);
+    expect((await laisso.api<TicketView[]>("/api/tickets?ended=done")).map((t) => t.id)).toEqual([second.id]);
   });
 
   it("sweeps a done Ticket's directory after retention days and keeps its rows", async () => {

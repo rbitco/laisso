@@ -7,38 +7,45 @@ import { showNotice } from "../notice.tsx";
 import { MiniRings } from "../ticket/Budget.tsx";
 import { prStateWord, prTone } from "../ticket/PullRequests.tsx";
 import { listTickets, message, pullTrigger } from "../ticket/ticket.ts";
+import { ENDED, endedShown, shownTickets, type Hidden } from "./filter.ts";
 import { SetupCard } from "./SetupCard.tsx";
 
 export interface LedgerProps {
-  /** Whether done and Abandoned Tickets are listed too, greyed. */
-  all: boolean;
+  /** The displayed states the filter leaves out (CONTEXT.md: Ledger). */
+  hidden: Hidden;
   /** Bumped each time the Ledger is shown, so it reads the Tickets afresh. */
   visit: number;
+  /** Told every Ticket each read brings, before the filter, so the app can count them. */
+  onRead?: (tickets: TicketView[]) => void;
 }
 
 /** How long changes the server names are gathered before acting on them, so a burst re-reads once. */
 const GATHER_MS = 100;
 
 /**
- * The Ledger: one row per Ticket, in the order the API serves them: attention first, newest activity within a group.
- * Done and Abandoned sit behind the toggle, greyed (CONTEXT.md: Ledger). A "ticket" event re-reads it; a read that a
- * newer one has overtaken is dropped.
+ * The Ledger: one row per Ticket the filter lets through, in the order the API serves them: attention first, newest
+ * activity within a group. Done and Abandoned are read only while the filter shows them, greyed (CONTEXT.md: Ledger).
+ * A "ticket" event re-reads it; a read that a newer one has overtaken is dropped.
  */
-export function Ledger({ all, visit }: LedgerProps) {
+export function Ledger({ hidden, visit, onRead }: LedgerProps) {
   const [tickets, setTickets] = useState<TicketView[] | null>(null);
-  const latestAll = useRef(all);
-  latestAll.current = all;
+  const ended = endedShown(hidden);
+  const latest = useRef({ ended, onRead });
+  latest.current = { ended, onRead };
   const reads = useRef(0);
   const read = useCallback(async () => {
     const mine = ++reads.current;
     try {
-      const list = await listTickets(latestAll.current);
-      if (mine === reads.current) setTickets(list);
+      const list = await listTickets(latest.current.ended);
+      if (mine !== reads.current) return;
+      setTickets(list);
+      latest.current.onRead?.(list);
     } catch (error) {
       showNotice(message(error));
     }
   }, []);
-  useEffect(() => void read(), [read, visit, all]);
+  // Showing or hiding an active state needs no read: every active Ticket is already here.
+  useEffect(() => void read(), [read, visit, ended.join()]);
 
   const owed = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEvents(["ticket"], () => {
@@ -50,10 +57,12 @@ export function Ledger({ all, visit }: LedgerProps) {
   useEffect(() => () => clearTimeout(owed.current ?? undefined), []);
 
   if (!tickets) return null;
-  if (!tickets.length) return <SetupCard empty={all ? "No Tickets yet. Paste a reference or a prompt above to start one." : "No active Tickets. Paste a reference or a prompt above to start one."} />;
+  if (!tickets.length) return <SetupCard empty={ended.length === ENDED.length ? "No Tickets yet. Paste a reference or a prompt above to start one." : "No active Tickets. Paste a reference or a prompt above to start one."} />;
+  const shown = shownTickets(tickets, hidden);
+  if (!shown.length) return <p className="empty" data-role="filtered-out">Every Ticket is hidden by the filter.</p>;
   return (
     <>
-      {tickets.map((t) => (
+      {shown.map((t) => (
         <TicketRow key={t.id} ticket={t} onPulled={read} />
       ))}
     </>

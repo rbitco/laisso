@@ -177,9 +177,11 @@ export class Tickets {
     return (this.db.prepare(`SELECT * FROM tickets WHERE reference = ? AND state = 'active'`).get(reference) as TicketRow | undefined) ?? null;
   }
 
-  list(opts: { all?: boolean } = {}): TicketRow[] {
-    const sql = opts.all ? `SELECT * FROM tickets ORDER BY created_at DESC` : `SELECT * FROM tickets WHERE state = 'active' ORDER BY created_at DESC`;
-    return this.db.prepare(sql).all() as unknown as TicketRow[];
+  /** The active Tickets, with those in the ended states named, or every Ticket with `all`. Newest first. */
+  list(opts: { all?: boolean; ended?: readonly ("done" | "abandoned")[] } = {}): TicketRow[] {
+    if (opts.all) return this.db.prepare(`SELECT * FROM tickets ORDER BY created_at DESC`).all() as unknown as TicketRow[];
+    const states = ["active", ...new Set(opts.ended ?? [])];
+    return this.db.prepare(`SELECT * FROM tickets WHERE state IN (${states.map(() => "?").join(", ")}) ORDER BY created_at DESC`).all(...states) as unknown as TicketRow[];
   }
 
   /** Tickets from before Pipeline Versions, not yet pinned to one. */
