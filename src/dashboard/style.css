@@ -179,7 +179,16 @@ main { padding: 16px; }
 
 /* the Ledger */
 .ledger-tools { display: flex; justify-content: flex-end; margin: 0 0 8px; font-size: 13px; color: var(--muted); }
-.ledger-tools label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+.state-filter { position: relative; display: inline-flex; align-items: center; gap: 12px; }
+.state-filter > button { display: inline-flex; align-items: center; gap: 6px; }
+.state-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; min-width: 240px; padding: 6px 8px 8px; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); }
+.state-menu fieldset { border: 0; margin: 0; padding: 0; }
+.state-menu legend { padding: 8px 6px 2px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.state-menu label { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 6px; cursor: pointer; }
+.state-menu label:hover { background: var(--surface2); }
+.state-menu .count { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
+.state-menu-foot { display: flex; justify-content: space-between; margin-top: 6px; padding: 6px 6px 0; border-top: 1px solid var(--line); }
+.state-menu-foot button { background: none; border: 0; padding: 0; font: inherit; font-size: 12px; color: var(--accent); cursor: pointer; }
 [data-role="ledger"] { display: grid; gap: 8px; }
 /*
  * Every row shares one column template in proportions of the row (fr after the gaps, so nothing overflows), never

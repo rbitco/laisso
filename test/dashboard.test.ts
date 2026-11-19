@@ -500,7 +500,7 @@ describe("the dashboard page", () => {
     const bundle = html.match(/<script type="module" crossorigin src="(\/assets\/[^"]+\.js)">/)![1]!;
     const script = await laisso.page(bundle);
     expect(script.headers.get("content-type")).toContain("text/javascript");
-    expect(await script.text()).toContain("Show done and Abandoned");
+    expect(await script.text()).toContain("Every Ticket is hidden by the filter.");
     const styles = html.match(/<link rel="stylesheet" crossorigin href="(\/assets\/[^"]+\.css)">/)![1]!;
     const css = await laisso.page(styles);
     expect(css.headers.get("content-type")).toContain("text/css");

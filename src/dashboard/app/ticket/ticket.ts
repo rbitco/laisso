@@ -1,5 +1,6 @@
 import type { TicketDetail, TicketView } from "../../../api/views.ts";
 import { api, ApiError } from "../api.ts";
+import type { EndedState } from "../ledger/filter.ts";
 
 /** Mark done met with a missing artifact: what is missing, and that the Ticket may advance anyway. */
 export interface ArtifactProblem {
@@ -10,8 +11,8 @@ export interface ArtifactProblem {
 /** A Ticket's own routes start here. */
 export const ticketRoute = (id: string) => "/api/tickets/" + encodeURIComponent(id);
 
-/** The sidebar's Tickets, in Ledger order; `all` includes done and Abandoned. */
-export const listTickets = (all: boolean) => api<TicketView[]>(all ? "/api/tickets?all=1" : "/api/tickets");
+/** The active Tickets, in Ledger order, with those in the ended states named. */
+export const listTickets = (ended: readonly EndedState[]) => api<TicketView[]>(ended.length ? "/api/tickets?all=1" : "/api/tickets");
 
 export const readTicket = (id: string) => api<TicketDetail>(ticketRoute(id));
 

@@ -7,6 +7,8 @@ import { MissingTools } from "./header/Tools.tsx";
 import { VersionNotice } from "./header/VersionNotice.tsx";
 import { Nav } from "./nav/Nav.tsx";
 import { Ledger } from "./ledger/Ledger.tsx";
+import { countActive, loadHidden, saveHidden, type Hidden } from "./ledger/filter.ts";
+import { StateFilter } from "./ledger/StateFilter.tsx";
 import { TicketPage } from "./ticket/TicketPage.tsx";
 import { PipelinesPage } from "./pipelines/PipelinesPage.tsx";
 import { ConfigPage } from "./config/ConfigPage.tsx";
@@ -35,7 +37,12 @@ export function App() {
   const shown = route.view === "detail" && !ticketShown ? before : place;
   const view = shown.route.view;
 
-  const [all, setAll] = useState(false);
+  const [hidden, setHidden] = useState<Hidden>(loadHidden);
+  const filter = (next: Hidden) => {
+    setHidden(next);
+    saveHidden(next);
+  };
+  const [counts, setCounts] = useState<ReturnType<typeof countActive>>({});
   const [side, setSide] = useState<HTMLElement | null>(null);
   const [intakeText, setIntakeText] = useState("");
   const [intake, setIntake] = useState<(Detected & { n: number }) | null>(null);
@@ -76,15 +83,13 @@ export function App() {
           <div className={"dwrap" + (view === "detail" ? " open" : "")} data-role="layout">
               <div className="dmain">
               <div className="ledger-tools" data-role="ledger-tools" hidden={view !== "ledger"}>
-                <label>
-                  <input type="checkbox" data-role="show-ended" checked={all} onChange={(ev) => setAll(ev.target.checked)} /> Show done and Abandoned
-                </label>
+                <StateFilter hidden={hidden} onChange={filter} counts={counts} />
               </div>
               <section data-role="ledger" aria-label="Tickets" hidden={view !== "ledger"}>
-                {view === "ledger" && <Ledger all={all} visit={shown.visit} />}
+                {view === "ledger" && <Ledger hidden={hidden} visit={shown.visit} onRead={(t) => setCounts(countActive(t))} />}
               </section>
               <section data-role="detail" className="detail" hidden={view !== "detail"}>
-                {route.view === "detail" && <TicketPage id={route.id} select={route.select} visit={place.visit} all={all} side={side} onShown={() => setTicketShown(true)} />}
+                {route.view === "detail" && <TicketPage id={route.id} select={route.select} visit={place.visit} hidden={hidden} side={side} onShown={() => setTicketShown(true)} />}
               </section>
               <section data-role="prs" aria-label="Pull Requests" hidden={view !== "prs"}>
                 {view === "prs" && <PrsPage visit={shown.visit} />}
