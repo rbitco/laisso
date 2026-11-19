@@ -27,6 +27,10 @@ Laisso uses them; say them that way to the user.
 3. **Make the change** in the files, following the reference that covers it:
    - `config.yaml` (repos, Actions, Budget, everything else): [config.md](config.md)
    - Pipelines and Stages, and Routes between them (`laisso route`): [pipelines.md](pipelines.md)
+   - Taking Stages from another Pipeline (`use`, `include`, `intake: false`),
+     and why a Pipeline doesn't load: [pipelines.md](pipelines.md#reusing-stages).
+     Before changing a Pipeline others reuse, find them (`grep -l
+     "use: <name>\.\|include: <name>" pipelines/*`): the edit changes them too.
    - Agent Profiles and Runners: [profiles.md](profiles.md)
    - Complete, tested homes for a GitHub-tracked and a JIRA-tracked repo:
      [examples/github/](examples/github/) and [examples/jira/](examples/jira/)
@@ -34,11 +38,13 @@ Laisso uses them; say them that way to the user.
    - A Ticket's PRs, Owned and Referenced, `laisso pr`, and `laisso add --pr`: [prs.md](prs.md)
 4. **Check it.** Run `laisso doctor`. Done when it prints no config error,
    every needed tool is found and logged in, and each tool's "needed by"
-   matches what you meant to configure. Doctor checks config.yaml parses but
-   skips a Pipeline that does not: check a Pipeline you wrote against
-   [pipelines.md](pipelines.md) line by line, or save it from the dashboard
-   (Pipelines page) or `PUT /api/pipelines/<name>`, which refuse a Pipeline
-   that does not parse or names a missing Action or profile.
+   matches what you meant to configure, and its Pipelines section says every
+   Pipeline loads (`ok` or `ok (parts)`). A `does not load:` line gives the
+   loader's message; [pipelines.md](pipelines.md#when-a-pipeline-doesnt-load)
+   says what each reuse message means. Doctor does not check Actions or
+   profiles a Pipeline names against each repo: saving it from the dashboard
+   (Pipelines page) or `PUT /api/pipelines/<name>` does, and refuses a save
+   that would stop another Pipeline loading unless confirmed (`?confirm=1`).
 5. **Say what needs a restart.** Tell the user which edits apply now and
    which need Laisso restarted, using the table in [config.md](config.md#when-edits-apply).
 

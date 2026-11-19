@@ -1,4 +1,4 @@
-import type { ActionListing, PipelineView, StageFields } from "../../../api/views.ts";
+import type { ActionListing, PipelineView, ReuseRow, StageFields } from "../../../api/views.ts";
 import type { PipelinePatch } from "../../../pipeline/files.ts";
 
 type RunnerFields = Extract<StageFields, { kind: "runner" }>;
@@ -39,6 +39,14 @@ export interface WaitDraft {
 
 export type StageDraft = RunnerDraft | ActionDraft | WaitDraft;
 
+/** Where a copied Stage came from, and the source's own fields, which its unchanged fields show (LASSO-222). */
+export interface Reused {
+  origin: NonNullable<ReuseRow["origin"]>;
+  source: StageFields;
+  /** Skipped by its include when the editor opened. */
+  skipped: boolean;
+}
+
 /** One Stage card: the Stage it started as, what it holds now, and whether it is new, removed on Save, or open. */
 export interface Card {
   id: number;
@@ -47,6 +55,8 @@ export interface Card {
   fresh: boolean;
   removed: boolean;
   open: boolean;
+  /** Set for a Stage copied from another Pipeline. */
+  reused?: Reused;
 }
 
 /** The Pipeline editor as typed: its settings, and its Stages in the order they will be saved. */
@@ -160,9 +170,63 @@ export function cardOf(stage: StageFields, fresh = false): Card {
   return { id: ++ids, stage, draft: stageDraft(stage), fresh, removed: false, open: fresh };
 }
 
-export function draftOf(pipeline: PipelineView): PipelineDraft {
-  return { profile: pipeline.profile ?? "", spend: pipeline.budget.spend === undefined ? "" : String(pipeline.budget.spend), cards: pipeline.stages.map((s) => cardOf(s)) };
+/** The editor's start: a reusing Pipeline lists its reuse rows, each skipped one as removed until kept; any other its Stages. */
+export function draftOf(pipeline: PipelineView, reuse: ReuseRow[] | null = null): PipelineDraft {
+  const cards = reuse
+    ? reuse.map((r): Card => ({ ...cardOf(r.stage), removed: r.skipped, ...(r.origin && r.source ? { reused: { origin: r.origin, source: r.source, skipped: r.skipped } } : {}) }))
+    : pipeline.stages.map((s) => cardOf(s));
+  return { profile: pipeline.profile ?? "", spend: pipeline.budget.spend === undefined ? "" : String(pipeline.budget.spend), cards };
 }
+
+/** A copied Stage's fields that now differ from its source's, by the editor's field keys: `rounds`, `with.status`, and so on. */
+export function changedFields(card: Card, params: Params): string[] {
+  if (!card.reused) return [];
+  let patch: Record<string, unknown>;
+  try {
+    patch = stagePatch({ ...card, stage: card.reused.source, fresh: false }, params, 0);
+  } catch (error) {
+    if (error instanceof FieldError) return [error.field.split(".")[0]!];
+    throw error;
+  }
+  return Object.entries(patch).flatMap(([key, value]) => (key === "budget" ? Object.keys(value as object) : key === "with" ? Object.keys(value as object).map((k) => "with." + k) : [key]));
+}
+
+/** What a copied Stage's field holds in its source, as its hint says it. */
+export function sourceValue(card: Card, field: string): string {
+  const d = stageDraft(card.reused!.source);
+  if (d.kind === "action") return field === "action" ? d.action : d.with[field.slice(5)] || "not set";
+  if (d.kind !== "runner") return "";
+  const on = (b: boolean) => (b ? "on" : "off");
+  switch (field) {
+    case "prompt":
+      return firstLine(d.prompt) || "none";
+    case "profile":
+      return d.profile ?? "inherited";
+    case "artifact":
+      return d.artifact === "file" ? "file " + d.artifactPath : d.artifact || "none";
+    case "human":
+    case "advance":
+    case "repeat":
+      return on(d[field]);
+    default:
+      return String(d[field as keyof RunnerDraft] ?? "") || (field === "name" || field === "skills" ? "none" : "default");
+  }
+}
+
+/** The draft change that puts `field` back to its source's value. */
+export function resetField(card: Card, field: string): Partial<RunnerDraft> | Partial<ActionDraft> {
+  const d = stageDraft(card.reused!.source);
+  if (d.kind === "action") {
+    if (field === "action") return { action: d.action, with: { ...d.with } };
+    const key = field.slice(5);
+    return { with: { ...(card.draft as ActionDraft).with, [key]: d.with[key] ?? "" } };
+  }
+  if (d.kind !== "runner") return {};
+  if (field === "artifact") return { artifact: d.artifact, artifactPath: d.artifactPath, artifactWith: { ...d.artifactWith } };
+  return { [field]: d[field as keyof RunnerDraft] } as Partial<RunnerDraft>;
+}
+
+const firstLine = (text: string) => text.split("\n").find((l) => l.trim()) ?? "";
 
 /** `cards` with a new blank Stage of `kind` after the card `after`. */
 export function addStage(cards: Card[], after: number, kind: "runner" | "action"): Card[] {

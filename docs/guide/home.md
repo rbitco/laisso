@@ -40,6 +40,13 @@ parse.
 `repos:` stays a hand edit, though a config edit from the dashboard picks up
 any change to it made since Laisso started.
 
+A Pipeline can take Stages from another with `use` and `include`; the copy
+is made each time it loads. Since an edit to a source changes its reusers,
+the editor shows who reuses a Pipeline, and a save or delete that would
+stop one loading asks first (through the API: 409, then `?confirm=1`).
+`laisso doctor` lists any Pipeline that doesn't load and why. See
+[Reusing Stages](../../skills/laisso/pipelines.md#reusing-stages).
+
 The field reference is in [skills/laisso/config.md](../../skills/laisso/config.md)
 and [skills/laisso/pipelines.md](../../skills/laisso/pipelines.md).
 

@@ -3,7 +3,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { profilesFor, type Config, type ProfileConfig } from "../server/config.ts";
 import { SHIPPED_PIPELINES, type LaissoHome } from "../server/home.ts";
-import { listPipelines, loadPipeline, parsePipeline, type Pipeline, type RunnerName } from "../pipeline/load.ts";
+import { listPipelines, loadPipeline, resolvePipeline, type Pipeline, type RunnerName } from "../pipeline/load.ts";
 import { runTool, type ToolResult } from "../tracker/exec.ts";
 import { overridesOf, ticketLabel, type TicketRow } from "../store/tickets.ts";
 
@@ -201,7 +201,7 @@ export const runCommand: RunCommand = (command, args) => runTool(command, args);
  */
 export function homePipelines(home: LaissoHome): Pipeline[] {
   const names = listPipelines(home.pipelinesDir);
-  if (names.length === 0) return Object.entries(SHIPPED_PIPELINES).map(([name, yaml]) => parsePipeline(name, yaml));
+  if (names.length === 0) return Object.keys(SHIPPED_PIPELINES).map((name) => resolvePipeline(name, (n) => SHIPPED_PIPELINES[n as keyof typeof SHIPPED_PIPELINES] ?? null));
   const pipelines: Pipeline[] = [];
   for (const name of names) {
     try {

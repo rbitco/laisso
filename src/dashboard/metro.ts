@@ -203,7 +203,10 @@ export function metroDiagram(t: MetroTicket, focus: string | null, width: number
   const baseY = band + (infos.some((inf) => inf.roundsUsed) ? 66 : infos.some((inf) => inf.attempts.length > 1) ? 44 : 34);
   // A row under the names for the Version upgrade markers (LASSO-201), when the Ticket has been upgraded.
   const upgrades = t.upgrades ?? [];
-  const H = baseY + (infos.some((inf) => inf.roundsUsed || inf.attempts.length > 1) ? 50 : 40) + (upgrades.length ? 22 : 0);
+  const subRow = infos.some((inf) => inf.roundsUsed || inf.attempts.length > 1);
+  // A row for where copied Stages came from (LASSO-221), when any Stage is copied.
+  const sourced = t.stages.some((s) => s.source);
+  const H = baseY + (subRow ? 50 : 40) + (sourced ? 14 : 0) + (upgrades.length ? 22 : 0);
   // Adjacent stations sit far enough apart that their labels clear each other.
   const gaps = reach.slice(1).map((r, i) => Math.max(reach[i]!.right + r.left + 18, 56));
   const natural = reach[0]!.left + gaps.reduce((a, b) => a + b, 0) + reach[reach.length - 1]!.right + 24;
@@ -233,6 +236,7 @@ export function metroDiagram(t: MetroTicket, focus: string | null, width: number
     const inf = infos[i]!;
     const sel = focus === s.name;
     const name = esc(s.label);
+    if (s.source) out += `<text class="sub source" data-source="${esc(s.name)}" x="${cx}" y="${baseY + (subRow ? 56 : 43)}" text-anchor="middle">${esc(s.source)}<title>copied from Pipeline ${esc(s.source)}</title></text>`;
     if (s.kind === "action") {
       const c = inf.done ? COL.done : inf.cur ? COL.accent : "var(--muted)";
       out += `<g class="node action${sel ? " focus" : ""}" data-stage="${esc(s.name)}"><rect x="${cx - 1.5}" y="${baseY - 9}" width="3" height="18" rx="1.5" fill="${c}"/><text class="act" x="${cx}" y="${baseY + 26}" text-anchor="middle">${name}</text><title>action Stage: ${name}</title></g>`;

@@ -27,12 +27,16 @@ import type { Queue } from "../session/queue.ts";
 import { Intake, IntakeError, type IntakeRequest } from "../intake/intake.ts";
 import { PipelineError, type Pipeline } from "../pipeline/load.ts";
 import { PipelineFiles } from "../pipeline/files.ts";
+import { WouldBreak } from "../pipeline/impact.ts";
 import type { Dashboard } from "../dashboard/page.ts";
 import { ticketView, ticketDetail, sessionView, prView, type RoutePickView, sortForLedger, pipelineListing, pipelineFileView, pipelineVersionView, actionListings, type LiveVersionView, type ViewContext, type IntakeResult, type ConfigFile, type PrListsYaml, type Health, type MissingTool, type VersionView } from "./views.ts";
 import { readFileSync } from "node:fs";
 import { isPlainObject } from "../fields.ts";
 import { replaceFile } from "../atomic-write.ts";
 import { noticeText, type VersionNotice } from "../version-notice.ts";
+
+/** `?confirm=1` (or true) on a Pipeline write: go ahead though it breaks other Pipelines. */
+const confirmed = (value: string | undefined) => value === "1" || value === "true";
 
 export interface AppDeps {
   config: Config;
@@ -109,6 +113,8 @@ export function createApp(deps: AppDeps): Hono {
   });
 
   app.onError((error, c) => {
+    // A Pipeline save or delete that would stop others loading: 409, with each one it breaks, until sent with ?confirm=1.
+    if (error instanceof WouldBreak) return c.json({ error: error.message, breaks: error.breaks }, 409);
     if (error instanceof IntakeError || error instanceof RunError || error instanceof TriggerError || error instanceof TerminalError || error instanceof SetupError || error instanceof PipelineError || error instanceof ConfigError) return c.json({ error: error.message }, 400);
     if (error instanceof ArtifactWarning) return c.json({ error: error.message, artifact: error.artifact, detail: error.detail, override: true }, 409);
     console.error(error);
@@ -378,7 +384,7 @@ export function createApp(deps: AppDeps): Hono {
   app.get("/api/pipelines", (c) => c.json(pipelines.list().map(pipelineListing)));
   app.get("/api/pipelines/:name", (c) => {
     const source = pipelines.read(c.req.param("name"));
-    return source ? c.json(pipelineFileView(source)) : c.json({ error: `no Pipeline named ${c.req.param("name")}` }, 404);
+    return source ? c.json(pipelineFileView(source, pipelines.reusedBy(source.name))) : c.json({ error: `no Pipeline named ${c.req.param("name")}` }, 404);
   });
   // Versions (ADR 0009): read-only, and readable after the file is gone.
   app.get("/api/pipelines/:name/versions", (c) => c.json(deps.versions.live(c.req.param("name")).map((v): LiveVersionView => ({ version: v.version, createdAt: v.created_at, live: v.live }))));
@@ -393,18 +399,18 @@ export function createApp(deps: AppDeps): Hono {
   const pipelineChanged = (pipeline: string) => deps.changes.emit({ kind: "pipeline", pipeline });
   app.put("/api/pipelines/:name", async (c) => {
     const body = ((await c.req.json().catch(() => null)) ?? {}) as { text?: unknown; create?: unknown };
-    const written = pipelines.write(c.req.param("name"), body.text, { create: body.create === true });
+    const written = pipelines.write(c.req.param("name"), body.text, { create: body.create === true, confirm: confirmed(c.req.query("confirm")) });
     pipelineChanged(written.name);
     return c.json(pipelineFileView(written));
   });
   app.patch("/api/pipelines/:name", async (c) => {
     const patch = await c.req.json().catch(() => null);
-    const written = pipelines.patch(c.req.param("name"), patch);
+    const written = pipelines.patch(c.req.param("name"), patch, { confirm: confirmed(c.req.query("confirm")) });
     pipelineChanged(written.name);
     return c.json(pipelineFileView(written));
   });
   app.delete("/api/pipelines/:name", (c) => {
-    if (!pipelines.remove(c.req.param("name"))) return c.json({ error: `no Pipeline named ${c.req.param("name")}` }, 404);
+    if (!pipelines.remove(c.req.param("name"), { confirm: confirmed(c.req.query("confirm")) })) return c.json({ error: `no Pipeline named ${c.req.param("name")}` }, 404);
     pipelineChanged(c.req.param("name"));
     return c.json({ ok: true });
   });

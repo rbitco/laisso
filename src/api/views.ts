@@ -3,6 +3,7 @@ import { checkOf, latestVisit, type ArrivedBy, type ArtifactCheck, type ChosenBy
 import { runnerOf, type SessionProfile, type SessionRow } from "../store/sessions.ts";
 import { type Pipeline, type Routes, type RunnerName, type RunnerStage, type Stage } from "../pipeline/load.ts";
 import type { PipelineSource } from "../pipeline/files.ts";
+import { rowsOf } from "../pipeline/rewrite.ts";
 import type { Drift, VersionRow } from "../store/versions.ts";
 import type { ActionConfig, Config, ProfileScope, ProfileSettings, ProfileSource } from "../server/config.ts";
 import { chatProfile, resumeRefusal, ticketProfile } from "../session/overrides.ts";
@@ -110,7 +111,7 @@ export interface TicketView {
   /** The four gauges as they stand, and the Ticket layer behind them. */
   budget: BudgetView;
   /** Every Stage of the Pipeline, for the Metro track and diagram, with when a human skipped it; empty when the Pipeline does not load. */
-  stages: Array<Pick<StageView, "name" | "kind" | "label" | "human"> & { skippedAt: string | null }>;
+  stages: Array<Pick<StageView, "name" | "kind" | "label" | "human"> & { skippedAt: string | null; /** The Pipeline a copied Stage came from, as the Ticket's Version recorded it; absent for an own Stage. */ source?: string }>;
   /** How the current Stage's check Action artifact last came out (ADR 0014), or null when it has none or has not run. */
   check: ArtifactCheck | null;
   /** The current Visit: which arrival at its Stage it is and how it began, for the Ledger's "×3 ↩"; null before Visits. */
@@ -396,6 +397,17 @@ export type StageFields =
   | { kind: "action"; name: string; label: string; action: string; with: Record<string, string>; routes?: Routes }
   | { kind: "wait"; name: string; label: string; wait: string; waitWith: Record<string, string>; advance: boolean; budget: { wallTime?: string }; routes?: Routes };
 
+/** A Stage of a reusing Pipeline as the editor lists it: where it came from, and the source's own fields for the hints. */
+export interface ReuseRow {
+  stage: StageFields;
+  /** Null for an own Stage. */
+  origin: { pipeline: string; stage: string; how: "use" | "include" } | null;
+  /** The source Stage's fields, before this Pipeline's changes; null for an own Stage. */
+  source: StageFields | null;
+  /** Skipped by its include: shown greyed, kept again with Keep. */
+  skipped: boolean;
+}
+
 export interface PipelineListing {
   name: string;
   file: string;
@@ -404,6 +416,8 @@ export interface PipelineListing {
   /** Each Stage, with the profile a Runner Stage names (null when it inherits, and for an action Stage). */
   stages: Array<{ name: string; kind: Stage["kind"]; label: string; profile: string | null }>;
   problem: string | null;
+  /** Kept as parts (intake: false): reused by other Pipelines, never offered at Intake. */
+  parts: boolean;
 }
 
 export interface PipelineFile {
@@ -412,6 +426,14 @@ export interface PipelineFile {
   text: string;
   pipeline: PipelineView | null;
   problem: string | null;
+  /** It takes Stages from other Pipelines. */
+  reuses: boolean;
+  /** For a reusing Pipeline that loads, each line of the editor's list: every Stage, and each one an include skips (LASSO-222). Null otherwise. */
+  reuse: ReuseRow[] | null;
+  /** Kept as parts (intake: false). */
+  parts: boolean;
+  /** The Pipelines that take Stages from this one, each with the Stages (by name here) it takes. */
+  reusedBy: Array<{ pipeline: string; stages: string[] }>;
 }
 
 /** A Version of a Pipeline that active Tickets still run, and how many. */
@@ -475,10 +497,10 @@ export function actionListings(config: Config): ActionListing[] {
 
 export function pipelineListing(source: PipelineSource): PipelineListing {
   const stages = (source.pipeline?.stages ?? []).map((s) => ({ name: s.name, kind: s.kind, label: stageLabel(s), profile: s.kind === "runner" ? s.profile : null }));
-  return { name: source.name, file: source.file, profile: source.pipeline?.profile ?? null, stages, problem: source.problem };
+  return { name: source.name, file: source.file, profile: source.pipeline?.profile ?? null, stages, problem: source.problem, parts: source.pipeline?.intake === false };
 }
 
-export function pipelineFileView(source: PipelineSource): PipelineFile {
+export function pipelineFileView(source: PipelineSource, reusedBy: PipelineFile["reusedBy"] = []): PipelineFile {
   const pipeline = source.pipeline;
   return {
     name: source.name,
@@ -486,6 +508,17 @@ export function pipelineFileView(source: PipelineSource): PipelineFile {
     text: source.text,
     pipeline: pipeline ? pipelineFields(pipeline) : null,
     problem: source.problem,
+    reuses: source.reuses,
+    reuse: source.entries
+      ? rowsOf(source.entries).map((r) => ({
+          stage: stageFields(r.stage),
+          origin: r.how !== "own" && r.original ? { pipeline: r.source!, stage: r.original.name, how: r.how } : null,
+          source: r.original ? stageFields(r.original) : null,
+          skipped: r.skipped,
+        }))
+      : null,
+    parts: pipeline?.intake === false,
+    reusedBy,
   };
 }
 
@@ -562,7 +595,7 @@ export function ticketView(ticket: TicketRow, ctx: ViewContext): TicketView {
     queue,
     triggers,
     budget,
-    stages: (pipeline?.stages ?? []).map((s) => ({ name: s.name, kind: s.kind, label: stageLabel(s), human: s.kind === "runner" && s.human, skippedAt: latestVisit(visits, s.name)?.skipped_at ?? null })),
+    stages: (pipeline?.stages ?? []).map((s) => ({ name: s.name, kind: s.kind, label: stageLabel(s), human: s.kind === "runner" && s.human, skippedAt: latestVisit(visits, s.name)?.skipped_at ?? null, ...(s.from ? { source: s.from.pipeline } : {}) })),
     check: (stage?.kind === "runner" && stage.artifactWith) || stage?.kind === "wait" ? check : null,
     visit: currentVisit(visits),
     mirrorPending: ticket.mirror_pending !== null,

@@ -33,7 +33,7 @@ function configWith(over: Partial<Config> = {}): Config {
 }
 
 const PIPELINES: PipelineListing[] = [
-  { name: "default", file: "/p/default.yaml", profile: null, problem: null, stages: [{ name: "plan", kind: "runner", label: "plan", profile: "codex" }, { name: "implement", kind: "runner", label: "implement", profile: null }] },
+  { name: "default", file: "/p/default.yaml", profile: null, problem: null, parts: false, stages: [{ name: "plan", kind: "runner", label: "plan", profile: "codex" }, { name: "implement", kind: "runner", label: "implement", profile: null }] },
 ];
 
 type Sent = { method: string; route: string; body: unknown };

@@ -1,11 +1,13 @@
 import { readFileSync, unlinkSync } from "node:fs";
 import { replaceFile } from "../atomic-write.ts";
 import path from "node:path";
-import { parseDocument, isMap, isScalar, isSeq, type Document } from "yaml";
+import { parseDocument, isMap, isScalar, isSeq, type Document, type Node } from "yaml";
 import { applyPatch } from "../yaml-edit.ts";
 import { isPlainObject } from "../fields.ts";
-import { checkActionsAny, checkProfiles, parsePipeline, pipelineFile, listPipelines, PipelineError, NAME, type Pipeline } from "./load.ts";
+import { checkActionsAny, checkProfiles, fileReader, overlay, resolveEntries, writesReuse, pipelineFile, listPipelines, PipelineError, NAME, type Entry, type Pipeline } from "./load.ts";
+import { rewriteEntries } from "./rewrite.ts";
 import { actionSets, anyRepoProfiles, type Config } from "../server/config.ts";
+import { breakage, reusers, WouldBreak, type Reuser } from "./impact.ts";
 
 /** A Pipeline file as read: the text as written, and what it parses to or why it does not. */
 export interface PipelineSource {
@@ -14,6 +16,10 @@ export interface PipelineSource {
   text: string;
   pipeline: Pipeline | null;
   problem: string | null;
+  /** It takes Stages from other Pipelines. */
+  reuses: boolean;
+  /** Its stages as written, when it reuses and loads; the editor edits these through the expanded list (LASSO-222). */
+  entries: Entry[] | null;
 }
 
 /**
@@ -44,7 +50,7 @@ export class PipelineFiles {
   list(): PipelineSource[] {
     return listPipelines(this.dir).flatMap((name) => {
       const file = pipelineFile(this.dir, name);
-      return file ? [sourceOf(name, file, readFileSync(file, "utf8"))] : [];
+      return file ? [this.sourceOf(name, file, readFileSync(file, "utf8"))] : [];
     });
   }
 
@@ -52,22 +58,26 @@ export class PipelineFiles {
   read(name: string): PipelineSource | null {
     const file = NAME.test(name) ? pipelineFile(this.dir, name) : null;
     if (!file) return null;
-    return sourceOf(name, file, readFileSync(file, "utf8"));
+    return this.sourceOf(name, file, readFileSync(file, "utf8"));
   }
 
-  /** Create or replace the whole file; the text must parse first. With `create`, an existing Pipeline is left alone. */
-  write(name: string, text: unknown, opts: { create?: boolean } = {}): PipelineSource {
+  /**
+   * Create or replace the whole file; the text must parse first. With `create`, an existing Pipeline is left alone.
+   * A save that would stop another Pipeline loading is refused with WouldBreak unless `confirm` is set.
+   */
+  write(name: string, text: unknown, opts: { create?: boolean; confirm?: boolean } = {}): PipelineSource {
     checkName(name);
     if (typeof text !== "string") throw new PipelineError("text must be the whole Pipeline file");
-    this.check(parsePipeline(name, text));
+    this.check(this.load(name, text).pipeline);
     const existing = pipelineFile(this.dir, name);
     if (existing && opts.create) throw new PipelineError(`Pipeline ${name} already exists`);
+    this.guard("Saving", name, text, opts.confirm);
     const file = existing ?? path.join(this.dir, `${name}.yaml`);
     replaceFile(file, text);
-    return sourceOf(name, file, text);
+    return this.sourceOf(name, file, text);
   }
 
-  patch(name: string, patch: unknown): PipelineSource {
+  patch(name: string, patch: unknown, opts: { confirm?: boolean } = {}): PipelineSource {
     const current = this.read(name);
     if (!current) throw new PipelineError(`Pipeline ${name} does not exist under ${this.dir}`);
     if (!isPlainObject(patch)) throw new PipelineError("patch must be a mapping");
@@ -75,23 +85,49 @@ export class PipelineFiles {
     const doc = parseDocument(current.text);
     const { stages, order, ...rest } = patch;
     applyPatch(doc, rest);
-    if (stages !== undefined) {
-      if (!isPlainObject(stages)) throw new PipelineError("stages must be a mapping of Stage name to fields");
-      for (const [stageName, fields] of Object.entries(stages)) {
+    if (stages !== undefined && !isPlainObject(stages)) throw new PipelineError("stages must be a mapping of Stage name to fields");
+    if (current.entries) rewriteEntries(doc, name, current.entries, { stages, order }, { apply: applyStage, create: (d, fields) => newStage(d, fields) as Node });
+    else {
+      for (const [stageName, fields] of Object.entries(stages ?? {})) {
         const index = current.pipeline.stages.findIndex((s) => s.name === stageName);
         if (index < 0) throw new PipelineError(`Pipeline ${name} has no Stage named ${stageName}`);
         if (!isPlainObject(fields)) throw new PipelineError(`Stage ${stageName}: fields must be a mapping`);
-        // A check Action `{ action, with }`, as an artifact or a wait Stage's wait, replaces what was there whole, not key by key.
-        const whole = Object.entries(fields).filter(([key, value]) => (key === "artifact" || key === "wait") && isPlainObject(value));
-        for (const [key, value] of whole) doc.setIn(["stages", index, key], artifactNode(doc, value as Record<string, unknown>));
-        applyPatch(doc, Object.fromEntries(Object.entries(fields).filter(([key]) => !whole.some(([k]) => k === key))), ["stages", index]);
+        applyStage(doc, index, fields);
       }
+      if (order !== undefined) reorderStages(doc, name, current.pipeline.stages.map((s) => s.name), order);
     }
-    if (order !== undefined) reorderStages(doc, name, current.pipeline.stages.map((s) => s.name), order);
     const text = doc.toString();
-    this.check(parsePipeline(name, text));
+    this.check(this.load(name, text).pipeline);
+    this.guard("Saving", name, text, opts.confirm);
     replaceFile(current.file, text);
-    return sourceOf(name, current.file, text);
+    return this.sourceOf(name, current.file, text);
+  }
+
+  /** The Pipeline `name` would be with `text` as its file, the other Pipelines as they are, with its stages as written. */
+  private load(name: string, text: string): { pipeline: Pipeline; entries: Entry[] } {
+    return resolveEntries(name, overlay(fileReader(this.dir), name, text));
+  }
+
+  private sourceOf(name: string, file: string, text: string): PipelineSource {
+    const reuses = writesReuse(text);
+    try {
+      const { pipeline, entries } = this.load(name, text);
+      return { name, file, text, pipeline, problem: null, reuses, entries: reuses ? entries : null };
+    } catch (error) {
+      return { name, file, text, pipeline: null, problem: error instanceof Error ? error.message : String(error), reuses, entries: null };
+    }
+  }
+
+  /** The Pipelines that take Stages from this one, directly or through a chain (LASSO-220). */
+  reusedBy(name: string): Reuser[] {
+    return reusers(fileReader(this.dir), listPipelines(this.dir), name);
+  }
+
+  /** Refuse a change that would stop another Pipeline loading, unless confirmed (LASSO-219). */
+  private guard(verb: "Saving" | "Deleting", name: string, text: string | null, confirm = false): void {
+    if (confirm) return;
+    const breaks = breakage(fileReader(this.dir), listPipelines(this.dir), name, text);
+    if (breaks.length) throw new WouldBreak(verb, name, breaks);
   }
 
   /** What parsing cannot see: each action Stage fits the Actions some repo has (see actionSets), and each profile named exists globally or in some repo. */
@@ -101,12 +137,20 @@ export class PipelineFiles {
     checkProfiles(pipeline, anyRepoProfiles(config));
   }
 
-  remove(name: string): boolean {
+  remove(name: string, opts: { confirm?: boolean } = {}): boolean {
     const file = NAME.test(name) ? pipelineFile(this.dir, name) : null;
     if (!file) return false;
+    this.guard("Deleting", name, null, opts.confirm);
     unlinkSync(file);
     return true;
   }
+}
+
+/** An own Stage's fields at its place in `stages`; a check Action `{ action, with }`, as an artifact or a wait Stage's wait, replaces what was there whole, not key by key. */
+function applyStage(doc: Document, index: number, fields: Record<string, unknown>): void {
+  const whole = Object.entries(fields).filter(([key, value]) => (key === "artifact" || key === "wait") && isPlainObject(value));
+  for (const [key, value] of whole) doc.setIn(["stages", index, key], artifactNode(doc, value as Record<string, unknown>));
+  applyPatch(doc, Object.fromEntries(Object.entries(fields).filter(([key]) => !whole.some(([k]) => k === key))), ["stages", index]);
 }
 
 /**
@@ -166,12 +210,4 @@ function flowWith(node: unknown): void {
 
 function checkName(name: string): void {
   if (!NAME.test(name)) throw new PipelineError("Pipeline name must be lowercase letters, digits, and hyphens");
-}
-
-function sourceOf(name: string, file: string, text: string): PipelineSource {
-  try {
-    return { name, file, text, pipeline: parsePipeline(name, text), problem: null };
-  } catch (error) {
-    return { name, file, text, pipeline: null, problem: error instanceof Error ? error.message : String(error) };
-  }
 }

@@ -342,6 +342,21 @@ describe("choosing the Session shown", () => {
     await waitFor(() => expect(viewing()!.textContent).toBe("Viewing plan #2 · skipped 5m ago · the current Session, implement #1, is running" + "Back to current"));
   });
 
+  it("labels a copied Stage's station with the Pipeline it came from, and own Stages with nothing (LASSO-221)", async () => {
+    const stages = [
+      { name: "plan", kind: "runner" as const, label: "plan", human: false, skippedAt: null, source: "default" },
+      { name: "implement", kind: "runner" as const, label: "implement", human: false, skippedAt: null },
+    ];
+    fakeLaisso([ticket("A", { stages })]);
+    await showPage("A");
+    const sources = await waitFor(() => {
+      const found = [...document.querySelectorAll<SVGTextElement>('[data-role="flow"] [data-source]')];
+      expect(found.length).toBeGreaterThan(0);
+      return found;
+    });
+    expect(sources.map((el) => [el.dataset.source, el.textContent])).toEqual([["plan", "defaultcopied from Pipeline default"]]);
+  });
+
   it("stays on a past Session when a new one starts, naming it in a blue banner, until Back to current", async () => {
     const laisso = fakeLaisso([three()]);
     await showRouted("#A/stages/plan");

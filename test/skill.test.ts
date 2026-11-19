@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { parse } from "yaml";
 import { actionSets, actionsFor, anyRepoProfiles, DEFAULT_CONFIG, parseConfig, resolveProfile } from "../src/server/config.ts";
-import { checkActions, checkActionsAny, checkProfiles, parsePipeline } from "../src/pipeline/load.ts";
+import { checkActions, checkActionsAny, checkProfiles, parsePipeline, resolvePipeline } from "../src/pipeline/load.ts";
+import { DEFAULT_PIPELINE_YAML } from "../src/pipeline/default.ts";
 import { findPackageRoot } from "../src/package-root.ts";
 import { installSkill, skillStatus, skillTargets, VERSION_FILE } from "../src/skill/skill.ts";
 import { skill } from "../src/cli/skill.ts";
@@ -74,13 +75,17 @@ describe("the skill's examples", () => {
   for (const file of markdown) {
     it(`every yaml block in ${file} is marked and parses`, () => {
       const text = readFileSync(path.join(SKILL, file), "utf8");
+      // `laisso-pipeline <name>` blocks reuse one another (and the shipped default), so they load together.
+      const named: Record<string, string> = { default: DEFAULT_PIPELINE_YAML };
       for (const [, info, body] of text.matchAll(/^```([^\n]*)\n([\s\S]*?)^```/gm)) {
-        const [lang, marker] = info!.trim().split(/\s+/);
+        const [lang, marker, name] = info!.trim().split(/\s+/);
         if (lang !== "yaml" && lang !== "yml") continue;
         if (marker === "laisso-config") parseConfig(body!, `${file} block`);
+        else if (marker === "laisso-pipeline" && name) named[name] = body!;
         else if (marker === "laisso-pipeline") checkProfiles(parsePipeline("example", body!), DEFAULT_CONFIG.profiles);
         else throw new Error(`${file}: a yaml block is marked "${marker ?? ""}", not laisso-config or laisso-pipeline:\n${body}`);
       }
+      for (const name of Object.keys(named)) resolvePipeline(name, (n) => named[n] ?? null);
     });
   }
 

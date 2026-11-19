@@ -15,6 +15,11 @@ export function PipelineList({ list, current }: { list: PipelineListing[]; curre
       {list.map((p) => (
         <a key={p.name} href={pipelineHref(p.name)} className={p.name === current ? "current" : ""} title={p.problem ? "" : p.stages.map((s) => s.label).join(" → ")}>
           <strong>{p.name}</strong>
+          {p.parts && (
+            <span className="why" data-role="parts" title="Kept as parts: other Pipelines reuse its Stages; Intake never offers it">
+              parts
+            </span>
+          )}
           {p.problem ? (
             <span className="why drift">does not load</span>
           ) : (

@@ -63,7 +63,8 @@ export class Intake {
     const { config, home } = this.deps;
     // PRs given without a repo name it: the one whose origin is the first PR's repo.
     if (prs.length && !repoName) repoName = await this.repoOfPr(prs[0]!);
-    const detection = detect(config, input, listPipelines(home.pipelinesDir), repoName);
+    const offered = offeredPipelines(home.pipelinesDir);
+    const detection = detect(config, input, offered.names, repoName, offered.broken);
     if (repoName && prs.length) {
       detection.repo.suggestion = repoName;
       for (const pr of await this.lookupPrs(prs, repoName)) detection.notes.push(`referenced PR #${pr.number}: ${pr.title} (${pr.state.toLowerCase()})`);
@@ -99,7 +100,8 @@ export class Intake {
     if (!input) throw new IntakeError("nothing to intake: paste a reference or type a prompt");
     const named = parseName(request.name);
     if ("problem" in named) throw new IntakeError(named.problem);
-    const detection = detect(config, input, listPipelines(home.pipelinesDir), request.repo);
+    const offered = offeredPipelines(home.pipelinesDir);
+    const detection = detect(config, input, offered.names, request.repo, offered.broken);
 
     const prs = request.prs ?? [];
     const repoName = request.repo ?? (prs.length ? await this.repoOfPr(prs[0]!) : detection.repo.suggestion);
@@ -113,6 +115,7 @@ export class Intake {
     let pipeline: Pipeline;
     try {
       pipeline = loadPipeline(home.pipelinesDir, pipelineName);
+      if (pipeline.intake === false) throw new PipelineError(`Pipeline ${pipelineName} is kept as parts (intake: false), so it takes no Tickets; reuse its Stages from another Pipeline`);
       const now = currentConfig(home, config);
       checkActions(pipeline, actionsFor(now, repoName));
       // Every Runner Stage must reach a profile config defines for this repo, the inherited defaults included.
@@ -255,4 +258,19 @@ export function branchName(prefix: string, key: string, slug: string): string {
 
 export function expandHome(p: string): string {
   return p.startsWith("~/") ? path.join(homedir(), p.slice(2)) : p;
+}
+
+/** The Pipelines Intake offers: every one but those kept as parts, with those that do not load named apart. */
+function offeredPipelines(dir: string): { names: string[]; broken: string[] } {
+  const names: string[] = [];
+  const broken: string[] = [];
+  for (const name of listPipelines(dir)) {
+    try {
+      if (loadPipeline(dir, name).intake !== false) names.push(name);
+    } catch {
+      names.push(name);
+      broken.push(name);
+    }
+  }
+  return { names, broken };
 }
