@@ -106,7 +106,7 @@ function fakeLaisso() {
     const method = init.method ?? "GET";
     const body = init.body ? JSON.parse(String(init.body)) : null;
     sent.push({ method, route: url, body });
-    if (url === "/api/tickets" || url === "/api/tickets?all=1") {
+    if (url === "/api/tickets" || url.startsWith("/api/tickets?ended=")) {
       if (method === "GET") return json(state.tickets);
       if (state.intakeHeld) await state.intakeHeld;
       return json({ ...ticket("N"), branch: "app-7-fix", branchExisted: state.branchExisted } satisfies IntakeResult);
@@ -598,14 +598,14 @@ describe("the Ledger's state filter", () => {
     expect(kept.get("laisso.ledgerHidden")).toBe('["quiet","done","abandoned"]');
   });
 
-  it("reads the ended Tickets once Done is ticked, and Show all and Reset set every box", async () => {
+  it("reads Done Tickets alone once Done is ticked, and Show all and Reset set every box", async () => {
     const laisso = fakeLaisso();
     render(<App />);
     await screen.findByText("Ticket A");
     const user = userEvent.setup();
     await user.click(button());
     await user.click(screen.getByRole("checkbox", { name: "Done" }));
-    await waitFor(() => expect(laisso.gets("/api/tickets?all=1")).toBe(1));
+    await waitFor(() => expect(laisso.gets("/api/tickets?ended=done")).toBe(1));
     expect(notShowing()).toBe("Not showing Abandoned");
     await user.click(screen.getByRole("button", { name: "Show all" }));
     expect(button().textContent).toBe("All states ▾");
@@ -635,8 +635,8 @@ describe("the Ledger's state filter", () => {
     await screen.findByText("Ticket B");
     expect(ids()).toEqual(["B"]);
     expect(button().textContent).toBe("9 of 10 states ▾");
-    // Done and Abandoned are shown, so the ended Tickets are read.
-    expect(laisso.gets("/api/tickets?all=1")).toBeGreaterThan(0);
+    // Done and Abandoned are shown, so both are read.
+    expect(laisso.gets("/api/tickets?ended=done,abandoned")).toBeGreaterThan(0);
     go("#B");
     await waitFor(() => expect(document.querySelectorAll('[data-role="side"] [data-id]').length).toBeGreaterThan(0));
     expect([...document.querySelectorAll<HTMLElement>('[data-role="side"] [data-id]')].map((r) => r.dataset.id)).toEqual(["B"]);

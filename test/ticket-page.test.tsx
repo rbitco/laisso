@@ -105,7 +105,7 @@ function fakeLaisso(tickets: TicketDetail[]) {
     reads.push(method + " " + url);
     if (route === "/api/config") return json({ file: "/c.yaml", text: "", config: CONFIG, restart: [] } satisfies ConfigFile);
     if (route === "/api/pipelines") return json([] satisfies PipelineListing[]);
-    if (route === "/api/tickets") return json(Object.values(state.tickets).filter((t) => query === "all=1" || t.state === "active"));
+    if (route === "/api/tickets") return json(Object.values(state.tickets).filter((t) => t.state === "active" || new URLSearchParams(query).get("ended")?.split(",").includes(t.state)));
     const body = init.body ? JSON.parse(String(init.body)) : null;
     if (method !== "GET") sent.push({ method, route: url, body });
     if (route === "/api/check-now") return json({ changes: [] });

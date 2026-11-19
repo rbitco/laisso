@@ -177,8 +177,10 @@ export function createApp(deps: AppDeps): Hono {
 
   app.get("/api/tickets", (c) => {
     const all = c.req.query("all") === "1" || c.req.query("all") === "true";
+    // `ended=done,abandoned` adds just those ended states to the active Tickets; the Ledger asks only for what its filter shows.
+    const ended = (c.req.query("ended") ?? "").split(",").filter((s): s is "done" | "abandoned" => s === "done" || s === "abandoned");
     const ctx = viewContext();
-    return c.json(sortForLedger(deps.tickets.list({ all }).map((t) => ticketView(t, ctx))));
+    return c.json(sortForLedger(deps.tickets.list({ all, ended }).map((t) => ticketView(t, ctx))));
   });
 
   app.post("/api/tickets", async (c) => {

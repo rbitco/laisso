@@ -12,7 +12,7 @@ export interface ArtifactProblem {
 export const ticketRoute = (id: string) => "/api/tickets/" + encodeURIComponent(id);
 
 /** The active Tickets, in Ledger order, with those in the ended states named. */
-export const listTickets = (ended: readonly EndedState[]) => api<TicketView[]>(ended.length ? "/api/tickets?all=1" : "/api/tickets");
+export const listTickets = (ended: readonly EndedState[]) => api<TicketView[]>(ended.length ? "/api/tickets?ended=" + ended.join(",") : "/api/tickets");
 
 export const readTicket = (id: string) => api<TicketDetail>(ticketRoute(id));
 

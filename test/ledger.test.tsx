@@ -58,7 +58,10 @@ function fakeLaisso(tickets: TicketView[]) {
     sent.push({ method, route: url });
     if (state.refuse[url]) return json({ error: state.refuse[url] }, 409);
     if (url === "/api/tickets") return json(state.tickets.filter((t) => t.state === "active"));
-    if (url === "/api/tickets?all=1") return json(state.tickets);
+    if (url.startsWith("/api/tickets?ended=")) {
+      const ended = url.slice("/api/tickets?ended=".length).split(",");
+      return json(state.tickets.filter((t) => t.state === "active" || ended.includes(t.state)));
+    }
     if (url === "/api/config") return json({ config: { repos: state.repos } });
     if (url === "/api/setup") return json({ terminal: "terminal-app", profile: "claude-opus", launcher: "/h/setup.command" });
     return json({ changes: [] });
@@ -143,7 +146,7 @@ describe("the Ledger", () => {
     expect(laisso.sent.at(-1)!.route).toBe("/api/tickets");
     view.rerender(<Ledger hidden={new Set()} visit={1} />);
     await screen.findByText("Ticket C");
-    expect(laisso.sent.at(-1)!.route).toBe("/api/tickets?all=1");
+    expect(laisso.sent.at(-1)!.route).toBe("/api/tickets?ended=done,abandoned");
     expect(rows().map((r) => [r.dataset.id, r.className])).toEqual([
       ["A", "ticket"],
       ["C", "ticket ended"],
